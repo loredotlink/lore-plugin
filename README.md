@@ -7,8 +7,8 @@ Share your Claude Code sessions to [Lore](https://lore.tanagram.ai) and read thr
 In Claude Code:
 
 ```
-/plugin marketplace add tanagram-ai/lore-plugin
-/plugin install lore@tanagram-ai-lore-plugin
+/plugin marketplace add tanagram/lore-plugin
+/plugin install lore@tanagram-lore-plugin
 ```
 
 That's it. The first time you run `/share` or `/lore`, the plugin will install the `@tanagram/lore` CLI globally via `npm install -g @tanagram/lore`. Requires Node.js 18+.
