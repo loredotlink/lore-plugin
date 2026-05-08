@@ -1,0 +1,18 @@
+{
+  "name": "tanagram-ai-lore-plugin",
+  "owner": {
+    "name": "Tanagram",
+    "url": "https://tanagram.ai"
+  },
+  "plugins": [
+    {
+      "name": "lore",
+      "source": "./lore",
+      "description": "Share your Claude Code session to Lore and read threads back. Bootstraps the tanagram CLI on first use.",
+      "homepage": "https://lore.tanagram.ai",
+      "license": "MIT",
+      "category": "collaboration",
+      "keywords": ["lore", "tanagram", "share", "threads", "collaboration"]
+    }
+  ]
+}
