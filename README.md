@@ -8,7 +8,7 @@ In Claude Code:
 
 ```
 /plugin marketplace add tanagram/lore-plugin
-/plugin install lore@tanagram-lore-plugin
+/plugin install lore@tanagram
 ```
 
 That's it. The first time you run `/share` or `/lore`, the plugin will install the `@tanagram/lore` CLI globally via `npm install -g @tanagram/lore`. Requires Node.js 18+.
