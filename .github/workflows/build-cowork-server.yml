@@ -1,0 +1,51 @@
+name: build-cowork-server
+
+# Binary-drift gate: rebuild the lore-cowork MCP server from source and
+# fail the PR if the committed binary at lore-cowork/server/lore-cowork-mcp
+# doesn't match what the current sources produce. Forces contributors who
+# touch server-src/ to also commit a freshly built binary.
+
+on:
+  pull_request:
+    paths:
+      - "lore-cowork/server-src/**"
+      - "lore-cowork/scripts/build.sh"
+      - "lore-cowork/package.json"
+      - "lore-cowork/tsconfig.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-cowork-server-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Verify committed binary matches source
+    # macOS arm64 runner — bun build --compile cannot cross-compile to
+    # darwin-arm64 from another OS, so we have to build on the target.
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          # Pinned to match lore-cowork/server/README.md and local builds.
+          bun-version: "1.3.10"
+
+      - name: Install dependencies
+        working-directory: lore-cowork
+        run: bun install --frozen-lockfile
+
+      - name: Build lore-cowork-mcp binary
+        run: bash lore-cowork/scripts/build.sh
+
+      - name: Check for binary drift
+        # `git diff --exit-code` exits non-zero if the rebuilt binary
+        # differs from the committed one (works for binary files too —
+        # reports "Binary files differ"). The PR author must rebuild
+        # locally and commit the result.
+        run: git diff --exit-code lore-cowork/server/lore-cowork-mcp
