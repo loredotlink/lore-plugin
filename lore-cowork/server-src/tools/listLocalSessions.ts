@@ -18,9 +18,12 @@
  *
  * Contract:
  *   - No arguments. Input schema is the empty object with
- *     `additionalProperties: false` so the SDK rejects callers that
- *     try to narrow the listing — this keeps the tool surface trivial
- *     to reason about.
+ *     `additionalProperties: false` so the dispatcher in `index.ts`
+ *     rejects callers that try to narrow the listing — this keeps the
+ *     tool surface trivial to reason about. The SDK itself does NOT
+ *     enforce inputSchema against `arguments`; the plugin validates
+ *     in `index.ts` and throws `McpError(InvalidParams)` on mismatch.
+ *     See `lib/tool.ts` for the SDK-side citation.
  *   - Return is a plain JSON-serializable object: every field maps to
  *     a number or snake_case string. No Date instances.
  *

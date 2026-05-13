@@ -37,12 +37,97 @@ import {
   type CallToolResult,
 } from '@modelcontextprotocol/sdk/types.js';
 
+import type { ToolInputSchema } from './lib/tool.js';
 import { tools } from './tools/index.js';
 
 const SERVER_INFO = {
   name: 'lore-cowork-mcp',
   version: '0.1.0',
 } as const;
+
+/**
+ * Validate `args` against a `ToolInputSchema`. Returns `null` when
+ * valid, or a human-readable error string when not.
+ *
+ * Scope: this is the small JSON Schema 7 subset V1 tools actually use:
+ *   - `type === 'object'` on the root (enforced by `ToolInputSchema`)
+ *   - `required: string[]` — every named field must be present in args
+ *   - `additionalProperties: false` — reject any field not in `properties`
+ *   - per-property `type`: 'string' | 'number' | 'integer' | 'boolean'
+ *
+ * Why a hand-rolled validator instead of Ajv: Ajv is in `node_modules`
+ * as a transitive dep of the SDK, but adding it as a direct dep just
+ * to enforce four features is more surface than the four features
+ * justify. If a future tool needs `oneOf` / `enum` / nested objects,
+ * swap in Ajv or zod — `ToolInputSchema` deliberately has no index
+ * signature so any new field forces a paired validator update.
+ *
+ * Why this lives in the dispatcher rather than each tool: the SDK's
+ * `CallToolRequestSchema` only validates `arguments` as
+ * `Record<string, unknown> | undefined` (see
+ * `node_modules/@modelcontextprotocol/sdk/dist/esm/types.js`
+ * line 1336). Without this gate, a caller could pass `{ sessionId: ...}`
+ * to a tool whose schema declares `session_id`, and the handler would
+ * silently see `undefined` — a real UX failure mode for the agent.
+ */
+export function validateAgainstSchema(
+  schema: ToolInputSchema,
+  args: unknown,
+): string | null {
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) {
+    return `expected an object, got ${args === null ? 'null' : Array.isArray(args) ? 'array' : typeof args}`;
+  }
+  const obj = args as Record<string, unknown>;
+  const properties = schema.properties ?? {};
+  const required = schema.required ?? [];
+
+  for (const name of required) {
+    if (!Object.prototype.hasOwnProperty.call(obj, name)) {
+      return `missing required field '${name}'`;
+    }
+  }
+
+  if (schema.additionalProperties === false) {
+    for (const name of Object.keys(obj)) {
+      if (!Object.prototype.hasOwnProperty.call(properties, name)) {
+        return `unknown field '${name}' (additionalProperties: false)`;
+      }
+    }
+  }
+
+  for (const [name, propSchemaRaw] of Object.entries(properties)) {
+    if (!Object.prototype.hasOwnProperty.call(obj, name)) continue;
+    const propSchema = propSchemaRaw as { type?: string };
+    if (typeof propSchema?.type !== 'string') continue;
+    const value = obj[name];
+    const actual = typeof value;
+    const expected = propSchema.type;
+    let ok: boolean;
+    switch (expected) {
+      case 'string':
+        ok = actual === 'string';
+        break;
+      case 'boolean':
+        ok = actual === 'boolean';
+        break;
+      case 'number':
+        ok = actual === 'number' && Number.isFinite(value as number);
+        break;
+      case 'integer':
+        ok = actual === 'number' && Number.isInteger(value as number);
+        break;
+      default:
+        // Unknown type keyword — be permissive rather than rejecting,
+        // so a schema typo doesn't silently break a working tool.
+        ok = true;
+    }
+    if (!ok) {
+      return `field '${name}' expected ${expected}, got ${actual}`;
+    }
+  }
+
+  return null;
+}
 
 /**
  * Wrap a tool handler's return into a `CallToolResult`. Handlers that
@@ -106,7 +191,15 @@ export async function main(): Promise<void> {
     if (!tool) {
       throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
     }
-    const value = await tool.handler(args ?? {});
+    const argsObj = args ?? {};
+    const error = validateAgainstSchema(tool.inputSchema, argsObj);
+    if (error) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Invalid arguments for tool '${name}': ${error}`,
+      );
+    }
+    const value = await tool.handler(argsObj);
     return toCallToolResult(value);
   });
 
