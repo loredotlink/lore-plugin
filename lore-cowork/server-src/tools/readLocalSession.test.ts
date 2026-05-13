@@ -204,6 +204,26 @@ describe('runReadLocalSession — resolution priority', () => {
     });
     expect(result.session_id).toBe('sess-B');
   });
+
+  test('whitespace-padded session_id arg resolves the trimmed real session', () => {
+    const result = runReadLocalSession({
+      root,
+      args: { session_id: '  sess-A  ' },
+      env: {},
+    });
+    expect(result.session_id).toBe('sess-A');
+    expect(result.conversation_id).toBe('convA');
+  });
+
+  test('whitespace-padded COWORK_SESSION_ID env resolves the trimmed real session', () => {
+    const result = runReadLocalSession({
+      root,
+      args: {},
+      env: { COWORK_SESSION_ID: '  sess-A  ' },
+    });
+    expect(result.session_id).toBe('sess-A');
+    expect(result.conversation_id).toBe('convA');
+  });
 });
 
 describe('runReadLocalSession — error paths', () => {
