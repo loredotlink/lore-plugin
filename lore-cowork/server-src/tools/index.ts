@@ -12,5 +12,6 @@
  */
 import type { ToolDefinition } from '../lib/tool.js';
 import { listLocalSessionsTool } from './listLocalSessions.js';
+import { readLocalSessionTool } from './readLocalSession.js';
 
-export const tools: ToolDefinition[] = [listLocalSessionsTool];
+export const tools: ToolDefinition[] = [listLocalSessionsTool, readLocalSessionTool];
