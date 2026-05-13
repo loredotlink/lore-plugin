@@ -48,3 +48,19 @@ Built and tested with **Bun 1.3.10**. Run `bun --version` locally to
 confirm before building — `bun build --compile` output is sensitive to
 the Bun version, and CI pins Bun explicitly. If you need to bump the
 Bun version, update this README in the same PR.
+
+## Committing the binary in a sandboxed environment
+
+`git add lore-cowork/server/lore-cowork-mcp` can OOM under sandboxed
+process limits (Claude Code, restricted shells) because git's default
+delta compression on a 60+ MB blob spikes memory. Workaround:
+
+```bash
+git -c core.bigFileThreshold=1m -c core.compression=0 \
+  add lore-cowork/server/lore-cowork-mcp
+```
+
+This stores the blob as a loose object without delta/zlib work and
+sidesteps the spike. The resulting blob is identical (just a different
+on-disk representation); normal `git push` / CI works unchanged.
+Unsandboxed local shells generally don't need this.
