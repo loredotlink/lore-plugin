@@ -13,6 +13,15 @@
       "license": "MIT",
       "category": "collaboration",
       "keywords": ["lore", "tanagram", "share", "threads", "collaboration"]
+    },
+    {
+      "name": "lore-cowork",
+      "source": "./lore-cowork",
+      "description": "Share your Cowork session to Lore and read threads back.",
+      "homepage": "https://lore.tanagram.ai",
+      "license": "MIT",
+      "category": "collaboration",
+      "keywords": ["lore", "tanagram", "cowork", "share", "threads"]
     }
   ]
 }
