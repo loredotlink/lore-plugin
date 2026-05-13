@@ -125,7 +125,7 @@ Used unchanged. The plugin's only contribution is registering the URL in `.mcp.j
 4. Token exchange at `/oauth/token` → 5-minute RS256 access JWT with `scope="mcp.read mcp.write"`, refresh token with rotation.
 5. `Authorization: Bearer <jwt>` on every `POST /mcp` call. Silent refresh via rotating refresh token.
 
-Tools available from the cloud MCP (unchanged from PR #458):
+Tools available from the cloud MCP (post PR #458 + PR #484):
 
 | Tool | Scope | Purpose |
 |------|-------|---------|
@@ -133,6 +133,8 @@ Tools available from the cloud MCP (unchanged from PR #458):
 | `get_thread` | `mcp.read` | Fetch a single thread by id |
 | `list_threads` | `mcp.read` | Paginated list across the caller's workspaces |
 | `search_threads` | `mcp.read` | Title search across the caller's workspaces |
+
+**`harness` is required on `share_session`.** Per [lore PR #484](https://github.com/tanagram/lore/pull/484), the tool now demands an explicit `harness` value validated against the enum (`claudeCode`, `codex`, `amp`, `cursor`, `cowork`, `unspecified`). This plugin always passes `harness: 'cowork'` so per-harness analytics and the `cliStatusResponse.connected` signal stay correctly attributed. The slash command body must spell this out so the agent never omits it.
 
 **Visibility default.** The agent always omits `workspace_id` when calling `share_session`. The cloud forces `visibility='private'` in that case — that's the v1 default. To share workspace-visible, the user re-shares from the Lore web UI. Future: add a `list_workspaces` tool to the cloud MCP and let the agent ask the user which workspace to share to. Out of scope for this plugin.
 
@@ -153,7 +155,7 @@ Share the user's current Cowork session to Lore. Steps:
 
 2. If the user asked to share a *specific* older session ("share the one from yesterday", "share session abc-123"), call `list_local_sessions` first, pick the matching entry, then call `read_local_session({ session_id })`.
 
-3. Call the `lore` MCP tool `share_session({ transcript })` with the transcript. Do NOT pass `workspace_id` — the cloud forces private visibility and that's the v1 default. Returns `{ thread_id, thread_url }`.
+3. Call the `lore` MCP tool `share_session({ transcript, harness: 'cowork' })`. The `harness` value is required (per lore PR #484) and must be the literal string `'cowork'` for this plugin. Do NOT pass `workspace_id` — the cloud forces private visibility and that's the v1 default. Returns `{ thread_id, thread_url }`.
 
 4. Respond in plain language. Surface `thread_url` as a clickable link. If `uploads` or `outputs` were non-empty, mention them briefly. Do not say "transcript", "JSONL", or "MCP".
 

@@ -366,7 +366,7 @@ Both files have frontmatter with a `description:` field (used by `/plugin` disco
 `share.md` body must instruct the agent to:
 1. Default flow: call `lore-cowork-local`/`read_local_session` with no args.
 2. Specific older-session flow: call `list_local_sessions` first, pick the matching entry, then `read_local_session({session_id})`.
-3. Call `lore`/`share_session({transcript})` with the result. Do NOT pass `workspace_id` (forces private).
+3. Call `lore`/`share_session({transcript, harness: 'cowork'})` with the result. The `harness` value is **required** per [lore PR #484](https://github.com/tanagram/lore/pull/484) and must be the literal string `'cowork'`. Do NOT pass `workspace_id` (forces private).
 4. Render `thread_url` to the user as a clickable link with brief artifact mention if `uploads`/`outputs` non-empty.
 5. Plain language only — never say "transcript", "JSONL", "MCP".
 6. Failure handling: no-session → ask if they want an older one; share errors → surface verbatim; auth errors → Cowork handles re-consent.
@@ -383,6 +383,7 @@ Final content matches the templates in [lore-cowork/DESIGN.md § "Slash commands
 - Both files have valid frontmatter with `description:` fields.
 - Both reference the correct MCP server names from `.mcp.json` (`lore-cowork-local` for host tools, `lore` for cloud tools).
 - Both reference tool names that exist (`list_local_sessions`, `read_local_session`, `share_session`, `get_thread`, `list_threads`, `search_threads`).
+- `share.md` explicitly instructs the agent to pass `harness: 'cowork'` to `share_session` (required per lore PR #484; missing → InvalidParams).
 - Neither file invokes bash.
 - Tone audit: no occurrence of "transcript", "JSONL", "MCP", "presigned" in any user-facing instruction (allowed in tool-selection prose addressed to the agent).
 
