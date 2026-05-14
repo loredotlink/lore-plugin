@@ -26,7 +26,7 @@ This plugin is a thin shim. It ships only the slash commands; the underlying ski
 
 ## First-time setup
 
-After install, run `tanagram login` in your terminal once to authenticate. The plugin will remind you if you forget.
+After install, run `lore login` in your terminal once to authenticate. The plugin will remind you if you forget.
 
 ## License
 
