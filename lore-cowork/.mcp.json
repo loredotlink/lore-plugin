@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "lore-cowork-local": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/server/lore-cowork-mcp",
+      "transport": "stdio"
+    },
+    "lore": {
+      "transport": "streamable-http",
+      "url": "https://lore.tanagram.ai/mcp"
+    }
+  }
+}
