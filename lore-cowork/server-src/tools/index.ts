@@ -11,7 +11,22 @@
  * display tools verbatim will see them in this order.
  */
 import type { ToolDefinition } from '../lib/tool.js';
+import { getThreadTool } from './get_thread.js';
 import { listLocalSessionsTool } from './listLocalSessions.js';
+import { listThreadsTool } from './list_threads.js';
+import { loreLoginTool } from './lore_login.js';
+import { loreLoginResumeTool } from './lore_login_resume.js';
 import { readLocalSessionTool } from './readLocalSession.js';
+import { searchThreadsTool } from './search_threads.js';
+import { shareSessionTool } from './share_session.js';
 
-export const tools: ToolDefinition[] = [listLocalSessionsTool, readLocalSessionTool];
+export const tools: ToolDefinition[] = [
+  listLocalSessionsTool,
+  readLocalSessionTool,
+  loreLoginTool,
+  loreLoginResumeTool,
+  shareSessionTool,
+  getThreadTool,
+  listThreadsTool,
+  searchThreadsTool,
+];
