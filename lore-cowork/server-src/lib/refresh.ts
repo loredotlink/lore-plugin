@@ -204,9 +204,12 @@ async function refreshAndPersist(
   let json: unknown;
   try {
     json = await res.json();
-  } catch (err) {
+  } catch {
+    // Do NOT include the parser error message: some JSON parsers echo a
+    // snippet of the offending input, and on the success path the body
+    // contains an access token. Status alone is enough for diagnosis.
     throw new Error(
-      `Cloud refresh response was not valid JSON: ${(err as Error).message}`,
+      `Cloud refresh response was not valid JSON (HTTP ${res.status}).`,
     );
   }
   const parsed = RefreshResponseSchema.safeParse(json);
