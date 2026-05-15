@@ -132,9 +132,12 @@ export async function readTokens(home?: string): Promise<Tokens | null> {
  *      new one, never a half-written file.
  *
  * If any step fails we leave the previous tokens file untouched. The
- * temp file may be left behind on disk in that case, but the next
- * successful write will overwrite it, and an interrupted read never
- * touches `<path>.tmp`.
+ * temp file is best-effort unlinked on any failure between its creation
+ * and the successful rename (writeFile, chmod, fsync, or rename), so
+ * the parent directory doesn't accumulate orphaned `tokens.json.tmp.*`
+ * files on a partially-full disk or a chmod-restricted filesystem.
+ * Cleanup errors are swallowed because the original failure is the
+ * signal the caller cares about.
  */
 export async function writeTokens(tokens: Tokens, home?: string): Promise<void> {
   const p = tokensFilePath(home);
@@ -150,21 +153,23 @@ export async function writeTokens(tokens: Tokens, home?: string): Promise<void> 
   // what readers see.
   const tmp = `${p}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
   const body = JSON.stringify(tokens);
-  const fh = await fsp.open(tmp, 'w', 0o600);
   try {
-    await fh.writeFile(body, 'utf8');
-    // Belt-and-braces: chmod after write in case the umask masked the
-    // open-time mode bits.
-    await fh.chmod(0o600);
-    await fh.sync();
-  } finally {
-    await fh.close();
-  }
-  try {
+    const fh = await fsp.open(tmp, 'w', 0o600);
+    try {
+      await fh.writeFile(body, 'utf8');
+      // Belt-and-braces: chmod after write in case the umask masked the
+      // open-time mode bits.
+      await fh.chmod(0o600);
+      await fh.sync();
+    } finally {
+      await fh.close();
+    }
     await fsp.rename(tmp, p);
   } catch (err) {
-    // Best-effort cleanup of the temp file so it doesn't accumulate.
-    // We swallow cleanup errors because the rename failure is the
+    // Best-effort cleanup of the temp file so it doesn't accumulate on
+    // any failure between open and rename (writeFile, chmod, fsync, or
+    // rename). Swallow cleanup errors — including ENOENT, if the temp
+    // file was never created — because the original failure is the
     // signal the caller cares about.
     await fsp.unlink(tmp).catch(() => {});
     throw err;

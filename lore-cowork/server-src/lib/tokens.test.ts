@@ -198,6 +198,48 @@ describe('writeTokens', () => {
     expect(await readTokens(home)).toEqual(original);
   });
 
+  test('cleans up the temp file when writeFile fails before rename', async () => {
+    // Establish a baseline file so we can also confirm the original
+    // tokens are untouched alongside the temp-file cleanup assertion.
+    const original: Tokens = { ...validTokens, access_token: 'ORIGINAL' };
+    await writeTokens(original, home);
+
+    // Monkey-patch fsp.open so the returned FileHandle's writeFile throws.
+    // This simulates a mid-write I/O failure (the case the previous
+    // implementation did not clean up after).
+    const originalOpen = fsp.open;
+    (fsp as unknown as { open: typeof fsp.open }).open = (async (
+      ...args: Parameters<typeof fsp.open>
+    ) => {
+      const fh = await originalOpen(...args);
+      const realWriteFile = fh.writeFile.bind(fh);
+      fh.writeFile = async () => {
+        // Don't actually write — just throw, leaving the (empty) temp
+        // file on disk for the caller's cleanup path to handle.
+        void realWriteFile;
+        throw new Error('simulated writeFile failure');
+      };
+      return fh;
+    }) as typeof fsp.open;
+    try {
+      const replacement: Tokens = { ...validTokens, access_token: 'REPLACEMENT' };
+      await expect(writeTokens(replacement, home)).rejects.toThrow(
+        'simulated writeFile failure',
+      );
+    } finally {
+      (fsp as unknown as { open: typeof fsp.open }).open = originalOpen;
+    }
+
+    // No orphaned temp files should remain in the parent directory.
+    const parent = path.dirname(tokensFilePath(home));
+    const entries = fs.readdirSync(parent);
+    const orphans = entries.filter((e) => e.startsWith('tokens.json.tmp.'));
+    expect(orphans).toEqual([]);
+
+    // And the original file should still be intact.
+    expect(await readTokens(home)).toEqual(original);
+  });
+
   test('concurrent writes never produce a corrupted file', async () => {
     const a: Tokens = { ...validTokens, access_token: 'WRITER-A' };
     const b: Tokens = { ...validTokens, access_token: 'WRITER-B' };
