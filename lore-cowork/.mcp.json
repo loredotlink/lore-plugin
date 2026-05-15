@@ -3,10 +3,6 @@
     "lore-cowork-local": {
       "type": "stdio",
       "command": "${CLAUDE_PLUGIN_ROOT}/server/lore-cowork-mcp"
-    },
-    "lore": {
-      "type": "http",
-      "url": "https://mcp.lore.tanagram.ai/mcp"
     }
   }
 }

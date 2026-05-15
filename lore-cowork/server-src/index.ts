@@ -137,7 +137,7 @@ export function validateAgainstSchema(
  * serialization — circular refs become an `isError: true` result so
  * the caller sees a tool error rather than a transport-level crash.
  */
-function toCallToolResult(value: unknown): CallToolResult {
+export function toCallToolResult(value: unknown): CallToolResult {
   if (
     value !== null &&
     typeof value === 'object' &&
