@@ -186,17 +186,71 @@ export async function runLoreLogin(opts: {
     };
   }
 
-  // Step 3: poll. The interval is mutable across iterations because
-  // `slow_down` permanently widens it; once the server has asked us to
-  // back off, every subsequent wait stays at the wider cadence.
-  let intervalSeconds = device.interval;
-  const tokenUrl = `${base}/oauth/token`;
+  // Step 3: delegate to the shared poll loop. The loop handles the hard
+  // cap, slow_down/authorization_pending/expired_token branching, and
+  // token persistence on success.
+  return pollDeviceToken({
+    device_code: device.device_code,
+    expires_in_seconds: device.expires_in,
+    interval_seconds: device.interval,
+    fetchImpl,
+    now,
+    sleep,
+    home,
+    startAnchor: start,
+  });
+}
+
+/**
+ * Shared device-code poll loop. Encapsulates the RFC 8628 §3.5 polling
+ * semantics and token persistence on success, so both `runLoreLogin`
+ * (browser auto-open path) and `runLoreLoginResume` (headless fallback)
+ * share one implementation of the behaviour that matters for security:
+ *   - never echoing `error_description` (which can contain the
+ *     `device_code` credential) into thrown Error messages,
+ *   - locally-computed `expires_at` (server-supplied times ignored),
+ *   - hard-cap so a misbehaving server can't pin the agent.
+ *
+ * `startAnchor` is an internal escape hatch for `runLoreLogin`, which
+ * needs the cap measured from *after* the device-code response (not
+ * from the first poll). External callers omit it and the cap starts at
+ * the first `now()` inside this function.
+ */
+export async function pollDeviceToken(opts: {
+  device_code: string;
+  expires_in_seconds: number;
+  interval_seconds: number;
+  fetchImpl: typeof fetch;
+  now: () => number;
+  sleep: (ms: number) => Promise<void>;
+  home: string;
+  startAnchor?: number;
+}): Promise<
+  | { ok: true }
+  | { ok: false; reason: 'expired_token'; message: string }
+> {
+  const {
+    device_code,
+    expires_in_seconds,
+    interval_seconds,
+    fetchImpl,
+    now,
+    sleep,
+    home,
+  } = opts;
+  const start = opts.startAnchor ?? now();
+  const tokenUrl = `${cloudBaseUrl()}/oauth/token`;
+
+  // Interval is mutable across iterations because `slow_down`
+  // permanently widens it; once the server has asked us to back off,
+  // every subsequent wait stays at the wider cadence.
+  let intervalSeconds = interval_seconds;
   while (true) {
     // Hard cap: if our local clock says we're past the granted window,
-    // bail out before issuing another poll. Equality with `expires_in *
-    // 1000` counts as expired — at that instant the server's grant is
-    // already invalid by RFC 8628.
-    if (now() - start >= device.expires_in * 1000) {
+    // bail out before issuing another poll. Equality with
+    // `expires_in_seconds * 1000` counts as expired — at that instant
+    // the server's grant is already invalid by RFC 8628.
+    if (now() - start >= expires_in_seconds * 1000) {
       return {
         ok: false,
         reason: 'expired_token',
@@ -210,7 +264,7 @@ export async function runLoreLogin(opts: {
 
     const pollBody = new URLSearchParams({
       grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
-      device_code: device.device_code,
+      device_code,
       client_id: CLIENT_ID,
     }).toString();
     const pollRes = await fetchImpl(tokenUrl, {
