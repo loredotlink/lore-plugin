@@ -6,7 +6,7 @@
     },
     "lore": {
       "type": "http",
-      "url": "https://lore.tanagram.ai/mcp"
+      "url": "https://mcp.lore.tanagram.ai/mcp"
     }
   }
 }
