@@ -54,9 +54,6 @@ export const AUTH_REQUIRED_MESSAGE =
 export class AuthRequiredError extends Error {
   constructor(message: string = AUTH_REQUIRED_MESSAGE) {
     super(message);
-    // Restore the prototype chain for `instanceof` after transpilation —
-    // some target configurations break the chain when extending built-ins.
-    Object.setPrototypeOf(this, new.target.prototype);
     this.name = 'AuthRequiredError';
   }
 }
