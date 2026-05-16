@@ -2,7 +2,11 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { runShareSession, shareSessionTool } from './share_session';
+import {
+  runShareSession,
+  shareSessionFromDisk,
+  shareSessionTool,
+} from './share_session';
 import { AuthRequiredError, AUTH_REQUIRED_MESSAGE } from '../lib/errors';
 import { writeTokens, readTokens, type Tokens } from '../lib/tokens';
 import { __resetCloudBaseUrlForTests } from '../lib/cloudBaseUrl';
@@ -156,11 +160,200 @@ describe('share_session tool', () => {
     expect((caught as Error).message).toContain('workspace_required');
   });
 
-  test('input schema does not expose `harness` as a property', () => {
+  test('input schema exposes only `session_id` — not `harness`, not `transcript`', () => {
+    // The agent's contract is "tell me which session, if any" — the
+    // plugin handles the read internally. Exposing `transcript`
+    // would re-introduce the round-trip-through-agent-context bug
+    // that motivated the local-resolve refactor.
     expect(shareSessionTool.inputSchema.properties).toBeDefined();
-    expect(
-      Object.keys(shareSessionTool.inputSchema.properties!),
-    ).not.toContain('harness');
+    const propertyNames = Object.keys(
+      shareSessionTool.inputSchema.properties!,
+    );
+    expect(propertyNames).toEqual(['session_id']);
     expect(shareSessionTool.inputSchema.additionalProperties).toBe(false);
+    expect(shareSessionTool.inputSchema.required ?? []).toEqual([]);
+  });
+});
+
+describe('shareSessionFromDisk', () => {
+  let home: string;
+  let sessionsRoot: string;
+  beforeEach(() => {
+    home = makeTmpHome();
+    sessionsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'share-session-root-'));
+    __resetInFlightForTests();
+    process.env.LORE_MCP_BASE_URL = 'http://localhost:4000';
+    __resetCloudBaseUrlForTests();
+  });
+  afterEach(() => {
+    rmrf(home);
+    rmrf(sessionsRoot);
+    delete process.env.LORE_MCP_BASE_URL;
+    __resetCloudBaseUrlForTests();
+    __resetInFlightForTests();
+  });
+
+  /**
+   * Stage a session layout matching the real Cowork on-disk shape:
+   *   <root>/<convId>/<sessId>/local_<id>/audit.jsonl
+   * Returns the staged session_id.
+   */
+  function stageSession(
+    transcript: string,
+    convId = 'conv-A',
+    sessId = 'sess-A',
+    localId = 'local-A',
+  ): string {
+    const sessionDir = path.join(sessionsRoot, convId, sessId);
+    const innerDir = path.join(sessionDir, `local_${localId}`);
+    fs.mkdirSync(innerDir, { recursive: true });
+    fs.writeFileSync(path.join(innerDir, 'audit.jsonl'), transcript);
+    return sessId;
+  }
+
+  test('happy path: reads transcript from disk and forwards to cloud — agent never sees transcript bytes', async () => {
+    await writeTokens(validTokens(), home);
+    const transcriptBytes = 'envelope-wrapped-jsonl-line-1\nenvelope-line-2\n';
+    stageSession(transcriptBytes);
+
+    const expected = { thread_id: 't_42', thread_url: 'https://lore/t_42' };
+    const { fetchImpl, calls } = captureFetch((req) =>
+      rpcSuccess(req.body.id, expected),
+    );
+
+    const result = await shareSessionFromDisk(
+      {},
+      { fetchImpl, home, sessionsRoot, env: {} },
+    );
+
+    expect(result).toEqual(expected);
+    // The transcript bytes were read locally and piped straight to
+    // the cloud — they appear in the outbound RPC, never in the
+    // function's return value.
+    expect(calls.length).toBe(1);
+    expect(calls[0]!.body.params.name).toBe('share_session');
+    expect(calls[0]!.body.params.arguments).toEqual({
+      transcript: transcriptBytes,
+      harness: 'cowork',
+    });
+  });
+
+  test('explicit session_id arg picks that session', async () => {
+    await writeTokens(validTokens(), home);
+    stageSession('older-transcript', 'conv-A', 'sess-old', 'local-old');
+    stageSession('newer-transcript', 'conv-A', 'sess-new', 'local-new');
+
+    const { fetchImpl, calls } = captureFetch((req) =>
+      rpcSuccess(req.body.id, { thread_id: 'x', thread_url: 'y' }),
+    );
+    await shareSessionFromDisk(
+      { session_id: 'sess-old' },
+      { fetchImpl, home, sessionsRoot, env: {} },
+    );
+    expect(
+      (calls[0]!.body.params.arguments as { transcript: string }).transcript,
+    ).toBe('older-transcript');
+  });
+
+  test('no session_id and no env → resolves newest by mtime', async () => {
+    await writeTokens(validTokens(), home);
+    stageSession('older-transcript', 'conv-A', 'sess-old', 'local-old');
+    // Force a measurable mtime gap so the newer session wins
+    // regardless of filesystem timestamp granularity.
+    const oldDir = path.join(sessionsRoot, 'conv-A', 'sess-old');
+    const past = new Date(Date.now() - 10_000);
+    fs.utimesSync(oldDir, past, past);
+    stageSession('newer-transcript', 'conv-A', 'sess-new', 'local-new');
+
+    const { fetchImpl, calls } = captureFetch((req) =>
+      rpcSuccess(req.body.id, { thread_id: 'x', thread_url: 'y' }),
+    );
+    await shareSessionFromDisk(
+      {},
+      { fetchImpl, home, sessionsRoot, env: {} },
+    );
+    expect(
+      (calls[0]!.body.params.arguments as { transcript: string }).transcript,
+    ).toBe('newer-transcript');
+  });
+
+  test('COWORK_SESSION_ID env wins over newest-by-mtime when no arg', async () => {
+    await writeTokens(validTokens(), home);
+    stageSession('env-pick', 'conv-A', 'sess-env', 'local-env');
+    const envDir = path.join(sessionsRoot, 'conv-A', 'sess-env');
+    const past = new Date(Date.now() - 10_000);
+    fs.utimesSync(envDir, past, past);
+    stageSession('newer-transcript', 'conv-A', 'sess-new', 'local-new');
+
+    const { fetchImpl, calls } = captureFetch((req) =>
+      rpcSuccess(req.body.id, { thread_id: 'x', thread_url: 'y' }),
+    );
+    await shareSessionFromDisk(
+      {},
+      {
+        fetchImpl,
+        home,
+        sessionsRoot,
+        env: { COWORK_SESSION_ID: 'sess-env' },
+      },
+    );
+    expect(
+      (calls[0]!.body.params.arguments as { transcript: string }).transcript,
+    ).toBe('env-pick');
+  });
+
+  test('no sessions on disk → throws InvalidParams (propagated from runReadLocalSession)', async () => {
+    await writeTokens(validTokens(), home);
+    const { fetchImpl, calls } = captureFetch(() => jsonResponse({}));
+
+    let caught: unknown;
+    try {
+      await shareSessionFromDisk(
+        {},
+        { fetchImpl, home, sessionsRoot, env: {} },
+      );
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain('no Cowork session found');
+    // We never reached the cloud call.
+    expect(calls.length).toBe(0);
+  });
+
+  test('explicit session_id that does not exist → throws InvalidParams', async () => {
+    await writeTokens(validTokens(), home);
+    stageSession('some-transcript');
+
+    const { fetchImpl, calls } = captureFetch(() => jsonResponse({}));
+    let caught: unknown;
+    try {
+      await shareSessionFromDisk(
+        { session_id: 'nope' },
+        { fetchImpl, home, sessionsRoot, env: {} },
+      );
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain('session not found: nope');
+    expect(calls.length).toBe(0);
+  });
+
+  test('cloud auth-required still surfaces through the orchestration layer', async () => {
+    // No tokens written → getValidAccessToken short-circuits inside
+    // runShareSession, which returns the auth-required shape. The
+    // orchestration layer must pass it through unchanged.
+    stageSession('some-transcript');
+    const { fetchImpl, calls } = captureFetch(() => jsonResponse({}));
+    const result = await shareSessionFromDisk(
+      {},
+      { fetchImpl, home, sessionsRoot, env: {} },
+    );
+    expect(result).toEqual({
+      isError: true,
+      content: [{ type: 'text', text: AUTH_REQUIRED_MESSAGE }],
+    });
+    expect(calls.length).toBe(0);
   });
 });
