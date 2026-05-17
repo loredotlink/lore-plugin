@@ -101,13 +101,35 @@ export function readSession(sessionDir: string): SessionContents {
   return { transcriptPath, transcript, uploads, outputs };
 }
 
+/**
+ * A Cowork session directory often contains many sibling `local_*`
+ * chats (each its own conversation). The active chat is the one whose
+ * transcript file was most recently written. We can't use the
+ * `local_*` directory's mtime because appending to `audit.jsonl`
+ * doesn't update the enclosing directory's mtime on macOS — only the
+ * file itself ticks forward. So rank by the newest transcript-file
+ * mtime, falling back to dir mtime when no transcript exists yet
+ * (brand-new chat).
+ */
 function findLocalSubdir(sessionDir: string): string | null {
   if (!fs.existsSync(sessionDir)) return null;
   const entries = fs.readdirSync(sessionDir, { withFileTypes: true });
-  const local = entries.find(
-    (e) => e.isDirectory() && e.name.startsWith('local_'),
-  );
-  return local ? path.join(sessionDir, local.name) : null;
+  let best: { dir: string; mtimeMs: number } | null = null;
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith('local_')) continue;
+    const dir = path.join(sessionDir, entry.name);
+    const transcriptPath = findTranscriptFile(dir);
+    let mtimeMs: number;
+    if (transcriptPath) {
+      mtimeMs = fs.statSync(transcriptPath).mtimeMs;
+    } else {
+      mtimeMs = fs.statSync(dir).mtimeMs;
+    }
+    if (!best || mtimeMs > best.mtimeMs) {
+      best = { dir, mtimeMs };
+    }
+  }
+  return best?.dir ?? null;
 }
 
 function findTranscriptFile(localDir: string): string | null {
