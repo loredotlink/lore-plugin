@@ -294,6 +294,55 @@ describe('readSession', () => {
     expect(result.outputs).toEqual(['result.json']);
   });
 
+  test('picks the local_* with the newest transcript mtime when multiple chats coexist', () => {
+    // Cowork puts many sibling local_* chats under one session dir; the
+    // active chat is the one whose transcript was most recently touched.
+    const sessionDir = path.join(tmp, 'conv', 'sess');
+    fs.mkdirSync(sessionDir, { recursive: true });
+
+    const olderLocal = path.join(sessionDir, 'local_aaa-older');
+    const newerLocal = path.join(sessionDir, 'local_bbb-newer');
+    fs.mkdirSync(olderLocal);
+    fs.mkdirSync(newerLocal);
+
+    const olderTranscript = path.join(olderLocal, 'audit.jsonl');
+    const newerTranscript = path.join(newerLocal, 'audit.jsonl');
+    fs.writeFileSync(olderTranscript, 'older-chat', 'utf8');
+    fs.writeFileSync(newerTranscript, 'newer-chat', 'utf8');
+
+    // Force mtimes: older transcript way in the past, newer transcript recent.
+    fs.utimesSync(olderTranscript, 1_000_000, 1_000_000);
+    fs.utimesSync(newerTranscript, 5_000_000, 5_000_000);
+
+    const result = readSession(sessionDir);
+    expect(result.transcript).toBe('newer-chat');
+    expect(result.transcriptPath).toBe(newerTranscript);
+  });
+
+  test('falls back to dir mtime when a local_* has no transcript yet', () => {
+    // A brand-new chat may have an empty local_* dir; the established
+    // chat with a transcript should still win.
+    const sessionDir = path.join(tmp, 'conv', 'sess');
+    fs.mkdirSync(sessionDir, { recursive: true });
+
+    const emptyLocal = path.join(sessionDir, 'local_aaa-empty');
+    const activeLocal = path.join(sessionDir, 'local_bbb-active');
+    fs.mkdirSync(emptyLocal);
+    fs.mkdirSync(activeLocal);
+
+    const activeTranscript = path.join(activeLocal, 'audit.jsonl');
+    fs.writeFileSync(activeTranscript, 'active-content', 'utf8');
+    fs.utimesSync(activeTranscript, 5_000_000, 5_000_000);
+    // empty dir mtime is "now" — newer than the transcript file —
+    // but the active chat should still win because the transcript exists.
+    // (Use a moderate dir mtime so this is unambiguous either way.)
+    fs.utimesSync(emptyLocal, 4_000_000, 4_000_000);
+
+    const result = readSession(sessionDir);
+    expect(result.transcript).toBe('active-content');
+    expect(result.transcriptPath).toBe(activeTranscript);
+  });
+
   test('filters out non-file entries in uploads/outputs', () => {
     const sessionDir = makeSession(tmp, 'conv', 'sess', {
       transcriptName: 'audit.jsonl',
