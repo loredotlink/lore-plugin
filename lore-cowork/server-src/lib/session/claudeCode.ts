@@ -44,7 +44,21 @@ export class ClaudeCodeSource implements SessionSource {
   }
 
   listSessions(): SessionSummary[] {
-    throw new Error('ClaudeCodeSource.listSessions: not yet implemented');
+    if (!fs.existsSync(this.projectDir)) return [];
+    const sessions: SessionSummary[] = [];
+    for (const entry of fs.readdirSync(this.projectDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
+      const sessionId = entry.name.slice(0, -'.jsonl'.length);
+      const filePath = path.join(this.projectDir, entry.name);
+      const stat = fs.statSync(filePath);
+      sessions.push({
+        sessionId,
+        sessionDir: this.projectDir,
+        mtimeMs: stat.mtimeMs,
+      });
+    }
+    sessions.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    return sessions;
   }
 
   findById(_sessionId: string): SessionSummary {
