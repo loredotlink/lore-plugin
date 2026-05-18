@@ -40,7 +40,7 @@
 import type { ToolDefinition } from '../lib/tool.js';
 import { callCloudTool } from '../lib/cloudCall.js';
 import { AuthRequiredError, authRequiredToMcpError } from '../lib/errors.js';
-import { defaultSessionsRoot } from '../lib/session.js';
+import { detectSource, type SessionSource } from '../lib/session/index.js';
 import { runReadLocalSession } from './readLocalSession.js';
 
 export type ShareSessionResult = {
@@ -86,10 +86,10 @@ export async function runShareSession(
  * agent's tool-result stream — only the final `{thread_id, thread_url}`
  * (or auth-required shape) does.
  *
- * Dependency injection (`sessionsRoot`, `env`) exists so tests can
- * stage a fake session under a tmpdir without mutating `process.env`
- * or `os.homedir()`. The production handler closes over
- * `defaultSessionsRoot()` and `process.env` lazily.
+ * Dependency injection (`source`, `env`) exists so tests can pass a
+ * `SessionSource` backed by a tmpdir without mutating `process.env`
+ * or `os.homedir()`. The production handler calls `detectSource()`
+ * lazily (and reads `process.env` lazily) on each invocation.
  *
  * Errors:
  *   - `runReadLocalSession` throws `McpError(InvalidParams)` when no
@@ -102,14 +102,14 @@ export async function shareSessionFromDisk(
   opts: {
     fetchImpl?: typeof fetch;
     home?: string;
-    sessionsRoot?: string;
+    source?: SessionSource;
     env?: NodeJS.ProcessEnv;
   } = {},
 ): Promise<unknown> {
-  const sessionsRoot = opts.sessionsRoot ?? defaultSessionsRoot(opts.home);
+  const source = opts.source ?? detectSource(opts.env);
   const env = opts.env ?? process.env;
   const session = runReadLocalSession({
-    root: sessionsRoot,
+    source,
     args: { session_id: args.session_id },
     env,
   });

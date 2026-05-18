@@ -11,6 +11,7 @@ import { AuthRequiredError, AUTH_REQUIRED_MESSAGE } from '../lib/errors';
 import { writeTokens, readTokens, type Tokens } from '../lib/tokens';
 import { __resetCloudBaseUrlForTests } from '../lib/cloudBaseUrl';
 import { __resetInFlightForTests } from '../lib/refresh';
+import { CoworkSource } from '../lib/session/cowork';
 
 function makeTmpHome(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'share-session-test-'));
@@ -178,9 +179,11 @@ describe('share_session tool', () => {
 describe('shareSessionFromDisk', () => {
   let home: string;
   let sessionsRoot: string;
+  let source: CoworkSource;
   beforeEach(() => {
     home = makeTmpHome();
     sessionsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'share-session-root-'));
+    source = new CoworkSource({ sessionsRoot });
     __resetInFlightForTests();
     process.env.LORE_MCP_BASE_URL = 'http://localhost:4000';
     __resetCloudBaseUrlForTests();
@@ -223,7 +226,7 @@ describe('shareSessionFromDisk', () => {
 
     const result = await shareSessionFromDisk(
       {},
-      { fetchImpl, home, sessionsRoot, env: {} },
+      { fetchImpl, home, source, env: {} },
     );
 
     expect(result).toEqual(expected);
@@ -248,7 +251,7 @@ describe('shareSessionFromDisk', () => {
     );
     await shareSessionFromDisk(
       { session_id: 'sess-old' },
-      { fetchImpl, home, sessionsRoot, env: {} },
+      { fetchImpl, home, source, env: {} },
     );
     expect(
       (calls[0]!.body.params.arguments as { transcript: string }).transcript,
@@ -270,7 +273,7 @@ describe('shareSessionFromDisk', () => {
     );
     await shareSessionFromDisk(
       {},
-      { fetchImpl, home, sessionsRoot, env: {} },
+      { fetchImpl, home, source, env: {} },
     );
     expect(
       (calls[0]!.body.params.arguments as { transcript: string }).transcript,
@@ -293,7 +296,7 @@ describe('shareSessionFromDisk', () => {
       {
         fetchImpl,
         home,
-        sessionsRoot,
+        source,
         env: { COWORK_SESSION_ID: 'sess-env' },
       },
     );
@@ -310,7 +313,7 @@ describe('shareSessionFromDisk', () => {
     try {
       await shareSessionFromDisk(
         {},
-        { fetchImpl, home, sessionsRoot, env: {} },
+        { fetchImpl, home, source, env: {} },
       );
     } catch (e) {
       caught = e;
@@ -330,7 +333,7 @@ describe('shareSessionFromDisk', () => {
     try {
       await shareSessionFromDisk(
         { session_id: 'nope' },
-        { fetchImpl, home, sessionsRoot, env: {} },
+        { fetchImpl, home, source, env: {} },
       );
     } catch (e) {
       caught = e;
@@ -348,7 +351,7 @@ describe('shareSessionFromDisk', () => {
     const { fetchImpl, calls } = captureFetch(() => jsonResponse({}));
     const result = await shareSessionFromDisk(
       {},
-      { fetchImpl, home, sessionsRoot, env: {} },
+      { fetchImpl, home, source, env: {} },
     );
     expect(result).toEqual({
       isError: true,
