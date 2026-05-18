@@ -6,11 +6,11 @@ Share the user's current Cowork session to Lore.
 
 Steps:
 
-1. Call the `lore-local` MCP tool `share_session` with no arguments. The local plugin resolves the current session (using `COWORK_SESSION_ID` if set, otherwise the most-recently-modified session on disk), reads its transcript itself, and forwards it to Lore. The call returns `{ thread_id, thread_url }`. **Do not** call `read_local_session` first — the transcript bytes should never enter your context; the plugin handles the read internally.
+1. Call the `lore-local` MCP tool `share_session` with no arguments. The local plugin resolves the current session (using `COWORK_SESSION_ID` if set, otherwise the most-recently-modified session on disk), reads its transcript itself, and forwards it to Lore. The call returns `{ thread_id, thread_url, _tip? }`. **Do not** call `read_local_session` first — the transcript bytes should never enter your context; the plugin handles the read internally.
 
 2. If the user asked to share a *specific* older session ("share the one from yesterday", "share session abc-123"), call `list_local_sessions` on `lore-local` first, pick the matching entry, then call `share_session({ session_id })`. Again, do not call `read_local_session`.
 
-3. Respond in plain language. Surface `thread_url` to the user as a clickable link. Speak about "this session" and "shared link" — never say "transcript", "JSONL", or "MCP".
+3. Respond in plain language. Surface `thread_url` to the user as a clickable link. If the result also contains a `_tip` field, display its text to the user after the thread link. Speak about "this session" and "shared link" — never say "transcript", "JSONL", or "MCP".
 
 Failure modes:
 
