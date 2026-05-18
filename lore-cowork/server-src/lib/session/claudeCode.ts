@@ -80,7 +80,19 @@ export class ClaudeCodeSource implements SessionSource {
     };
   }
 
-  readSession(_session: SessionSummary): SessionPayload {
-    throw new Error('ClaudeCodeSource.readSession: not yet implemented');
+  readSession(session: SessionSummary): SessionPayload {
+    const transcriptPath = path.join(session.sessionDir, `${session.sessionId}.jsonl`);
+    if (!fs.existsSync(transcriptPath) || !fs.statSync(transcriptPath).isFile()) {
+      throw new Error(
+        `Claude Code session ${session.sessionId} has no transcript file at ${transcriptPath}`,
+      );
+    }
+    return {
+      sessionId: session.sessionId,
+      transcriptPath,
+      transcript: fs.readFileSync(transcriptPath, 'utf8'),
+      uploads: [],
+      outputs: [],
+    };
   }
 }

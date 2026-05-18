@@ -125,3 +125,33 @@ test('resolveActive: throws when CLAUDE_SESSION_ID names a missing session', () 
     source.resolveActive({ CLAUDE_SESSION_ID: 'sess-ghost' }),
   ).toThrow(/sess-ghost/);
 });
+
+test('readSession: returns transcript bytes and empty artifact arrays', () => {
+  const root = makeTmpRoot();
+  const cwd = '/Users/q/repos/foo';
+  const projectDir = stageProject(root, cwd);
+  stageSessionFile(projectDir, 'sess-A', 1_000, '{"type":"user"}\n{"type":"assistant"}\n');
+
+  const source = new ClaudeCodeSource({ projectsRoot: root, cwd });
+  const summary = source.findById('sess-A');
+  const payload = source.readSession(summary);
+
+  expect(payload.transcript).toBe('{"type":"user"}\n{"type":"assistant"}\n');
+  expect(payload.uploads).toEqual([]);
+  expect(payload.outputs).toEqual([]);
+  expect(payload.sessionId).toBe('sess-A');
+  expect(payload.transcriptPath).toBe(path.join(projectDir, 'sess-A.jsonl'));
+});
+
+test('readSession: throws when the .jsonl file disappeared between resolve and read', () => {
+  const root = makeTmpRoot();
+  const cwd = '/Users/q/repos/foo';
+  const projectDir = stageProject(root, cwd);
+  stageSessionFile(projectDir, 'sess-A', 1_000, 'x\n');
+
+  const source = new ClaudeCodeSource({ projectsRoot: root, cwd });
+  const summary = source.findById('sess-A');
+  fs.rmSync(path.join(projectDir, 'sess-A.jsonl'));
+
+  expect(() => source.readSession(summary)).toThrow(/transcript file/);
+});
