@@ -39,8 +39,14 @@ export class ClaudeCodeSource implements SessionSource {
     this.projectDir = path.join(root, encodeCwdForClaudeCode(cwd));
   }
 
-  resolveActive(_env: NodeJS.ProcessEnv): SessionSummary {
-    throw new Error('ClaudeCodeSource.resolveActive: not yet implemented');
+  resolveActive(env: NodeJS.ProcessEnv): SessionSummary {
+    const envId = nonBlank(env.CLAUDE_SESSION_ID);
+    if (envId === null) {
+      throw new Error(
+        'no Claude Code session: CLAUDE_SESSION_ID is required when running under Claude Code',
+      );
+    }
+    return this.findById(envId);
   }
 
   listSessions(): SessionSummary[] {

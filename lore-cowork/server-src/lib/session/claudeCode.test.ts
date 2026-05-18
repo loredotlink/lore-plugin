@@ -78,3 +78,50 @@ test('findById: throws when no matching .jsonl exists', () => {
   const source = new ClaudeCodeSource({ projectsRoot: root, cwd });
   expect(() => source.findById('sess-ghost')).toThrow(/sess-ghost/);
 });
+
+test('resolveActive: returns the session named by CLAUDE_SESSION_ID', () => {
+  const root = makeTmpRoot();
+  const cwd = '/Users/q/repos/foo';
+  const projectDir = stageProject(root, cwd);
+  stageSessionFile(projectDir, 'sess-target', 1_000);
+  stageSessionFile(projectDir, 'sess-other', 9_000);
+
+  const source = new ClaudeCodeSource({ projectsRoot: root, cwd });
+  expect(
+    source.resolveActive({ CLAUDE_SESSION_ID: 'sess-target' }).sessionId,
+  ).toBe('sess-target');
+});
+
+test('resolveActive: trims whitespace from CLAUDE_SESSION_ID', () => {
+  const root = makeTmpRoot();
+  const cwd = '/Users/q/repos/foo';
+  const projectDir = stageProject(root, cwd);
+  stageSessionFile(projectDir, 'sess-target', 1_000);
+
+  const source = new ClaudeCodeSource({ projectsRoot: root, cwd });
+  expect(
+    source.resolveActive({ CLAUDE_SESSION_ID: '  sess-target  ' }).sessionId,
+  ).toBe('sess-target');
+});
+
+test('resolveActive: throws when CLAUDE_SESSION_ID is missing', () => {
+  const source = new ClaudeCodeSource({ projectsRoot: '/tmp/anywhere', cwd: '/tmp/x' });
+  expect(() => source.resolveActive({})).toThrow(/CLAUDE_SESSION_ID/);
+});
+
+test('resolveActive: throws when CLAUDE_SESSION_ID is blank', () => {
+  const source = new ClaudeCodeSource({ projectsRoot: '/tmp/anywhere', cwd: '/tmp/x' });
+  expect(() => source.resolveActive({ CLAUDE_SESSION_ID: '   ' })).toThrow(/CLAUDE_SESSION_ID/);
+});
+
+test('resolveActive: throws when CLAUDE_SESSION_ID names a missing session', () => {
+  const root = makeTmpRoot();
+  const cwd = '/Users/q/repos/foo';
+  const projectDir = stageProject(root, cwd);
+  stageSessionFile(projectDir, 'sess-real', 1_000);
+
+  const source = new ClaudeCodeSource({ projectsRoot: root, cwd });
+  expect(() =>
+    source.resolveActive({ CLAUDE_SESSION_ID: 'sess-ghost' }),
+  ).toThrow(/sess-ghost/);
+});
