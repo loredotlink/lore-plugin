@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "lore-local": {
+      "type": "stdio",
+      "command": "${CLAUDE_PLUGIN_ROOT}/server/lore-mcp"
+    }
+  }
+}

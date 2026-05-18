@@ -1,12 +1,12 @@
 {
   "name": "lore-cowork",
-  "description": "Share Cowork sessions to Lore and read threads back.",
-  "version": "0.2.0",
+  "description": "Deprecated — renamed to 'lore'. Run /plugin uninstall lore-cowork and /plugin install lore.",
+  "version": "1.0.0",
   "author": {
     "name": "Tanagram",
     "url": "https://tanagram.ai"
   },
   "homepage": "https://lore.tanagram.ai",
   "license": "MIT",
-  "keywords": ["lore", "tanagram", "cowork", "share", "threads"]
+  "keywords": ["lore", "tanagram", "deprecated"]
 }

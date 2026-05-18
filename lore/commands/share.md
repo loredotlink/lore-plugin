@@ -1,14 +1,23 @@
 ---
-description: Share the current Claude Code session to Lore. Bootstraps the @tanagram/lore CLI on first use.
+description: Share the current Cowork session to Lore. Returns a shareable URL.
 ---
 
-Run this bash command. Bootstrap the CLI if it's missing, then export this session.
+Share the user's current Cowork session to Lore.
 
-```bash
-command -v lore >/dev/null 2>&1 || npm install -g @tanagram/lore
-lore export --session-id ${CLAUDE_SESSION_ID} --visibility workspace $ARGUMENTS
-```
+Steps:
 
-The export prints a JSON object with a `url` field — show that URL to the user as a clickable link. If `clipboard_copied` is true, mention the URL was copied to their clipboard. Default visibility is `workspace`; if the user said "publicly" or "privately", swap `--visibility workspace` for `--visibility public` or `--visibility private`.
+1. Call the `lore-local` MCP tool `share_session` with no arguments. The local plugin resolves the current session (using `COWORK_SESSION_ID` if set, otherwise the most-recently-modified session on disk), reads its transcript itself, and forwards it to Lore. The call returns `{ thread_id, thread_url }`. **Do not** call `read_local_session` first — the transcript bytes should never enter your context; the plugin handles the read internally.
 
-If the command fails with "not logged in", tell the user to run `lore login`. If `npm` is missing, tell them to install Node.js 18+ from https://nodejs.org.
+2. If the user asked to share a *specific* older session ("share the one from yesterday", "share session abc-123"), call `list_local_sessions` on `lore-local` first, pick the matching entry, then call `share_session({ session_id })`. Again, do not call `read_local_session`.
+
+3. Respond in plain language. Surface `thread_url` to the user as a clickable link. Speak about "this session" and "shared link" — never say "transcript", "JSONL", or "MCP".
+
+Failure modes:
+
+- `share_session` errors with "no Cowork session found" → ask the user if they want to share an older one, then list with `list_local_sessions`.
+- `share_session` errors with "session not found: <id>" → tell the user the id didn't match and offer to list with `list_local_sessions`.
+- Other `share_session` errors → surface the message verbatim and suggest a retry.
+- Auth errors → call the `lore-local` MCP tool `lore_login` and retry the share once it succeeds. If `lore_login` returns `browser_open_failed`, tell the user to visit the provided verification URL, then call `lore_login_resume({ device_code })` with the returned device code and retry the share once it succeeds.
+- Empty session content → tell the user the session has nothing to share yet.
+
+If you want to mention attached files in your response, you may call `read_local_session` *after* a successful share to inspect `uploads` and `outputs` — but do not call it before, and never pass its `transcript` field anywhere.
