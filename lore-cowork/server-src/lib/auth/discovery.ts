@@ -242,7 +242,16 @@ async function doDiscover(opts: {
   }
 
   // 2. Full discovery: PRM → AS metadata.
-  return fetchAndCache({ cached, base, fetchFn, home, nowFn });
+  //
+  // CRITICAL: when the cached entry's `baseUrl` does not match the current
+  // `cloudBaseUrl()`, we MUST NOT use it as a last-known-good fallback if
+  // the network fails. Otherwise an environment switch (e.g. staging → prod)
+  // combined with a transient network failure would silently serve the
+  // wrong environment's endpoints. Treat a wrong-baseUrl cache as absent
+  // for ALL purposes (TTL, ETag, fallback) — not just for the fresh-hit
+  // check above.
+  const fallbackCache = cached !== null && cached.baseUrl === base ? cached : null;
+  return fetchAndCache({ cached: fallbackCache, base, fetchFn, home, nowFn });
 }
 
 /**
@@ -258,7 +267,11 @@ async function doDiscover(opts: {
  * On network failure during revalidation, returns the stale endpoints
  * directly (last-known-good fallback).
  *
- * On a non-2xx, non-304 response, returns null to trigger a full re-fetch.
+ * On a non-2xx, non-304 response during revalidation, also returns the
+ * stale endpoints as last-known-good — extending beyond the strict spec
+ * (which only specifies 304) on the principle that a transient 5xx is
+ * exactly the case where serving the stale data is preferable to a hard
+ * failure. Non-2xx on a cold path (no cache) still throws via fetchAndCache.
  */
 async function tryRevalidate(
   cached: DiscoveryCache,

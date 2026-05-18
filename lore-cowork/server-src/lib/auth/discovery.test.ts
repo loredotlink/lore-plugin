@@ -436,6 +436,38 @@ describe('different cloudBaseUrl invalidates cache', () => {
     // PRM was fetched from the new base URL, not the cached one.
     expect(prmCallUrl).toContain(ALT_BASE);
   });
+
+  test('wrong-baseUrl cache is NOT used as last-known-good fallback on network failure', async () => {
+    // Pre-populate the cache file with a DIFFERENT baseUrl than what
+    // cloudBaseUrl() currently returns. This simulates having previously
+    // logged into staging, then switching to prod.
+    const cacheDir = path.dirname(discoveryCacheFilePath(home));
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(
+      discoveryCacheFilePath(home),
+      JSON.stringify({
+        baseUrl: 'https://staging.mcp.lore.tanagram.ai', // != TEST_BASE
+        endpoints: {
+          audience: 'https://staging.api.lore.tanagram.ai',
+          deviceAuthorizationEndpoint:
+            'https://staging.signin.lore.tanagram.ai/oauth2/device_authorization',
+          tokenEndpoint: 'https://staging.signin.lore.tanagram.ai/oauth2/token',
+        },
+        fetchedAt: FIXED_NOW,
+      }),
+      'utf8',
+    );
+
+    // Network failure on discovery. Must NOT silently fall back to the
+    // stale wrong-environment endpoints — must throw instead.
+    const failingFetch = (async () => {
+      throw new Error('ECONNREFUSED');
+    }) as unknown as typeof fetch;
+
+    await expect(
+      discoverEndpoints({ fetchImpl: failingFetch, home, now }),
+    ).rejects.toThrow('Discovery failed');
+  });
 });
 
 // ---------------------------------------------------------------------------
