@@ -16,10 +16,10 @@
  *   discover the fallback by name from `lore_login`'s description.
  *
  * Why defaults for `expires_in_seconds`/`interval_seconds`:
- *   The cloud's `/oauth/device/code` response is the only place those
- *   numbers are issued. On resume, the agent doesn't have them — they
- *   were consumed inside `runLoreLogin` and never serialized back. We
- *   pick conservative defaults (600s cap, 5s interval) that match the
+ *   The cloud's device-code response is the only place those numbers
+ *   are issued. On resume, the agent doesn't have them — they were
+ *   consumed inside `runLoreLogin` and never serialized back. We pick
+ *   conservative defaults (600s cap, 5s interval) that match the
  *   server's current configuration; if the user happens to resume past
  *   the actual server-side expiry the next poll will return
  *   `expired_token` and we surface that cleanly.
@@ -27,20 +27,20 @@
  * Why this file does not import `runLoreLogin`:
  *   `runLoreLogin` is the cold-start orchestrator and bundles the
  *   device-code mint + browser-open steps that resume must skip. The
- *   shared surface is `pollDeviceToken`, which is the only piece of
- *   `lore_login.ts` reused here.
+ *   shared surface is `pollDeviceToken` from `lib/auth/deviceFlow.ts`,
+ *   which is the only piece reused here.
  */
 
 import os from 'node:os';
-import { pollDeviceToken } from './lore_login.js';
+import { pollDeviceToken } from '../lib/auth/deviceFlow.js';
 import type { ToolDefinition } from '../lib/tool.js';
 
 /**
  * Default polling window when the agent doesn't carry the original
- * `/oauth/device/code` response forward. 600s matches the cloud's
- * current device-code lifetime; 5s matches the cloud's recommended
- * polling cadence. Both are overridable so the production handler
- * remains testable without monkey-patching module state.
+ * device-code response forward. 600s matches the cloud's current
+ * device-code lifetime; 5s matches the cloud's recommended polling
+ * cadence. Both are overridable so the production handler remains
+ * testable without monkey-patching module state.
  */
 const DEFAULT_EXPIRES_IN_SECONDS = 600;
 const DEFAULT_INTERVAL_SECONDS = 5;

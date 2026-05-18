@@ -4,9 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { runSearchThreads, searchThreadsTool } from './search_threads';
 import { AUTH_REQUIRED_MESSAGE } from '../lib/errors';
-import { writeTokens, type Tokens } from '../lib/tokens';
+import { writeTokens, type Tokens } from '../lib/auth/store';
 import { __resetCloudBaseUrlForTests } from '../lib/cloudBaseUrl';
-import { __resetInFlightForTests } from '../lib/refresh';
+import { __resetInFlightForTests } from '../lib/auth/refresh';
 
 function makeTmpHome(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'search-threads-test-'));

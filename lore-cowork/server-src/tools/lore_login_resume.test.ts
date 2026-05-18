@@ -3,8 +3,27 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runLoreLoginResume } from './lore_login_resume';
-import { readTokens } from '../lib/tokens';
+import { readTokens } from '../lib/auth/store';
 import { __resetCloudBaseUrlForTests } from '../lib/cloudBaseUrl';
+import {
+  discoverEndpoints,
+  __resetInFlightForTests as __resetDiscoveryInFlightForTests,
+} from '../lib/auth/discovery';
+import { AUTHKIT_CLIENT_ID, AUTHKIT_SCOPES } from '../lib/auth/constants';
+
+// ---------------------------------------------------------------------------
+// Test constants
+// ---------------------------------------------------------------------------
+
+const TEST_BASE = 'https://mcp.lore.tanagram.ai';
+const TEST_AS = 'https://signin.lore.tanagram.ai';
+const TEST_RESOURCE = 'https://api.lore.tanagram.ai';
+const TEST_ISSUER = 'https://signin.lore.tanagram.ai';
+const TEST_TOKEN_ENDPOINT = `${TEST_ISSUER}/oauth2/token`;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function makeTmpHome(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'lore-cowork-resume-test-'));
@@ -21,17 +40,35 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function makePrmBody() {
+  return {
+    resource: TEST_RESOURCE,
+    authorization_servers: [TEST_AS],
+  };
+}
+
+function makeAsBody() {
+  return {
+    issuer: TEST_ISSUER,
+    token_endpoint: TEST_TOKEN_ENDPOINT,
+  };
+}
+
 function tokenPairBody(overrides: Record<string, unknown> = {}) {
   return {
     access_token: 'access-NEW',
     refresh_token: 'refresh-NEW',
     expires_in: 3600,
     token_type: 'Bearer',
-    scope: 'mcp.read mcp.write',
+    scope: AUTHKIT_SCOPES,
     ...overrides,
   };
 }
 
+/**
+ * Build a routing fetchImpl that handles discovery URLs + token endpoint
+ * with a FIFO queue for token endpoint responses.
+ */
 function makeFetch(seq: Array<{ url: string; res: Response | (() => Response) }>): {
   fetchImpl: typeof fetch;
   calls: Array<{ url: string; body: string | undefined }>;
@@ -42,11 +79,20 @@ function makeFetch(seq: Array<{ url: string; res: Response | (() => Response) }>
     queues.get(url)!.push(res);
   }
   const calls: Array<{ url: string; body: string | undefined }> = [];
-  const fetchImpl = (async (url: string, init?: RequestInit) => {
-    calls.push({ url, body: init?.body as string | undefined });
-    const q = queues.get(url);
+  const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+    const urlStr =
+      typeof url === 'string' ? url : url instanceof URL ? url.toString() : (url as Request).url;
+    calls.push({ url: urlStr, body: init?.body as string | undefined });
+    // Discovery URLs: always return standard defaults.
+    if (urlStr.includes('oauth-protected-resource')) {
+      return jsonResponse(makePrmBody());
+    }
+    if (urlStr.includes('oauth-authorization-server')) {
+      return jsonResponse(makeAsBody());
+    }
+    const q = queues.get(urlStr);
     if (!q || q.length === 0) {
-      throw new Error(`unexpected fetch call to ${url}`);
+      throw new Error(`unexpected fetch call to ${urlStr}`);
     }
     const next = q.shift()!;
     return typeof next === 'function' ? next() : next;
@@ -62,19 +108,41 @@ function makeSleep(): { sleep: (ms: number) => Promise<void>; awaited: number[] 
   return { sleep, awaited };
 }
 
-const TOKEN_URL = 'http://localhost:4000/oauth/token';
+/**
+ * Prime the on-disk discovery cache so tests that only exercise the poll logic
+ * don't need their fetchImpl to handle PRM/AS URLs.
+ */
+async function primeDiscoveryCache(home: string): Promise<void> {
+  const primeFetch = (async (url: string | URL | Request) => {
+    const urlStr =
+      typeof url === 'string' ? url : url instanceof URL ? url.toString() : (url as Request).url;
+    if (urlStr.includes('oauth-protected-resource')) return jsonResponse(makePrmBody());
+    if (urlStr.includes('oauth-authorization-server')) return jsonResponse(makeAsBody());
+    throw new Error(`Unexpected URL in primeDiscoveryCache: ${urlStr}`);
+  }) as unknown as typeof fetch;
+  const now = () => 1_700_000_000_000;
+  await discoverEndpoints({ fetchImpl: primeFetch, home, now });
+  __resetDiscoveryInFlightForTests();
+}
+
+// ---------------------------------------------------------------------------
+// Setup / teardown
+// ---------------------------------------------------------------------------
 
 describe('runLoreLoginResume', () => {
   let home: string;
-  beforeEach(() => {
+  beforeEach(async () => {
     home = makeTmpHome();
-    process.env.LORE_MCP_BASE_URL = 'http://localhost:4000';
+    process.env.LORE_MCP_BASE_URL = TEST_BASE;
     __resetCloudBaseUrlForTests();
+    __resetDiscoveryInFlightForTests();
+    await primeDiscoveryCache(home);
   });
   afterEach(() => {
     rmrf(home);
     delete process.env.LORE_MCP_BASE_URL;
     __resetCloudBaseUrlForTests();
+    __resetDiscoveryInFlightForTests();
   });
 
   test('happy path with explicit expires_in/interval: pending → tokens → writeTokens called', async () => {
@@ -82,8 +150,8 @@ describe('runLoreLoginResume', () => {
     let n = 0;
     const now = () => FIXED_NOW + ++n;
     const { fetchImpl, calls } = makeFetch([
-      { url: TOKEN_URL, res: jsonResponse({ error: 'authorization_pending' }, 400) },
-      { url: TOKEN_URL, res: jsonResponse(tokenPairBody({ expires_in: 3600 })) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse({ error: 'authorization_pending' }, 400) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse(tokenPairBody({ expires_in: 3600 })) },
     ]);
     const { sleep, awaited } = makeSleep();
 
@@ -100,18 +168,20 @@ describe('runLoreLoginResume', () => {
     expect(result).toEqual({ ok: true });
     expect(awaited).toEqual([3000, 3000]);
     // Poll POST shape carries the supplied device_code.
-    const pollParams = new URLSearchParams(calls[0]?.body ?? '');
+    const pollCall = calls.find((c) => c.url === TEST_TOKEN_ENDPOINT);
+    expect(pollCall).toBeDefined();
+    const pollParams = new URLSearchParams(pollCall?.body ?? '');
     expect(pollParams.get('grant_type')).toBe(
       'urn:ietf:params:oauth:grant-type:device_code',
     );
     expect(pollParams.get('device_code')).toBe('dev-RESUME');
-    expect(pollParams.get('client_id')).toBe('lore-cowork-plugin');
+    expect(pollParams.get('client_id')).toBe(AUTHKIT_CLIENT_ID);
     // Tokens persisted with locally-computed expires_at.
     const persisted = await readTokens(home);
     expect(persisted).not.toBeNull();
     expect(persisted?.access_token).toBe('access-NEW');
     expect(persisted?.refresh_token).toBe('refresh-NEW');
-    expect(persisted?.scope).toBe('mcp.read mcp.write');
+    expect(persisted?.scope).toBe(AUTHKIT_SCOPES);
     expect(persisted!.expires_at).toBeGreaterThan(FIXED_NOW + 3_600_000);
     expect(persisted!.expires_at).toBeLessThan(FIXED_NOW + 3_600_000 + 1000);
   });
@@ -126,9 +196,9 @@ describe('runLoreLoginResume', () => {
       return t;
     };
     const { fetchImpl } = makeFetch([
-      { url: TOKEN_URL, res: jsonResponse({ error: 'authorization_pending' }, 400) },
-      { url: TOKEN_URL, res: jsonResponse({ error: 'authorization_pending' }, 400) },
-      { url: TOKEN_URL, res: jsonResponse({ error: 'authorization_pending' }, 400) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse({ error: 'authorization_pending' }, 400) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse({ error: 'authorization_pending' }, 400) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse({ error: 'authorization_pending' }, 400) },
     ]);
     const { sleep, awaited } = makeSleep();
 
@@ -154,9 +224,9 @@ describe('runLoreLoginResume', () => {
   test('slow_down adds 5s to the local interval', async () => {
     const now = () => 1_700_000_000_000;
     const { fetchImpl } = makeFetch([
-      { url: TOKEN_URL, res: jsonResponse({ error: 'authorization_pending' }, 400) },
-      { url: TOKEN_URL, res: jsonResponse({ error: 'slow_down' }, 400) },
-      { url: TOKEN_URL, res: jsonResponse(tokenPairBody()) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse({ error: 'authorization_pending' }, 400) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse({ error: 'slow_down' }, 400) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse(tokenPairBody()) },
     ]);
     const { sleep, awaited } = makeSleep();
 
@@ -179,7 +249,7 @@ describe('runLoreLoginResume', () => {
   test('server expired_token: returns expired_token shape; no tokens written', async () => {
     const now = () => 1_700_000_000_000;
     const { fetchImpl } = makeFetch([
-      { url: TOKEN_URL, res: jsonResponse({ error: 'expired_token' }, 400) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse({ error: 'expired_token' }, 400) },
     ]);
     const { sleep } = makeSleep();
     const result = await runLoreLoginResume({
@@ -209,9 +279,9 @@ describe('runLoreLoginResume', () => {
       return t;
     };
     const { fetchImpl } = makeFetch([
-      { url: TOKEN_URL, res: jsonResponse({ error: 'authorization_pending' }, 400) },
-      { url: TOKEN_URL, res: jsonResponse({ error: 'authorization_pending' }, 400) },
-      { url: TOKEN_URL, res: jsonResponse({ error: 'authorization_pending' }, 400) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse({ error: 'authorization_pending' }, 400) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse({ error: 'authorization_pending' }, 400) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse({ error: 'authorization_pending' }, 400) },
     ]);
     const { sleep } = makeSleep();
     const result = await runLoreLoginResume({
@@ -234,7 +304,7 @@ describe('runLoreLoginResume', () => {
     const now = () => 1_700_000_000_000;
     const { fetchImpl } = makeFetch([
       {
-        url: TOKEN_URL,
+        url: TEST_TOKEN_ENDPOINT,
         res: jsonResponse(
           { error: 'invalid_client', error_description: 'echoed dev-XYZ-99' },
           400,
@@ -269,7 +339,7 @@ describe('runLoreLoginResume', () => {
     // explicitly to lock in the contract.
     const now = () => 1_700_000_000_000;
     const { fetchImpl } = makeFetch([
-      { url: TOKEN_URL, res: jsonResponse(tokenPairBody()) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse(tokenPairBody()) },
     ]);
     const { sleep } = makeSleep();
     const result = await runLoreLoginResume({

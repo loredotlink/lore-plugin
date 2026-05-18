@@ -3,8 +3,28 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runLoreLogin } from './lore_login';
-import { readTokens } from '../lib/tokens';
+import { readTokens } from '../lib/auth/store';
 import { __resetCloudBaseUrlForTests } from '../lib/cloudBaseUrl';
+import {
+  discoverEndpoints,
+  __resetInFlightForTests as __resetDiscoveryInFlightForTests,
+} from '../lib/auth/discovery';
+import { AUTHKIT_CLIENT_ID, AUTHKIT_SCOPES } from '../lib/auth/constants';
+
+// ---------------------------------------------------------------------------
+// Test constants
+// ---------------------------------------------------------------------------
+
+const TEST_BASE = 'https://mcp.lore.tanagram.ai';
+const TEST_AS = 'https://signin.lore.tanagram.ai';
+const TEST_RESOURCE = 'https://api.lore.tanagram.ai';
+const TEST_ISSUER = 'https://signin.lore.tanagram.ai';
+const TEST_TOKEN_ENDPOINT = `${TEST_ISSUER}/oauth2/token`;
+const TEST_DEVICE_ENDPOINT = `${TEST_ISSUER}/oauth2/device_authorization`;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function makeTmpHome(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'lore-cowork-login-test-'));
@@ -21,12 +41,26 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function makePrmBody() {
+  return {
+    resource: TEST_RESOURCE,
+    authorization_servers: [TEST_AS],
+  };
+}
+
+function makeAsBody() {
+  return {
+    issuer: TEST_ISSUER,
+    token_endpoint: TEST_TOKEN_ENDPOINT,
+  };
+}
+
 function deviceCodeBody(overrides: Record<string, unknown> = {}) {
   return {
     device_code: 'dev-CODE',
     user_code: 'WXYZ-1234',
-    verification_uri: 'http://localhost:4000/device',
-    verification_uri_complete: 'http://localhost:4000/device?user_code=WXYZ-1234',
+    verification_uri: 'https://auth.example.com/device',
+    verification_uri_complete: 'https://auth.example.com/device?user_code=WXYZ-1234',
     expires_in: 600,
     interval: 5,
     ...overrides,
@@ -39,15 +73,17 @@ function tokenPairBody(overrides: Record<string, unknown> = {}) {
     refresh_token: 'refresh-NEW',
     expires_in: 3600,
     token_type: 'Bearer',
-    scope: 'mcp.read mcp.write',
+    scope: AUTHKIT_SCOPES,
     ...overrides,
   };
 }
 
 /**
- * Build a fetch stub that returns a queued sequence of responses keyed
- * by URL. Each URL maps to a FIFO queue; if the queue empties the stub
- * throws so a misordered test fails loudly.
+ * Build a routing fetchImpl that handles discovery URLs + device/token
+ * endpoints with per-URL response queues. Each URL maps to a FIFO queue;
+ * if the queue empties the stub throws so a misordered test fails loudly.
+ * Discovery URLs (PRM + AS metadata) always return the standard defaults
+ * unless overridden.
  */
 function makeFetch(seq: Array<{ url: string; res: Response | (() => Response) }>): {
   fetchImpl: typeof fetch;
@@ -59,11 +95,22 @@ function makeFetch(seq: Array<{ url: string; res: Response | (() => Response) }>
     queues.get(url)!.push(res);
   }
   const calls: Array<{ url: string; body: string | undefined }> = [];
-  const fetchImpl = (async (url: string, init?: RequestInit) => {
-    calls.push({ url, body: init?.body as string | undefined });
-    const q = queues.get(url);
+  const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+    const urlStr =
+      typeof url === 'string' ? url : url instanceof URL ? url.toString() : (url as Request).url;
+    calls.push({ url: urlStr, body: init?.body as string | undefined });
+    // Discovery URLs: always return standard defaults (cache is pre-primed
+    // in beforeEach, so these should not normally be called, but handle
+    // gracefully if they are).
+    if (urlStr.includes('oauth-protected-resource')) {
+      return jsonResponse(makePrmBody());
+    }
+    if (urlStr.includes('oauth-authorization-server')) {
+      return jsonResponse(makeAsBody());
+    }
+    const q = queues.get(urlStr);
     if (!q || q.length === 0) {
-      throw new Error(`unexpected fetch call to ${url}`);
+      throw new Error(`unexpected fetch call to ${urlStr}`);
     }
     const next = q.shift()!;
     return typeof next === 'function' ? next() : next;
@@ -80,20 +127,41 @@ function makeSleep(): { sleep: (ms: number) => Promise<void>; awaited: number[] 
   return { sleep, awaited };
 }
 
-const DEVICE_URL = 'http://localhost:4000/oauth/device/code';
-const TOKEN_URL = 'http://localhost:4000/oauth/token';
+/**
+ * Prime the on-disk discovery cache so tests that only exercise the device-flow
+ * logic don't need their fetchImpl to handle PRM/AS URLs.
+ */
+async function primeDiscoveryCache(home: string): Promise<void> {
+  const primeFetch = (async (url: string | URL | Request) => {
+    const urlStr =
+      typeof url === 'string' ? url : url instanceof URL ? url.toString() : (url as Request).url;
+    if (urlStr.includes('oauth-protected-resource')) return jsonResponse(makePrmBody());
+    if (urlStr.includes('oauth-authorization-server')) return jsonResponse(makeAsBody());
+    throw new Error(`Unexpected URL in primeDiscoveryCache: ${urlStr}`);
+  }) as unknown as typeof fetch;
+  const now = () => 1_700_000_000_000;
+  await discoverEndpoints({ fetchImpl: primeFetch, home, now });
+  __resetDiscoveryInFlightForTests();
+}
+
+// ---------------------------------------------------------------------------
+// Setup / teardown
+// ---------------------------------------------------------------------------
 
 describe('runLoreLogin', () => {
   let home: string;
-  beforeEach(() => {
+  beforeEach(async () => {
     home = makeTmpHome();
-    process.env.LORE_MCP_BASE_URL = 'http://localhost:4000';
+    process.env.LORE_MCP_BASE_URL = TEST_BASE;
     __resetCloudBaseUrlForTests();
+    __resetDiscoveryInFlightForTests();
+    await primeDiscoveryCache(home);
   });
   afterEach(() => {
     rmrf(home);
     delete process.env.LORE_MCP_BASE_URL;
     __resetCloudBaseUrlForTests();
+    __resetDiscoveryInFlightForTests();
   });
 
   test('happy path: device-code → browser opens → pending → token pair → writeTokens called', async () => {
@@ -104,9 +172,9 @@ describe('runLoreLogin', () => {
       return FIXED_NOW + nowCallCount;
     };
     const { fetchImpl, calls } = makeFetch([
-      { url: DEVICE_URL, res: jsonResponse(deviceCodeBody()) },
-      { url: TOKEN_URL, res: jsonResponse({ error: 'authorization_pending' }, 400) },
-      { url: TOKEN_URL, res: jsonResponse(tokenPairBody({ expires_in: 3600 })) },
+      { url: TEST_DEVICE_ENDPOINT, res: jsonResponse(deviceCodeBody()) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse({ error: 'authorization_pending' }, 400) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse(tokenPairBody({ expires_in: 3600 })) },
     ]);
     const { sleep, awaited } = makeSleep();
     const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
@@ -122,25 +190,30 @@ describe('runLoreLogin', () => {
     expect(awaited).toEqual([5000, 5000]);
     // Browser opened with the complete URL.
     expect(spawnCalls).toEqual([
-      { cmd: 'open', args: ['http://localhost:4000/device?user_code=WXYZ-1234'] },
+      { cmd: 'open', args: ['https://auth.example.com/device?user_code=WXYZ-1234'] },
     ]);
-    // Device-code POST shape.
-    const deviceParams = new URLSearchParams(calls[0]?.body ?? '');
-    expect(deviceParams.get('client_id')).toBe('lore-cowork-plugin');
-    expect(deviceParams.get('scope')).toBe('mcp.read mcp.write');
+    // Device-code POST shape (discovery calls are filtered out by URL).
+    const deviceCall = calls.find((c) => c.url === TEST_DEVICE_ENDPOINT);
+    expect(deviceCall).toBeDefined();
+    const deviceParams = new URLSearchParams(deviceCall?.body ?? '');
+    expect(deviceParams.get('client_id')).toBe(AUTHKIT_CLIENT_ID);
+    expect(deviceParams.get('scope')).toBe(AUTHKIT_SCOPES);
+    expect(deviceParams.get('audience')).toBe(TEST_RESOURCE);
     // Poll POST shape.
-    const pollParams = new URLSearchParams(calls[1]?.body ?? '');
+    const pollCall = calls.find((c) => c.url === TEST_TOKEN_ENDPOINT);
+    expect(pollCall).toBeDefined();
+    const pollParams = new URLSearchParams(pollCall?.body ?? '');
     expect(pollParams.get('grant_type')).toBe(
       'urn:ietf:params:oauth:grant-type:device_code',
     );
     expect(pollParams.get('device_code')).toBe('dev-CODE');
-    expect(pollParams.get('client_id')).toBe('lore-cowork-plugin');
-    // Tokens persisted with locally-computed expires_at and the fixed scope.
+    expect(pollParams.get('client_id')).toBe(AUTHKIT_CLIENT_ID);
+    // Tokens persisted with locally-computed expires_at and the AuthKit scope.
     const persisted = await readTokens(home);
     expect(persisted).not.toBeNull();
     expect(persisted?.access_token).toBe('access-NEW');
     expect(persisted?.refresh_token).toBe('refresh-NEW');
-    expect(persisted?.scope).toBe('mcp.read mcp.write');
+    expect(persisted?.scope).toBe(AUTHKIT_SCOPES);
     // expires_at = now() (at success) + 3600*1000. now is monotonic so
     // it must be > FIXED_NOW + 3600_000 by a small amount.
     expect(persisted!.expires_at).toBeGreaterThan(FIXED_NOW + 3_600_000);
@@ -150,8 +223,8 @@ describe('runLoreLogin', () => {
   test('happy-path return value does not leak credentials', async () => {
     const now = () => 1_700_000_000_000;
     const { fetchImpl } = makeFetch([
-      { url: DEVICE_URL, res: jsonResponse(deviceCodeBody()) },
-      { url: TOKEN_URL, res: jsonResponse(tokenPairBody()) },
+      { url: TEST_DEVICE_ENDPOINT, res: jsonResponse(deviceCodeBody()) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse(tokenPairBody()) },
     ]);
     const { sleep } = makeSleep();
     const result = await runLoreLogin({
@@ -170,7 +243,7 @@ describe('runLoreLogin', () => {
   test('browser open fails (exit 1): returns browser_open_failed, no polling, no tokens written', async () => {
     const now = () => 1_700_000_000_000;
     const { fetchImpl, calls } = makeFetch([
-      { url: DEVICE_URL, res: jsonResponse(deviceCodeBody()) },
+      { url: TEST_DEVICE_ENDPOINT, res: jsonResponse(deviceCodeBody()) },
     ]);
     const { sleep, awaited } = makeSleep();
     const result = await runLoreLogin({
@@ -185,14 +258,15 @@ describe('runLoreLogin', () => {
     if (result.ok === false && result.reason === 'browser_open_failed') {
       expect(result.device_code).toBe('dev-CODE');
       expect(result.user_code).toBe('WXYZ-1234');
-      expect(result.verification_uri).toBe('http://localhost:4000/device');
+      expect(result.verification_uri).toBe('https://auth.example.com/device');
       expect(result.message).toContain('lore_login_resume');
-      expect(result.message).toContain('http://localhost:4000/device');
+      expect(result.message).toContain('https://auth.example.com/device');
     } else {
       throw new Error('expected browser_open_failed');
     }
-    // Only the device-code POST should have been called.
-    expect(calls.length).toBe(1);
+    // Only the device-code POST should have been called (no token polls).
+    const tokenCalls = calls.filter((c) => c.url === TEST_TOKEN_ENDPOINT);
+    expect(tokenCalls.length).toBe(0);
     expect(awaited).toEqual([]);
     // tokens file must not exist.
     expect(await readTokens(home)).toBeNull();
@@ -201,11 +275,11 @@ describe('runLoreLogin', () => {
   test('slow_down adds 5s to the local interval; second slow_down adds another 5s', async () => {
     const now = () => 1_700_000_000_000;
     const { fetchImpl } = makeFetch([
-      { url: DEVICE_URL, res: jsonResponse(deviceCodeBody({ interval: 5 })) },
-      { url: TOKEN_URL, res: jsonResponse({ error: 'authorization_pending' }, 400) },
-      { url: TOKEN_URL, res: jsonResponse({ error: 'slow_down' }, 400) },
-      { url: TOKEN_URL, res: jsonResponse({ error: 'slow_down' }, 400) },
-      { url: TOKEN_URL, res: jsonResponse(tokenPairBody()) },
+      { url: TEST_DEVICE_ENDPOINT, res: jsonResponse(deviceCodeBody({ interval: 5 })) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse({ error: 'authorization_pending' }, 400) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse({ error: 'slow_down' }, 400) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse({ error: 'slow_down' }, 400) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse(tokenPairBody()) },
     ]);
     const { sleep, awaited } = makeSleep();
     const result = await runLoreLogin({
@@ -227,8 +301,8 @@ describe('runLoreLogin', () => {
   test('server returns expired_token: returns expired_token shape; no tokens written', async () => {
     const now = () => 1_700_000_000_000;
     const { fetchImpl } = makeFetch([
-      { url: DEVICE_URL, res: jsonResponse(deviceCodeBody()) },
-      { url: TOKEN_URL, res: jsonResponse({ error: 'expired_token' }, 400) },
+      { url: TEST_DEVICE_ENDPOINT, res: jsonResponse(deviceCodeBody()) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse({ error: 'expired_token' }, 400) },
     ]);
     const { sleep } = makeSleep();
     const result = await runLoreLogin({
@@ -253,7 +327,7 @@ describe('runLoreLogin', () => {
     const FIXED_START = 1_700_000_000_000;
     let calls = 0;
     const now = () => {
-      // 0: post-device-code (start anchor)
+      // 0: post-device-code (start anchor in pollDeviceToken)
       // 1: top of iter 1 (delta 0) — still under
       // 2: top of iter 2 (delta 200_000) — still under
       // 3: top of iter 3 (delta 400_000) — still under
@@ -265,10 +339,10 @@ describe('runLoreLogin', () => {
     // Build enough pending responses to cover the loop iterations
     // before the cap kicks in.
     const { fetchImpl } = makeFetch([
-      { url: DEVICE_URL, res: jsonResponse(deviceCodeBody({ expires_in: 600, interval: 1 })) },
-      { url: TOKEN_URL, res: jsonResponse({ error: 'authorization_pending' }, 400) },
-      { url: TOKEN_URL, res: jsonResponse({ error: 'authorization_pending' }, 400) },
-      { url: TOKEN_URL, res: jsonResponse({ error: 'authorization_pending' }, 400) },
+      { url: TEST_DEVICE_ENDPOINT, res: jsonResponse(deviceCodeBody({ expires_in: 600, interval: 1 })) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse({ error: 'authorization_pending' }, 400) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse({ error: 'authorization_pending' }, 400) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse({ error: 'authorization_pending' }, 400) },
     ]);
     const { sleep } = makeSleep();
     const result = await runLoreLogin({
@@ -288,9 +362,9 @@ describe('runLoreLogin', () => {
   test('unknown cloud error surfaces error code but not error_description', async () => {
     const now = () => 1_700_000_000_000;
     const { fetchImpl } = makeFetch([
-      { url: DEVICE_URL, res: jsonResponse(deviceCodeBody()) },
+      { url: TEST_DEVICE_ENDPOINT, res: jsonResponse(deviceCodeBody()) },
       {
-        url: TOKEN_URL,
+        url: TEST_TOKEN_ENDPOINT,
         res: jsonResponse(
           { error: 'invalid_client', error_description: 'should-not-leak' },
           400,
@@ -325,9 +399,9 @@ describe('runLoreLogin', () => {
     // thrown Error must not contain the device_code substring.
     const now = () => 1_700_000_000_000;
     const { fetchImpl } = makeFetch([
-      { url: DEVICE_URL, res: jsonResponse(deviceCodeBody({ device_code: 'dev-CODE-12345' })) },
+      { url: TEST_DEVICE_ENDPOINT, res: jsonResponse(deviceCodeBody({ device_code: 'dev-CODE-12345' })) },
       {
-        url: TOKEN_URL,
+        url: TEST_TOKEN_ENDPOINT,
         res: jsonResponse(
           {
             error: 'invalid_client',

@@ -33,8 +33,8 @@
 
 import { randomUUID } from 'node:crypto';
 import { AuthRequiredError } from './errors';
-import { getValidAccessToken } from './refresh';
-import { deleteTokens } from './tokens';
+import { getValidAccessToken } from './auth/refresh.js';
+import { deleteTokens } from './auth/store.js';
 import { cloudBaseUrl } from './cloudBaseUrl';
 
 interface Options {

@@ -4,12 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { AuthRequiredError } from './errors';
 import { callCloudTool } from './cloudCall';
-import { __resetInFlightForTests } from './refresh';
+import { __resetInFlightForTests } from './auth/refresh';
 import {
   writeTokens,
   readTokens,
   type Tokens,
-} from './tokens';
+} from './auth/store';
 import { __resetCloudBaseUrlForTests } from './cloudBaseUrl';
 
 function makeTmpHome(): string {

@@ -8,9 +8,9 @@ import {
   shareSessionTool,
 } from './share_session';
 import { AuthRequiredError, AUTH_REQUIRED_MESSAGE } from '../lib/errors';
-import { writeTokens, readTokens, type Tokens } from '../lib/tokens';
+import { writeTokens, readTokens, type Tokens } from '../lib/auth/store';
 import { __resetCloudBaseUrlForTests } from '../lib/cloudBaseUrl';
-import { __resetInFlightForTests } from '../lib/refresh';
+import { __resetInFlightForTests } from '../lib/auth/refresh';
 import { CoworkSource } from '../lib/session/cowork';
 
 function makeTmpHome(): string {
