@@ -17,7 +17,7 @@ export function defaultClaudeCodeProjectsRoot(home: string = os.homedir()): stri
  *   '/Users/q/repos/foo' -> '-Users-q-repos-foo'
  */
 export function encodeCwdForClaudeCode(cwd: string): string {
-  return cwd.split(path.sep).join('-');
+  return cwd.split('/').join('-');
 }
 
 export type ClaudeCodeSourceOptions = {
@@ -69,10 +69,15 @@ export class ClaudeCodeSource implements SessionSource {
 
   findById(sessionId: string): SessionSummary {
     const filePath = path.join(this.projectDir, `${sessionId}.jsonl`);
-    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(filePath);
+    } catch {
       throw new Error(`session not found: ${sessionId}`);
     }
-    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) {
+      throw new Error(`session not found: ${sessionId}`);
+    }
     return {
       sessionId,
       sessionDir: this.projectDir,
@@ -82,7 +87,12 @@ export class ClaudeCodeSource implements SessionSource {
 
   readSession(session: SessionSummary): SessionPayload {
     const transcriptPath = path.join(session.sessionDir, `${session.sessionId}.jsonl`);
-    if (!fs.existsSync(transcriptPath) || !fs.statSync(transcriptPath).isFile()) {
+    let transcript: string;
+    try {
+      const stat = fs.statSync(transcriptPath);
+      if (!stat.isFile()) throw new Error('not a file');
+      transcript = fs.readFileSync(transcriptPath, 'utf8');
+    } catch {
       throw new Error(
         `Claude Code session ${session.sessionId} has no transcript file at ${transcriptPath}`,
       );
@@ -90,7 +100,7 @@ export class ClaudeCodeSource implements SessionSource {
     return {
       sessionId: session.sessionId,
       transcriptPath,
-      transcript: fs.readFileSync(transcriptPath, 'utf8'),
+      transcript,
       uploads: [],
       outputs: [],
     };

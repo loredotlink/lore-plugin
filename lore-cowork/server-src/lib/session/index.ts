@@ -8,6 +8,9 @@
  * them.
  */
 
+import { ClaudeCodeSource } from './claudeCode.js';
+import { CoworkSource } from './cowork.js';
+
 /** Summary returned by `listSessions` — one entry per session on disk. */
 export type SessionSummary = {
   /** Stable session identifier as the runtime understands it. */
@@ -69,9 +72,6 @@ export function nonBlank(value: unknown): string | null {
   const trimmed = value.trim();
   return trimmed === '' ? null : trimmed;
 }
-
-import { ClaudeCodeSource } from './claudeCode.js';
-import { CoworkSource } from './cowork.js';
 
 /**
  * Choose the right SessionSource for the current runtime.
