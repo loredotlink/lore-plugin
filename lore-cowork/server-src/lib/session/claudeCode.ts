@@ -61,8 +61,17 @@ export class ClaudeCodeSource implements SessionSource {
     return sessions;
   }
 
-  findById(_sessionId: string): SessionSummary {
-    throw new Error('ClaudeCodeSource.findById: not yet implemented');
+  findById(sessionId: string): SessionSummary {
+    const filePath = path.join(this.projectDir, `${sessionId}.jsonl`);
+    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+      throw new Error(`session not found: ${sessionId}`);
+    }
+    const stat = fs.statSync(filePath);
+    return {
+      sessionId,
+      sessionDir: this.projectDir,
+      mtimeMs: stat.mtimeMs,
+    };
   }
 
   readSession(_session: SessionSummary): SessionPayload {

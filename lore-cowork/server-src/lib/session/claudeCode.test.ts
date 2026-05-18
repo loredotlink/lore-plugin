@@ -57,3 +57,24 @@ test('listSessions: ignores non-jsonl files and subdirectories', () => {
   const source = new ClaudeCodeSource({ projectsRoot: root, cwd });
   expect(source.listSessions().map((s) => s.sessionId)).toEqual(['sess-real']);
 });
+
+test('findById: returns the matching session', () => {
+  const root = makeTmpRoot();
+  const cwd = '/Users/q/repos/foo';
+  const projectDir = stageProject(root, cwd);
+  stageSessionFile(projectDir, 'sess-target', 1_000);
+  stageSessionFile(projectDir, 'sess-other', 2_000);
+
+  const source = new ClaudeCodeSource({ projectsRoot: root, cwd });
+  expect(source.findById('sess-target').sessionId).toBe('sess-target');
+});
+
+test('findById: throws when no matching .jsonl exists', () => {
+  const root = makeTmpRoot();
+  const cwd = '/Users/q/repos/foo';
+  const projectDir = stageProject(root, cwd);
+  stageSessionFile(projectDir, 'sess-real', 1_000);
+
+  const source = new ClaudeCodeSource({ projectsRoot: root, cwd });
+  expect(() => source.findById('sess-ghost')).toThrow(/sess-ghost/);
+});
