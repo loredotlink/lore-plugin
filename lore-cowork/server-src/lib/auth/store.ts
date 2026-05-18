@@ -4,7 +4,7 @@
  *
  * Why a dedicated module:
  *   Both the login flow (`tools/lore_login.ts`) and the auto-refresh
- *   helper (`lib/refresh.ts`) read and mutate the same tokens file.
+ *   helper (`lib/auth/refresh.ts`) read and mutate the same tokens file.
  *   Centralizing schema validation, atomic-write semantics, and file
  *   permissions here is the only way to keep those two callers in sync
  *   without copy-pasting the trickier bits.

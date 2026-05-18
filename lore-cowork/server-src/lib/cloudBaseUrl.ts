@@ -3,7 +3,7 @@
  *
  * Why this is its own leaf:
  *   Three callers need the same origin string:
- *     - `lib/refresh.ts` — POSTs to `${base}/oauth/token` to refresh.
+ *     - `lib/auth/refresh.ts` — POSTs to the discovered token endpoint to refresh.
  *     - `lib/cloudCall.ts` — fans out arbitrary proxy calls.
  *     - `tools/lore_login.ts` — kicks off the device-authorization flow.
  *   Centralizing the resolution rule (env override, trailing-slash
@@ -26,7 +26,7 @@
  * Why we fail loud on a malformed URL:
  *   A typo in `LORE_MCP_BASE_URL` (e.g. dropping the scheme) would
  *   otherwise surface much later as a confusing `fetch` failure inside
- *   `refresh.ts` — and at that point we've already burned a refresh
+ *   `auth/refresh.ts` — and at that point we've already burned a refresh
  *   token write/read cycle and confused the user. Validating at load
  *   time turns the error into a single legible message that names the
  *   env var.

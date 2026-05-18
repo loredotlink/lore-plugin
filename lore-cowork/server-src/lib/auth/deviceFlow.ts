@@ -23,7 +23,7 @@
  *   - `access_token` and `refresh_token` are never in return values — callers
  *     receive only `{ ok: true }`.
  *   - `expires_at` is computed from the local clock (`now() + expires_in * 1000`),
- *     never trusted from the server, matching the convention in `lib/refresh.ts`.
+ *     never trusted from the server, matching the convention in `lib/auth/refresh.ts`.
  *
  * Polling semantics (RFC 8628 §3.5):
  *   - `authorization_pending` → keep polling at the current interval.
@@ -108,7 +108,7 @@ const DeviceCodeResponseSchema = z.object({
 /**
  * Schema for the token endpoint's successful response during device-code polling.
  *
- * Matches `RefreshResponseSchema` in `lib/refresh.ts` exactly: all five fields
+ * Matches `RefreshResponseSchema` in `lib/auth/refresh.ts` exactly: all five fields
  * required, `expires_in` is a positive integer. Any server-supplied `expires_at`
  * is ignored; we compute our own from the local clock.
  */
@@ -239,7 +239,7 @@ export async function initiateDeviceCode(opts?: {
  *               The cap protects against a misbehaving server pinning the agent.
  *
  * On success:
- *   - Validates the token response with Zod (same strictness as `lib/refresh.ts`).
+ *   - Validates the token response with Zod (same strictness as `lib/auth/refresh.ts`).
  *   - Computes `expires_at = now() + expires_in * 1000` from the local clock.
  *   - Persists tokens via `writeTokens` from `lib/auth/store.ts`.
  *   - Returns `{ ok: true }`.

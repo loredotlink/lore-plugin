@@ -20,11 +20,11 @@ Natural-language phrasings work too — "share this", "send this to my team", "s
 
 ## First-time setup
 
-The first time you run `/share` or `/lore`, Cowork pops a browser to [lore.tanagram.ai](https://lore.tanagram.ai). Sign in via WorkOS, pick a workspace, click Allow. Cowork caches the access and refresh tokens and silently refreshes them — subsequent calls are zero-friction. There's no CLI to install and no token file to manage.
+The first time you run `/share` or `/lore`, the plugin's `lore_login` tool opens a browser to the WorkOS AuthKit consent screen with a device code pre-filled. Sign in, click Allow, and the tool returns. The plugin persists tokens under `~/Library/Application Support/tanagram/lore/tokens.json` (mode 0600) and refreshes them silently on subsequent calls. If the browser cannot be opened automatically (SSH, no GUI), `lore_login` returns a `verification_uri` + `device_code` and the agent calls `lore_login_resume` once you complete the flow on another device.
 
 ## Architecture
 
-The plugin registers two MCP servers: a bundled stdio binary that reads your local Cowork session bytes off disk (the only path out of the agent's sandbox to `audit.jsonl`), and the cloud Lore MCP at `https://lore.tanagram.ai/mcp` which handles upload, thread fetching, and search. The stdio binary is a Bun-compiled single executable. OAuth is handled entirely by Cowork against the cloud MCP's standard OAuth 2.1 endpoints — this plugin does no auth itself. See [`DESIGN.md`](./DESIGN.md) for the full breakdown.
+The plugin registers two MCP servers: a bundled stdio binary that reads your local Cowork session bytes off disk (the only path out of the agent's sandbox to `audit.jsonl`), and the cloud Lore MCP at `https://lore.tanagram.ai/mcp` which handles upload, thread fetching, and search. The stdio binary is a Bun-compiled single executable. Auth runs in-process via the `lib/auth/` library: RFC 8628 device-code flow against WorkOS AuthKit, discovery-driven (PRM → AS metadata, cached at `~/Library/Application Support/tanagram/lore/discovery-cache.json`), with silent refresh and 401-triggered re-login. See [`DESIGN.md`](./DESIGN.md) for the full breakdown.
 
 ## Requirements
 

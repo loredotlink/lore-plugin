@@ -46,7 +46,7 @@
  *   a cold cache) would both observe a cache miss and both POST to PRM. The
  *   AS metadata call and the cache write that follow would then race.
  *   The `inFlight` mutex guarantees exactly one PRM+AS fetch pair per process
- *   per TTL window, using the same pattern as `lib/refresh.ts`.
+ *   per TTL window, using the same pattern as `lib/auth/refresh.ts`.
  *
  * Constraint: no `await` between the `if (inFlight)` check and the
  * assignment — same reasoning as in refresh.ts. JS is single-threaded

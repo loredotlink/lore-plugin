@@ -2,7 +2,7 @@
 
 A sibling of `lore-plugin/lore/` for **Claude Cowork**. Gives Cowork users the same two affordances the existing Claude Code plugin gives developers — post the current session to Lore, and read Lore threads back — adapted to Cowork's sandboxed agent environment.
 
-The plugin ships a thin **host-side MCP server** that exposes the user's local Cowork session bytes to the agent, and registers the existing **cloud Lore MCP server** as a remote MCP source. The cloud MCP (shipped in lore PRs #456 / #458 / #461) is OAuth-protected; Cowork drives the OAuth flow client-side, so this plugin does not handle auth at all.
+The plugin ships a thin **host-side MCP server** that exposes the user's local Cowork session bytes to the agent, and also proxies the cloud Lore tools (`share_session`, `get_thread`, `list_threads`, `search_threads`) through the same stdio server. The cloud is OAuth-protected via WorkOS AuthKit (RFC 8628 device-code flow); the host MCP server drives that flow in-process via the `lib/auth/` library and persists tokens locally.
 
 ## Why the split
 
@@ -10,9 +10,9 @@ Three properties of Cowork force the architecture:
 
 1. The agent's sandbox cannot read `~/Library/Application Support/Claude/local-agent-mode-sessions/`. The only path from the agent to its own `audit.jsonl` bytes is a plugin-bundled MCP server running on the user's Mac.
 2. The cloud Lore MCP at `https://lore.tanagram.ai/mcp` already implements `share_session`, `get_thread`, `list_threads`, `search_threads`. Reimplementing them in the host would duplicate auth, upload, and visibility logic. We want the host to do *only* what it uniquely can.
-3. The cloud MCP is a full OAuth 2.1 Authorization Server (RFC 8414 discovery, RFC 7591 dynamic client registration, PKCE-S256, refresh token rotation). Any MCP client that speaks the standard OAuth flow — including Cowork — handles auth without plugin involvement.
+3. The cloud is fronted by WorkOS AuthKit. The plugin authenticates as a public OAuth client (RFC 8252) using the RFC 8628 device-authorization flow, discovers endpoints via PRM → AS metadata (RFC 8414 / RFC 8707), and manages tokens entirely in-process.
 
-So the host MCP server is reduced to a "local session reader". The cloud MCP does everything else.
+So the host MCP server does two jobs: read the local session bytes, and proxy authenticated calls to the cloud Lore tools.
 
 ## User experience
 
@@ -20,7 +20,7 @@ So the host MCP server is reduced to a "local session reader". The cloud MCP doe
 
 **Read.** User says "show me that Lore thread `th_...`", "find threads about onboarding", or "list recent Lore threads". The agent calls one of `get_thread` / `search_threads` / `list_threads` directly on the cloud MCP. No host involvement.
 
-**Auth.** On first tool call to the cloud MCP, Cowork pops a browser to the Lore consent screen. User signs in via WorkOS, picks a workspace, clicks Allow. Cowork caches the access + refresh tokens and silently refreshes them. Subsequent calls are zero-friction.
+**Auth.** When a cloud-proxy tool runs without valid tokens (or the cloud returns 401), the agent calls the plugin's `lore_login` tool, which mints a device code, opens the WorkOS AuthKit consent screen with the code pre-filled, and polls until the user approves. Tokens land at `~/Library/Application Support/tanagram/lore/tokens.json` (mode 0600). Subsequent cloud calls are zero-friction — `getValidAccessToken` refreshes silently when the access token has under 30s of life left, deduping concurrent refreshes via an in-flight mutex. If `spawn('open')` fails (SSH, no GUI), `lore_login` returns a `verification_uri` + `device_code` and the agent calls `lore_login_resume` once the user has completed the flow on another device.
 
 User-visible strings are plain language. The agent should never surface "transcript", "JSONL", "presigned PUT", "MCP", or other implementation language.
 
@@ -52,18 +52,14 @@ lore-plugin/
 {
   "mcpServers": {
     "lore-cowork-local": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/server/lore-cowork-mcp",
-      "transport": "stdio"
-    },
-    "lore": {
-      "transport": "streamable-http",
-      "url": "https://lore.tanagram.ai/mcp"
+      "type": "stdio",
+      "command": "${CLAUDE_PLUGIN_ROOT}/server/lore-cowork-mcp"
     }
   }
 }
 ```
 
-The host stdio server is launched on demand by Cowork. The cloud server uses the Streamable HTTP transport from the 2025-03-26 MCP spec — Cowork supports both `http` and `streamable-http`; we use the explicit name for clarity.
+Only one MCP server is registered: the bundled stdio binary. It exposes both the local session tools (`list_local_sessions`, `read_local_session`) and the cloud-proxy tools (`share_session`, `get_thread`, `list_threads`, `search_threads`, `lore_login`, `lore_login_resume`). The proxy tools POST JSON-RPC envelopes to `https://lore.tanagram.ai/mcp` from inside the stdio process; the agent only sees a single MCP server.
 
 ### Host MCP server
 
@@ -117,22 +113,25 @@ inputSchema: {
 
 ### Cloud MCP
 
-Used unchanged. The plugin's only contribution is registering the URL in `.mcp.json`. Cowork handles:
+Proxied through the host stdio server. The plugin's `share_session`, `get_thread`, `list_threads`, and `search_threads` tools each call `callCloudTool` in `lib/cloudCall.ts`, which acquires a bearer token via `getValidAccessToken` and POSTs a JSON-RPC envelope to `${cloudBaseUrl()}/mcp`.
 
-1. Discovery via `GET https://lore.tanagram.ai/.well-known/oauth-authorization-server`.
-2. Dynamic Client Registration via `POST /oauth/register` (RFC 7591, open).
-3. PKCE-S256 authorization flow via browser pop to `/oauth/authorize`.
-4. Token exchange at `/oauth/token` → 5-minute RS256 access JWT with `scope="mcp.read mcp.write"`, refresh token with rotation.
-5. `Authorization: Bearer <jwt>` on every `POST /mcp` call. Silent refresh via rotating refresh token.
+Auth is handled entirely in-process by the `lib/auth/` library:
 
-Tools available from the cloud MCP (post PR #458 + PR #484):
+1. **Discovery** (`lib/auth/discovery.ts`). On first use, `GET ${cloudBaseUrl()}/.well-known/oauth-protected-resource` (PRM) yields `resource` (the `audience`) and `authorization_servers[0]`. A follow-up `GET ${as}/.well-known/oauth-authorization-server` (RFC 8414) yields `issuer` and `token_endpoint`. `deviceAuthorizationEndpoint` is derived as `${issuer}/oauth2/device_authorization` (WorkOS convention; not advertised in AS metadata). Results are cached at `~/Library/Application Support/tanagram/lore/discovery-cache.json` with a 24h TTL and ETag revalidation.
+2. **Cold-start login** (`tools/lore_login.ts` → `lib/auth/deviceFlow.ts`). RFC 8628 device-code flow against AuthKit. Public client `client_01KRSDB9SR20N7MB0D9MPS05Q6` (registered in WorkOS; safe to commit per RFC 8252 §8.4). Requests OIDC scopes `openid email profile offline_access` and passes the discovered `audience`. Polls the token endpoint at the server-supplied interval, honors `slow_down` per RFC 8628 §3.5, and enforces a local hard cap on the device-code lifetime.
+3. **Headless fallback** (`tools/lore_login_resume.ts`). If `spawn('open')` fails, `lore_login` returns the `device_code` + `verification_uri`; the agent then calls `lore_login_resume` to drive the poll loop from a headless context.
+4. **Token storage** (`lib/auth/store.ts`). `tokens.json` at `~/Library/Application Support/tanagram/lore/tokens.json` (file 0600, parent dir 0700, atomic temp+rename writes). Stores `{ access_token, refresh_token, expires_at, scope }` — `expires_at` is computed from the local clock at write time.
+5. **Silent refresh** (`lib/auth/refresh.ts`). `getValidAccessToken` returns the cached access token when it has ≥30s left; otherwise POSTs the refresh-token grant to the discovered token endpoint, persists the rotated pair, and returns the new access token. Concurrent callers share one in-flight refresh via a module-scope mutex.
+6. **401 handling** (`lib/cloudCall.ts`). A 401 from the cloud means the refresh token has been revoked server-side. The cloud-call helper wipes `tokens.json` and throws `AuthRequiredError`; the per-tool dispatcher maps that to a `CallToolResult` whose message names `lore_login`, prompting the agent to re-authenticate.
 
-| Tool | Scope | Purpose |
-|------|-------|---------|
-| `share_session` | `mcp.write` | Persist transcript as a Lore thread, return `thread_id` + `thread_url` |
-| `get_thread` | `mcp.read` | Fetch a single thread by id |
-| `list_threads` | `mcp.read` | Paginated list across the caller's workspaces |
-| `search_threads` | `mcp.read` | Title search across the caller's workspaces |
+Tools available via the host proxy (cloud-side implementations live in lore PR #458 / PR #484):
+
+| Tool | Purpose |
+|------|---------|
+| `share_session` | Persist transcript as a Lore thread, return `thread_id` + `thread_url` |
+| `get_thread` | Fetch a single thread by id |
+| `list_threads` | Paginated list across the caller's workspaces |
+| `search_threads` | Title search across the caller's workspaces |
 
 **`harness` is required on `share_session`.** Per [lore PR #484](https://github.com/tanagram/lore/pull/484), the tool now demands an explicit `harness` value validated against the enum (`claudeCode`, `codex`, `amp`, `cursor`, `cowork`, `unspecified`). This plugin always passes `harness: 'cowork'` so per-harness analytics and the `cliStatusResponse.connected` signal stay correctly attributed. The slash command body must spell this out so the agent never omits it.
 
@@ -161,7 +160,7 @@ Share the user's current Cowork session to Lore. Steps:
 
 Failure modes:
 - `read_local_session` errors with "no Cowork session found" → ask the user if they want to share an older one (then list).
-- `share_session` errors → surface the message, suggest retry. Auth errors mean Cowork will re-prompt for consent; let it happen.
+- `share_session` errors → surface the message, suggest retry. Auth errors carry the `lore_login` cue in the error message — call that tool to re-authenticate.
 - Empty transcript → tell the user the session has no content yet.
 ```
 
@@ -180,7 +179,7 @@ Pick the right `lore` MCP tool based on `$ARGUMENTS`:
 
 Render in plain language. Single-thread fetches: surface URL prominently with title and author. Lists: top matches as one-liners. Mention pagination cursors only if useful. Empty results: suggest loosening the query.
 
-Do not say "transcript", "JSONL", or "MCP" in user-facing text. Auth errors → Cowork handles re-consent; surface the message and let it run.
+Do not say "transcript", "JSONL", or "MCP" in user-facing text. Auth errors carry the `lore_login` cue in the error message — call that tool to re-authenticate.
 ```
 
 ## Build, marketplace, and versioning
@@ -217,12 +216,10 @@ bun build --compile --target=bun-darwin-arm64 server-src/index.ts --outfile serv
 Open assumptions to validate before tagging v0.1.0:
 
 1. Cowork supports `"transport": "streamable-http"` MCP servers in plugin `.mcp.json`. **(User confirmed Cowork supports both `http` and `streamable-http`.)**
-2. Cowork drives MCP-spec OAuth client-side: browser pop, PKCE, token cache, refresh-token rotation.
+2. The in-process AuthKit device-code flow can drive `spawn('open', [...])` from within the stdio MCP server's process tree on a typical Cowork host. (Fallback: `lore_login_resume` covers the SSH / no-GUI case.)
 3. Cowork sets a `COWORK_SESSION_ID` env var when launching plugin stdio MCP servers. If not present, host falls back to newest-mtime — verify the fallback is acceptable UX.
 4. Cowork executes committed binaries from `${CLAUDE_PLUGIN_ROOT}/server/`. Verify path templating works and the binary executes (no Gatekeeper or quarantine blocks for plugin-shipped binaries).
 5. Realistic `audit.jsonl` size doesn't blow the agent's context budget on share. Spot-check with a representative session.
-
-If item 1 or 2 turns out false, fallback design: the host MCP server proxies all four tools to the cloud, using a token obtained via a host-side `lore_login` flow (device-code OAuth in a host tool). The host expands its surface; the agent's tool-calling pattern stays identical.
 
 ## Out of scope for v1
 

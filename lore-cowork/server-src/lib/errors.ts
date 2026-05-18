@@ -2,7 +2,7 @@
  * Auth-required error type and its MCP tool-result mapping.
  *
  * Why this module exists as a leaf:
- *   Later modules (`refresh.ts`, `cloudCall.ts`, the proxy tools that
+ *   Later modules (`auth/refresh.ts`, `cloudCall.ts`, the proxy tools that
  *   forward `share_session`, `get_thread`, etc. to the cloud MCP) throw
  *   `AuthRequiredError` when a request can't be authenticated — either
  *   because no tokens are on disk, or because the cloud returned 401
