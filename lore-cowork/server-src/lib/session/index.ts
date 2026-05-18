@@ -60,6 +60,16 @@ export interface SessionSource {
   readSession(session: SessionSummary): SessionPayload;
 }
 
+/**
+ * Returns the trimmed value when it's a non-empty string, else `null`.
+ * Shared by every `SessionSource` and by `detectSource` for env-var checks.
+ */
+export function nonBlank(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
 import { CoworkSource } from './cowork.js';
 
 /**

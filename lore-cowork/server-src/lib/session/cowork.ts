@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { SessionPayload, SessionSource, SessionSummary } from './index.js';
+import { nonBlank, type SessionPayload, type SessionSource, type SessionSummary } from './index.js';
 
 export const SESSIONS_DIR_NAME = 'local-agent-mode-sessions';
 const TRANSCRIPT_FILENAME_CANDIDATES = ['audit.jsonl', 'transcript.jsonl'];
@@ -94,12 +94,6 @@ export class CoworkSource implements SessionSource {
       outputs: listFilesInSubdir(localDir, 'outputs'),
     };
   }
-}
-
-function nonBlank(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed === '' ? null : trimmed;
 }
 
 function findLocalSubdir(sessionDir: string): string | null {
