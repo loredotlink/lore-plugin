@@ -8,6 +8,7 @@ import {
   runReadLocalSession,
   type ReadLocalSessionResult,
 } from './readLocalSession';
+import { CoworkSource } from '../lib/session/cowork.js';
 
 function makeTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'lore-cowork-read-test-'));
@@ -97,10 +98,12 @@ describe('readLocalSessionTool — shape', () => {
 describe('runReadLocalSession — resolution priority', () => {
   let tmp: string;
   let root: string;
+  let source: CoworkSource;
   beforeEach(() => {
     tmp = makeTmpDir();
     root = path.join(tmp, 'root');
     fs.mkdirSync(root);
+    source = new CoworkSource({ sessionsRoot: root });
     // Two sessions: A older, B newer.
     makeSession(root, 'convA', 'sess-A', {
       mtimeMs: 1_000_000,
@@ -120,7 +123,7 @@ describe('runReadLocalSession — resolution priority', () => {
   });
 
   test('no args, no env → newest by mtime (B)', () => {
-    const result = runReadLocalSession({ root, args: {}, env: {} });
+    const result = runReadLocalSession({ source, args: {}, env: {} });
     expect(result.session_id).toBe('sess-B');
     expect(result.conversation_id).toBe('convB');
     expect(result.transcript).toBe('B-transcript\n');
@@ -130,7 +133,7 @@ describe('runReadLocalSession — resolution priority', () => {
 
   test('COWORK_SESSION_ID env → that session regardless of mtime', () => {
     const result = runReadLocalSession({
-      root,
+      source,
       args: {},
       env: { COWORK_SESSION_ID: 'sess-A' },
     });
@@ -141,7 +144,7 @@ describe('runReadLocalSession — resolution priority', () => {
 
   test('session_id arg → that session regardless of env or mtime', () => {
     const result = runReadLocalSession({
-      root,
+      source,
       args: { session_id: 'sess-A' },
       env: { COWORK_SESSION_ID: 'sess-B' },
     });
@@ -153,7 +156,7 @@ describe('runReadLocalSession — resolution priority', () => {
   test('session_id arg takes priority over env var (explicit check)', () => {
     // Arg points to A; env points to B; arg wins.
     const result = runReadLocalSession({
-      root,
+      source,
       args: { session_id: 'sess-A' },
       env: { COWORK_SESSION_ID: 'sess-B' },
     });
@@ -162,7 +165,7 @@ describe('runReadLocalSession — resolution priority', () => {
 
   test('empty-string session_id falls through to env', () => {
     const result = runReadLocalSession({
-      root,
+      source,
       args: { session_id: '' },
       env: { COWORK_SESSION_ID: 'sess-A' },
     });
@@ -171,7 +174,7 @@ describe('runReadLocalSession — resolution priority', () => {
 
   test('whitespace-only session_id falls through to env', () => {
     const result = runReadLocalSession({
-      root,
+      source,
       args: { session_id: '   ' },
       env: { COWORK_SESSION_ID: 'sess-A' },
     });
@@ -180,7 +183,7 @@ describe('runReadLocalSession — resolution priority', () => {
 
   test('empty-string env var falls through to mtime', () => {
     const result = runReadLocalSession({
-      root,
+      source,
       args: {},
       env: { COWORK_SESSION_ID: '' },
     });
@@ -189,7 +192,7 @@ describe('runReadLocalSession — resolution priority', () => {
 
   test('whitespace-only env var falls through to mtime', () => {
     const result = runReadLocalSession({
-      root,
+      source,
       args: {},
       env: { COWORK_SESSION_ID: '   ' },
     });
@@ -198,7 +201,7 @@ describe('runReadLocalSession — resolution priority', () => {
 
   test('empty-string session_id AND empty-string env → falls through to mtime', () => {
     const result = runReadLocalSession({
-      root,
+      source,
       args: { session_id: '' },
       env: { COWORK_SESSION_ID: '' },
     });
@@ -207,7 +210,7 @@ describe('runReadLocalSession — resolution priority', () => {
 
   test('whitespace-padded session_id arg resolves the trimmed real session', () => {
     const result = runReadLocalSession({
-      root,
+      source,
       args: { session_id: '  sess-A  ' },
       env: {},
     });
@@ -217,7 +220,7 @@ describe('runReadLocalSession — resolution priority', () => {
 
   test('whitespace-padded COWORK_SESSION_ID env resolves the trimmed real session', () => {
     const result = runReadLocalSession({
-      root,
+      source,
       args: {},
       env: { COWORK_SESSION_ID: '  sess-A  ' },
     });
@@ -239,11 +242,12 @@ describe('runReadLocalSession — error paths', () => {
     const root = path.join(tmp, 'root');
     fs.mkdirSync(root);
     makeSession(root, 'conv', 'real-session', { mtimeMs: 1_000_000 });
+    const source = new CoworkSource({ sessionsRoot: root });
 
     let thrown: unknown;
     try {
       runReadLocalSession({
-        root,
+        source,
         args: { session_id: 'bogus-id' },
         env: {},
       });
@@ -260,11 +264,12 @@ describe('runReadLocalSession — error paths', () => {
     const root = path.join(tmp, 'root');
     fs.mkdirSync(root);
     makeSession(root, 'conv', 'real-session', { mtimeMs: 1_000_000 });
+    const source = new CoworkSource({ sessionsRoot: root });
 
     let thrown: unknown;
     try {
       runReadLocalSession({
-        root,
+        source,
         args: {},
         env: { COWORK_SESSION_ID: 'ghost-id' },
       });
@@ -280,10 +285,11 @@ describe('runReadLocalSession — error paths', () => {
   test('no sessions at all → McpError(InvalidParams, "no Cowork session found")', () => {
     const root = path.join(tmp, 'root');
     fs.mkdirSync(root);
+    const source = new CoworkSource({ sessionsRoot: root });
 
     let thrown: unknown;
     try {
-      runReadLocalSession({ root, args: {}, env: {} });
+      runReadLocalSession({ source, args: {}, env: {} });
     } catch (err) {
       thrown = err;
     }
@@ -295,9 +301,11 @@ describe('runReadLocalSession — error paths', () => {
 
   test('root does not exist → McpError(InvalidParams, "no Cowork session found")', () => {
     const missing = path.join(tmp, 'does-not-exist');
+    const source = new CoworkSource({ sessionsRoot: missing });
+
     let thrown: unknown;
     try {
-      runReadLocalSession({ root: missing, args: {}, env: {} });
+      runReadLocalSession({ source, args: {}, env: {} });
     } catch (err) {
       thrown = err;
     }
@@ -313,10 +321,11 @@ describe('runReadLocalSession — error paths', () => {
       mtimeMs: 1_000_000,
       noTranscript: true,
     });
+    const source = new CoworkSource({ sessionsRoot: root });
 
     let thrown: unknown;
     try {
-      runReadLocalSession({ root, args: {}, env: {} });
+      runReadLocalSession({ source, args: {}, env: {} });
     } catch (err) {
       thrown = err;
     }
@@ -335,10 +344,11 @@ describe('runReadLocalSession — error paths', () => {
       mtimeMs: 1_000_000,
       noLocalSubdir: true,
     });
+    const source = new CoworkSource({ sessionsRoot: root });
 
     let thrown: unknown;
     try {
-      runReadLocalSession({ root, args: {}, env: {} });
+      runReadLocalSession({ source, args: {}, env: {} });
     } catch (err) {
       thrown = err;
     }
@@ -367,8 +377,9 @@ describe('runReadLocalSession — return shape', () => {
       uploads: ['u.txt'],
       outputs: ['o.json'],
     });
+    const source = new CoworkSource({ sessionsRoot: root });
 
-    const result = runReadLocalSession({ root, args: {}, env: {} });
+    const result = runReadLocalSession({ source, args: {}, env: {} });
     expect(Object.keys(result).sort()).toEqual([
       'conversation_id',
       'outputs',
@@ -386,8 +397,9 @@ describe('runReadLocalSession — return shape', () => {
       mtimeMs: 1_000_000,
       transcript: raw,
     });
+    const source = new CoworkSource({ sessionsRoot: root });
 
-    const result = runReadLocalSession({ root, args: {}, env: {} });
+    const result = runReadLocalSession({ source, args: {}, env: {} });
     expect(result.transcript).toBe(raw);
   });
 
@@ -400,7 +412,8 @@ describe('runReadLocalSession — return shape', () => {
       uploads: ['a.txt'],
       outputs: ['b.json'],
     });
-    const result = runReadLocalSession({ root, args: {}, env: {} });
+    const source = new CoworkSource({ sessionsRoot: root });
+    const result = runReadLocalSession({ source, args: {}, env: {} });
     const roundTripped = JSON.parse(JSON.stringify(result)) as ReadLocalSessionResult;
     expect(roundTripped).toEqual(result);
   });

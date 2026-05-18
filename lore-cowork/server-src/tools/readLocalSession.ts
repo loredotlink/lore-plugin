@@ -28,24 +28,18 @@
  *   - Other filesystem errors: `McpError(InternalError)`.
  *
  * Testability:
- *   `runReadLocalSession({ root, args, env })` is the pure core — tests
- *   pass a tmpdir-backed `root` and a controlled `env` object instead
- *   of mutating `process.env`. The production handler closes over
- *   `defaultSessionsRoot()` + `process.env` lazily.
+ *   `runReadLocalSession({ source, args, env })` is the pure core — tests
+ *   pass a `CoworkSource` backed by a tmpdir and a controlled `env`
+ *   object instead of mutating `process.env`. The production handler
+ *   creates a `SessionSource` via `detectSource()` lazily.
  */
 import {
   ErrorCode,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 
-import {
-  defaultSessionsRoot,
-  findLatestSession,
-  listSessions,
-  readSession,
-  type ListedSession,
-} from '../lib/session.js';
 import type { ToolDefinition } from '../lib/tool.js';
+import { detectSource, type SessionSource, type SessionSummary } from '../lib/session/index.js';
 
 export type ReadLocalSessionArgs = {
   session_id?: string;
@@ -77,58 +71,46 @@ function nonBlank(value: unknown): string | null {
  * match a real session, or when there are no sessions at all.
  */
 function resolveSession(
-  root: string,
+  source: SessionSource,
   args: ReadLocalSessionArgs,
   env: NodeJS.ProcessEnv,
-): ListedSession {
+): SessionSummary {
   const explicitArg = nonBlank(args.session_id);
   if (explicitArg !== null) {
-    const all = listSessions(root);
-    const match = all.find((s) => s.sessionId === explicitArg);
-    if (!match) {
+    try {
+      return source.findById(explicitArg);
+    } catch (err) {
       throw new McpError(
         ErrorCode.InvalidParams,
-        `session not found: ${explicitArg}`,
+        (err as Error).message,
       );
     }
-    return match;
   }
-
-  const envId = nonBlank(env.COWORK_SESSION_ID);
-  if (envId !== null) {
-    const all = listSessions(root);
-    const match = all.find((s) => s.sessionId === envId);
-    if (!match) {
-      throw new McpError(
-        ErrorCode.InvalidParams,
-        `session not found: ${envId}`,
-      );
-    }
-    return match;
+  try {
+    return source.resolveActive(env);
+  } catch (err) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      (err as Error).message,
+    );
   }
-
-  const latest = findLatestSession(root);
-  if (!latest) {
-    throw new McpError(ErrorCode.InvalidParams, 'no Cowork session found');
-  }
-  return latest;
 }
 
 /**
- * Pure core: given a sessions root, args, and env, resolve and read
+ * Pure core: given a SessionSource, args, and env, resolve and read
  * the target session. Used by the tool handler and exercised directly
  * by tests.
  */
 export function runReadLocalSession(opts: {
-  root: string;
+  source: SessionSource;
   args: ReadLocalSessionArgs;
   env: NodeJS.ProcessEnv;
 }): ReadLocalSessionResult {
-  const session = resolveSession(opts.root, opts.args, opts.env);
+  const session = resolveSession(opts.source, opts.args, opts.env);
 
-  let contents;
+  let payload;
   try {
-    contents = readSession(session.sessionDir);
+    payload = opts.source.readSession(session);
   } catch (err) {
     // Lib throws plain Error with actionable messages for the
     // structural cases (no `local_*` subdir, no transcript file).
@@ -154,11 +136,11 @@ export function runReadLocalSession(opts: {
   }
 
   return {
-    session_id: session.sessionId,
-    conversation_id: session.conversationId,
-    transcript: contents.transcript,
-    uploads: contents.uploads,
-    outputs: contents.outputs,
+    session_id: payload.sessionId,
+    conversation_id: payload.conversationId ?? '',
+    transcript: payload.transcript,
+    uploads: payload.uploads,
+    outputs: payload.outputs,
   };
 }
 
@@ -183,7 +165,7 @@ export const readLocalSessionTool: ToolDefinition = {
     // against `inputSchema`, so it's safe to narrow here.
     const typed = (args ?? {}) as ReadLocalSessionArgs;
     return runReadLocalSession({
-      root: defaultSessionsRoot(),
+      source: detectSource(),
       args: typed,
       env: process.env,
     });
