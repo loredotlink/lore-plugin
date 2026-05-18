@@ -28,14 +28,14 @@
  *     a number or snake_case string. No Date instances.
  *
  * Testability:
- *   The pure `runListLocalSessions(root)` is exported separately so
+ *   The pure `runListLocalSessions(source)` is exported separately so
  *   unit tests can exercise the mapping + ordering against tmpdir
- *   fixtures without monkey-patching `os.homedir()`. The exported
- *   `listLocalSessionsTool.handler` is the production wiring that
- *   calls `defaultSessionsRoot()` — it cannot be redirected, matching
- *   the "no env vars or arguments" constraint.
+ *   fixtures by injecting a `CoworkSource` with a custom `sessionsRoot`.
+ *   The exported `listLocalSessionsTool.handler` is the production wiring
+ *   that calls `detectSource()` — it cannot be redirected, matching the
+ *   "no env vars or arguments" constraint.
  */
-import { defaultSessionsRoot, listSessions } from '../lib/session.js';
+import { detectSource, type SessionSource } from '../lib/session/index.js';
 import type { ToolDefinition } from '../lib/tool.js';
 
 export type ListLocalSessionsResult = {
@@ -47,15 +47,15 @@ export type ListLocalSessionsResult = {
 };
 
 /**
- * Pure core: given a sessions root, return the mapped, newest-first
+ * Pure core: given a SessionSource, return the mapped, newest-first
  * listing. Used by the tool handler and exercised directly by tests.
  */
-export function runListLocalSessions(root: string): ListLocalSessionsResult {
-  const sessions = listSessions(root);
+export function runListLocalSessions(source: SessionSource): ListLocalSessionsResult {
+  const sessions = source.listSessions();
   return {
     sessions: sessions.map((s) => ({
       session_id: s.sessionId,
-      conversation_id: s.conversationId,
+      conversation_id: s.conversationId ?? '',
       mtime_ms: s.mtimeMs,
     })),
   };
@@ -74,6 +74,6 @@ export const listLocalSessionsTool: ToolDefinition = {
     additionalProperties: false,
   },
   handler: async (): Promise<ListLocalSessionsResult> => {
-    return runListLocalSessions(defaultSessionsRoot());
+    return runListLocalSessions(detectSource());
   },
 };

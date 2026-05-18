@@ -7,6 +7,7 @@ import {
   runListLocalSessions,
   type ListLocalSessionsResult,
 } from './listLocalSessions';
+import { CoworkSource } from '../lib/session/cowork.js';
 
 function makeTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'lore-cowork-list-test-'));
@@ -73,14 +74,16 @@ describe('runListLocalSessions — behavior', () => {
 
   test('returns { sessions: [] } when the root does not exist', () => {
     const missing = path.join(tmp, 'does-not-exist');
-    const result = runListLocalSessions(missing);
+    const source = new CoworkSource({ sessionsRoot: missing });
+    const result = runListLocalSessions(source);
     expect(result).toEqual({ sessions: [] });
   });
 
   test('returns { sessions: [] } when the root exists but is empty', () => {
     const root = path.join(tmp, 'empty-root');
     fs.mkdirSync(root);
-    expect(runListLocalSessions(root)).toEqual({ sessions: [] });
+    const source = new CoworkSource({ sessionsRoot: root });
+    expect(runListLocalSessions(source)).toEqual({ sessions: [] });
   });
 
   test('returns sessions newest-first, mapped to snake_case keys', () => {
@@ -90,7 +93,8 @@ describe('runListLocalSessions — behavior', () => {
     makeSession(root, 'convB', 'sess-mid', 2_000_000);
     makeSession(root, 'convA', 'sess-new', 3_000_000);
 
-    const result = runListLocalSessions(root);
+    const source = new CoworkSource({ sessionsRoot: root });
+    const result = runListLocalSessions(source);
     expect(result.sessions).toHaveLength(3);
     expect(result.sessions[0]).toEqual({
       session_id: 'sess-new',
@@ -114,7 +118,8 @@ describe('runListLocalSessions — behavior', () => {
     fs.mkdirSync(root);
     makeSession(root, 'conv', 'sess', 1_000_000);
 
-    const result = runListLocalSessions(root);
+    const source = new CoworkSource({ sessionsRoot: root });
+    const result = runListLocalSessions(source);
     const roundTripped = JSON.parse(JSON.stringify(result)) as ListLocalSessionsResult;
     expect(roundTripped).toEqual(result);
     // mtime_ms must be a number, not a serialized Date.
@@ -126,7 +131,8 @@ describe('runListLocalSessions — behavior', () => {
     fs.mkdirSync(root);
     makeSession(root, 'conv', 'sess', 1_000_000);
 
-    const result = runListLocalSessions(root);
+    const source = new CoworkSource({ sessionsRoot: root });
+    const result = runListLocalSessions(source);
     expect(Object.keys(result.sessions[0]).sort()).toEqual([
       'conversation_id',
       'mtime_ms',
