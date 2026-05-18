@@ -6,12 +6,14 @@ import {
   runShareSession,
   shareSessionFromDisk,
   shareSessionTool,
+  WATCHER_TIP,
 } from './share_session';
 import { AuthRequiredError, AUTH_REQUIRED_MESSAGE } from '../lib/errors';
 import { writeTokens, readTokens, type Tokens } from '../lib/auth/store';
 import { __resetCloudBaseUrlForTests } from '../lib/cloudBaseUrl';
 import { __resetInFlightForTests } from '../lib/auth/refresh';
 import { CoworkSource } from '../lib/session/cowork';
+import { writePluginState, readPluginState } from '../lib/pluginState';
 
 function makeTmpHome(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'share-session-test-'));
@@ -229,7 +231,10 @@ describe('shareSessionFromDisk', () => {
       { fetchImpl, home, source, env: {} },
     );
 
-    expect(result).toEqual(expected);
+    // Use toMatchObject so the optional _tip field (from watcher-soft-prompt)
+    // does not break this test — the transcript-routing behavior is the
+    // focus here.
+    expect(result).toMatchObject(expected);
     // The transcript bytes were read locally and piped straight to
     // the cloud — they appear in the outbound RPC, never in the
     // function's return value.
@@ -358,5 +363,102 @@ describe('shareSessionFromDisk', () => {
       content: [{ type: 'text', text: AUTH_REQUIRED_MESSAGE }],
     });
     expect(calls.length).toBe(0);
+  });
+
+  // ── Watcher soft-prompt tests ─────────────────────────────────────────────
+
+  function makeSuccessFetch(): ReturnType<typeof captureFetch> {
+    return captureFetch((req) =>
+      rpcSuccess(req.body.id, { thread_id: 't_tip', thread_url: 'https://lore/t_tip' }),
+    );
+  }
+
+  test('watcher tip is appended on the first share (share_count=0)', async () => {
+    await writeTokens(validTokens(), home);
+    stageSession('transcript-a');
+    const { fetchImpl } = makeSuccessFetch();
+    const result = await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
+    expect(result).toMatchObject({ thread_id: 't_tip', thread_url: 'https://lore/t_tip' });
+    expect((result as Record<string, unknown>)._tip).toBe(WATCHER_TIP);
+  });
+
+  test('watcher tip is appended on the second share (share_count=1)', async () => {
+    await writeTokens(validTokens(), home);
+    await writePluginState({ share_count: 1, watcher_prompt_dismissed: false }, home);
+    stageSession('transcript-b');
+    const { fetchImpl } = makeSuccessFetch();
+    const result = await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
+    expect((result as Record<string, unknown>)._tip).toBe(WATCHER_TIP);
+  });
+
+  test('watcher tip is appended on the third share (share_count=2)', async () => {
+    await writeTokens(validTokens(), home);
+    await writePluginState({ share_count: 2, watcher_prompt_dismissed: false }, home);
+    stageSession('transcript-c');
+    const { fetchImpl } = makeSuccessFetch();
+    const result = await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
+    expect((result as Record<string, unknown>)._tip).toBe(WATCHER_TIP);
+  });
+
+  test('watcher tip is suppressed on the fourth share (share_count=3)', async () => {
+    await writeTokens(validTokens(), home);
+    await writePluginState({ share_count: 3, watcher_prompt_dismissed: false }, home);
+    stageSession('transcript-d');
+    const { fetchImpl } = makeSuccessFetch();
+    const result = await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
+    expect((result as Record<string, unknown>)._tip).toBeUndefined();
+  });
+
+  test('watcher tip is suppressed when watcher_prompt_dismissed=true', async () => {
+    await writeTokens(validTokens(), home);
+    await writePluginState({ share_count: 0, watcher_prompt_dismissed: true }, home);
+    stageSession('transcript-e');
+    const { fetchImpl } = makeSuccessFetch();
+    const result = await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
+    expect((result as Record<string, unknown>)._tip).toBeUndefined();
+  });
+
+  test('share_count increments on every successful share, including when tip is suppressed', async () => {
+    await writeTokens(validTokens(), home);
+    await writePluginState({ share_count: 3, watcher_prompt_dismissed: false }, home);
+    stageSession('transcript-f');
+    const { fetchImpl } = makeSuccessFetch();
+    await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
+    const state = await readPluginState(home);
+    expect(state.share_count).toBe(4);
+  });
+
+  test('share_count increments on every successful share, including when tip shows', async () => {
+    await writeTokens(validTokens(), home);
+    stageSession('transcript-g'); // share_count starts at 0
+    const { fetchImpl } = makeSuccessFetch();
+    await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
+    const state = await readPluginState(home);
+    expect(state.share_count).toBe(1);
+  });
+
+  test('plugin state I/O error does not fail the share', async () => {
+    await writeTokens(validTokens(), home);
+    // Write a malformed state file so readPluginState throws.
+    const p = require('../lib/pluginState').pluginStateFilePath(home);
+    const parent = require('node:path').dirname(p);
+    require('node:fs').mkdirSync(parent, { recursive: true });
+    require('node:fs').writeFileSync(p, 'not-json');
+
+    stageSession('transcript-h');
+    const { fetchImpl } = makeSuccessFetch();
+    // Should not throw; should still return the cloud result.
+    const result = await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
+    expect(result).toMatchObject({ thread_id: 't_tip', thread_url: 'https://lore/t_tip' });
+  });
+
+  test('auth-required result does not increment share_count', async () => {
+    // No tokens: share fails with auth-required, plugin state must not change.
+    stageSession('transcript-i');
+    const { fetchImpl } = makeSuccessFetch();
+    await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
+    // File should not have been created (still at defaults).
+    const state = await readPluginState(home);
+    expect(state.share_count).toBe(0);
   });
 });

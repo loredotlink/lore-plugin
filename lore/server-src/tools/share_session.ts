@@ -42,6 +42,14 @@ import { callCloudTool } from '../lib/cloudCall.js';
 import { AuthRequiredError, authRequiredToMcpError } from '../lib/errors.js';
 import { detectSource, type SessionSource } from '../lib/session/index.js';
 import { runReadLocalSession } from './readLocalSession.js';
+import {
+  readPluginState,
+  writePluginState,
+  shouldShowWatcherTip,
+} from '../lib/pluginState.js';
+
+export const WATCHER_TIP =
+  'Tip: install `@tanagram/lore` (`npm i -g @tanagram/lore`) to auto-share new sessions in the background. Run `lore watch --help` to learn more.';
 
 export type ShareSessionResult = {
   thread_id: string;
@@ -113,10 +121,52 @@ export async function shareSessionFromDisk(
     args: { session_id: args.session_id },
     env,
   });
-  return runShareSession(
+  const result = await runShareSession(
     { transcript: session.transcript },
     { fetchImpl: opts.fetchImpl, home: opts.home },
   );
+
+  // If the share failed (auth-required shape), skip state mutation.
+  if (
+    result !== null &&
+    typeof result === 'object' &&
+    (result as Record<string, unknown>).isError === true
+  ) {
+    return result;
+  }
+
+  // Read state, compute tip visibility, write incremented state.
+  // Errors here must NOT fail the share — log to stderr and move on.
+  let tipText: string | null = null;
+  try {
+    const state = await readPluginState(opts.home);
+    const showTip = shouldShowWatcherTip(state);
+    await writePluginState({ ...state, share_count: state.share_count + 1 }, opts.home);
+    if (showTip) {
+      tipText = WATCHER_TIP;
+    }
+  } catch (err) {
+    console.error('[lore-plugin] warning: failed to update plugin state:', (err as Error).message);
+  }
+
+  if (tipText === null) {
+    return result;
+  }
+
+  // Append tip to content array if result is MCP content shape, otherwise
+  // wrap both in a combined object.
+  if (
+    result !== null &&
+    typeof result === 'object' &&
+    Array.isArray((result as Record<string, unknown>).content)
+  ) {
+    const r = result as { content: unknown[] };
+    return { ...r, content: [...r.content, { type: 'text', text: tipText }] };
+  }
+
+  // Result is a plain object (e.g. {thread_id, thread_url}); attach tip
+  // as a separate property so the caller still gets the structured data.
+  return { ...(result as object), _tip: tipText };
 }
 
 export const shareSessionTool: ToolDefinition = {
