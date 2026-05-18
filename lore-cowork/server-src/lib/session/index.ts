@@ -70,16 +70,15 @@ export function nonBlank(value: unknown): string | null {
   return trimmed === '' ? null : trimmed;
 }
 
+import { ClaudeCodeSource } from './claudeCode.js';
 import { CoworkSource } from './cowork.js';
 
 /**
- * Choose the right SessionSource for the current runtime. Phase 1
- * always returns `CoworkSource`; Phase 2 adds a `ClaudeCodeSource`
- * branch when `CLAUDE_SESSION_ID` is set.
+ * Choose the right SessionSource for the current runtime.
+ * Returns `ClaudeCodeSource` when `CLAUDE_SESSION_ID` is set,
+ * otherwise falls back to `CoworkSource`.
  */
 export function detectSource(env: NodeJS.ProcessEnv = process.env): SessionSource {
-  // Phase 2 will add:
-  //   if (nonBlank(env.CLAUDE_SESSION_ID)) return new ClaudeCodeSource(...);
-  void env;
+  if (nonBlank(env.CLAUDE_SESSION_ID) !== null) return new ClaudeCodeSource();
   return new CoworkSource();
 }
