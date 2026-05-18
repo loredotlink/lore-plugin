@@ -59,3 +59,17 @@ export interface SessionSource {
   /** Read transcript bytes + artifact filenames for the given session. */
   readSession(session: SessionSummary): SessionPayload;
 }
+
+import { CoworkSource } from './cowork.js';
+
+/**
+ * Choose the right SessionSource for the current runtime. Phase 1
+ * always returns `CoworkSource`; Phase 2 adds a `ClaudeCodeSource`
+ * branch when `CLAUDE_SESSION_ID` is set.
+ */
+export function detectSource(env: NodeJS.ProcessEnv = process.env): SessionSource {
+  // Phase 2 will add:
+  //   if (nonBlank(env.CLAUDE_SESSION_ID)) return new ClaudeCodeSource(...);
+  void env;
+  return new CoworkSource();
+}
