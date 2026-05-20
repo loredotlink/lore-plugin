@@ -242,6 +242,8 @@ describe('shareSessionFromDisk', () => {
     expect(calls[0]!.body.params.name).toBe('share_session');
     expect(calls[0]!.body.params.arguments).toEqual({
       transcript: transcriptBytes,
+      uploads: [],
+      outputs: [],
       harness: 'cowork',
     });
   });

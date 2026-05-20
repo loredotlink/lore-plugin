@@ -1,6 +1,6 @@
 {
   "name": "lore",
-  "description": "Share your Claude Code session to Lore and read threads back.",
+  "description": "Share Claude Code and Cowork sessions to Lore and read threads back.",
   "version": "1.0.0",
   "author": {
     "name": "Tanagram",

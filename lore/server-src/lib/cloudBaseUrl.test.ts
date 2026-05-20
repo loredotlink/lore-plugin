@@ -1,7 +1,12 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { cloudBaseUrl, __resetCloudBaseUrlForTests } from './cloudBaseUrl';
+import {
+  cloudBaseUrl,
+  cloudMcpBaseUrl,
+  __resetCloudBaseUrlForTests,
+} from './cloudBaseUrl';
 
 const ENV_KEY = 'LORE_MCP_BASE_URL';
+const MCP_ENV_KEY = 'LORE_MCP_PROXY_BASE_URL';
 const PROD_DEFAULT = 'https://mcp.lore.tanagram.ai';
 
 describe('cloudBaseUrl', () => {
@@ -10,6 +15,7 @@ describe('cloudBaseUrl', () => {
   beforeEach(() => {
     saved = process.env[ENV_KEY];
     delete process.env[ENV_KEY];
+    delete process.env[MCP_ENV_KEY];
     __resetCloudBaseUrlForTests();
   });
 
@@ -19,6 +25,7 @@ describe('cloudBaseUrl', () => {
     } else {
       process.env[ENV_KEY] = saved;
     }
+    delete process.env[MCP_ENV_KEY];
     __resetCloudBaseUrlForTests();
   });
 
@@ -80,5 +87,24 @@ describe('cloudBaseUrl', () => {
     process.env[ENV_KEY] = 'https://staging.example.com:8443';
     __resetCloudBaseUrlForTests();
     expect(cloudBaseUrl()).toBe('https://staging.example.com:8443');
+  });
+
+  test('cloudMcpBaseUrl defaults to the auth/discovery base URL', () => {
+    process.env[ENV_KEY] = 'https://staging.example.com';
+    __resetCloudBaseUrlForTests();
+    expect(cloudMcpBaseUrl()).toBe('https://staging.example.com');
+  });
+
+  test('cloudMcpBaseUrl can point proxy calls at localhost without changing auth discovery', () => {
+    process.env[MCP_ENV_KEY] = 'http://localhost:4000';
+    __resetCloudBaseUrlForTests();
+    expect(cloudBaseUrl()).toBe(PROD_DEFAULT);
+    expect(cloudMcpBaseUrl()).toBe('http://localhost:4000');
+  });
+
+  test('cloudMcpBaseUrl strips trailing slashes from its override', () => {
+    process.env[MCP_ENV_KEY] = 'http://localhost:4000///';
+    __resetCloudBaseUrlForTests();
+    expect(cloudMcpBaseUrl()).toBe('http://localhost:4000');
   });
 });

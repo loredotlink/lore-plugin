@@ -70,10 +70,13 @@ const REFRESH_SKEW_MS = 30_000;
 /**
  * Schema for the cloud's successful refresh response.
  *
- * All five fields are required. `expires_in` must be a positive integer
- * (seconds) — a float here usually means someone confused seconds with
- * milliseconds upstream, and we'd rather fail loud than silently
+ * Token strings, token type, and `expires_in` are required. `expires_in` must be
+ * a positive integer (seconds) — a float here usually means someone confused
+ * seconds with milliseconds upstream, and we'd rather fail loud than silently
  * truncate to a window that expires in the past.
+ *
+ * `scope` is optional because WorkOS AuthKit does not echo it in token responses.
+ * When omitted, we preserve the scope already stored on disk.
  *
  * We intentionally do NOT model server-provided `expires_at` even if
  * one appears: the plugin computes its own from `now() + expires_in *
@@ -84,7 +87,7 @@ const RefreshResponseSchema = z.object({
   refresh_token: z.string().min(1),
   expires_in: z.number().int().positive(),
   token_type: z.string().min(1),
-  scope: z.string(),
+  scope: z.string().optional(),
 });
 
 type RefreshResponse = z.infer<typeof RefreshResponseSchema>;
@@ -233,7 +236,7 @@ async function refreshAndPersist(
     refresh_token: fresh.refresh_token,
     // Compute locally — never trust a server-supplied expires_at.
     expires_at: nowFn() + fresh.expires_in * 1000,
-    scope: fresh.scope,
+    scope: fresh.scope ?? current.scope,
   };
   await writeTokens(updated, home);
   return updated.access_token;

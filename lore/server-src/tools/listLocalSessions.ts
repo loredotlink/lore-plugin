@@ -1,7 +1,7 @@
 /**
  * MCP tool: `list_local_sessions`.
  *
- * Enumerates every Cowork session under the default sessions root,
+ * Enumerates every session under the detected sessions root,
  * sorted newest-first by directory mtime. Returns an empty array when
  * the root doesn't exist — matches the underlying `listSessions` lib
  * behavior so the agent can browse a fresh machine without seeing a
@@ -30,7 +30,7 @@
  * Testability:
  *   The pure `runListLocalSessions(source)` is exported separately so
  *   unit tests can exercise the mapping + ordering against tmpdir
- *   fixtures by injecting a `CoworkSource` with a custom `sessionsRoot`.
+ *   fixtures by injecting a `SessionSource` with a custom root.
  *   The exported `listLocalSessionsTool.handler` is the production wiring
  *   that calls `detectSource()` — it cannot be redirected, matching the
  *   "no env vars or arguments" constraint.
@@ -64,7 +64,7 @@ export function runListLocalSessions(source: SessionSource): ListLocalSessionsRe
 export const listLocalSessionsTool: ToolDefinition = {
   name: 'list_local_sessions',
   description:
-    'List local Cowork sessions on this machine, newest-first by mtime. ' +
+    'List local sessions on this machine, newest-first by mtime. ' +
     'Use this only when the user explicitly asks to browse or pick a ' +
     'session other than the current one — the default share flow does ' +
     'not need this tool. Returns an empty list when no sessions exist.',

@@ -47,9 +47,9 @@ import { z } from 'zod';
  *   - `expires_at` is epoch milliseconds (not seconds, not ISO). It must
  *     be an integer; floats are a sign someone confused ms with seconds
  *     (or vice versa) and we'd rather fail loud than silently truncate.
- *   - `scope` is the raw space-separated string returned by the OAuth
- *     server. We don't split it here — the refresh path passes it
- *     through verbatim on a re-auth request.
+ *   - `scope` is the space-separated scope string associated with the token.
+ *     AuthKit may omit `scope` from token responses, so callers may persist the
+ *     requested scope string instead of a server-echoed value.
  */
 export const TokensSchema = z.object({
   access_token: z.string(),

@@ -13,14 +13,13 @@
  *   tool-result limits on long sessions and triggered subagent
  *   fallback. The handler now resolves the session locally (same
  *   priority order as `read_local_session`: explicit `session_id` →
- *   `COWORK_SESSION_ID` → newest-by-mtime), reads the transcript from
- *   disk, and pipes it straight to the cloud. The agent only sees
- *   `{thread_id, thread_url}` come back.
+ *   `CLAUDE_SESSION_ID` / `COWORK_SESSION_ID` → newest-by-mtime),
+ *   reads the transcript from disk, and pipes it straight to the cloud.
+ *   The agent only sees `{thread_id, thread_url}` come back.
  *
  * Local plumbing:
- *   - Always merges `harness: 'cowork'` into the args passed cloud-side
- *     so the cloud aggregator records this thread under the "cowork"
- *     harness regardless of what the agent sends. The merge order
+ *   - Merges `harness` into the args passed cloud-side, derived from
+ *     the detected runtime ('claude-code' or 'cowork'). The merge order
  *     deliberately puts the plugin's `harness` last, so even if a
  *     future schema change opened up an agent-controlled `harness`
  *     field, the plugin value wins.
@@ -61,6 +60,16 @@ export type ShareSessionArgs = {
 };
 
 /**
+ * Map `SessionSource.runtime` values to the harness strings the Lore
+ * cloud API accepts. The API uses camelCase (`claudeCode`) while the
+ * internal runtime type uses kebab-case (`claude-code`).
+ */
+const RUNTIME_TO_HARNESS: Record<string, string> = {
+  'claude-code': 'claudeCode',
+  cowork: 'cowork',
+};
+
+/**
  * Pure cloud-call core: invoke `callCloudTool` with the harness
  * merged in. Exported for tests so they can verify the merge order
  * and result round-trip without mocking module-level globals or
@@ -68,15 +77,16 @@ export type ShareSessionArgs = {
  */
 export async function runShareSession(
   args: Record<string, unknown>,
-  opts: { fetchImpl?: typeof fetch; home?: string } = {},
+  opts: { fetchImpl?: typeof fetch; home?: string; harness?: string } = {},
 ): Promise<unknown> {
   try {
+    const harness = opts.harness ?? 'cowork';
     // Plugin-controlled `harness` is spread LAST so it overrides any
     // (currently impossible, but defense-in-depth) caller-supplied
     // value. See module docstring.
     return await callCloudTool<ShareSessionResult>(
       'share_session',
-      { ...args, harness: 'cowork' },
+      { ...args, harness },
       opts,
     );
   } catch (err) {
@@ -88,8 +98,8 @@ export async function runShareSession(
 }
 
 /**
- * Handler orchestration: resolve the target Cowork session on the
- * local filesystem, read its transcript, and forward to the cloud
+ * Handler orchestration: resolve the target session on the local
+ * filesystem (Claude Code or Cowork), read its transcript, and forward to the cloud
  * `share_session` tool. The resolved transcript never appears in the
  * agent's tool-result stream — only the final `{thread_id, thread_url}`
  * (or auth-required shape) does.
@@ -122,8 +132,12 @@ export async function shareSessionFromDisk(
     env,
   });
   const result = await runShareSession(
-    { transcript: session.transcript },
-    { fetchImpl: opts.fetchImpl, home: opts.home },
+    {
+      transcript: session.transcript,
+      uploads: session.uploads,
+      outputs: session.outputs,
+    },
+    { fetchImpl: opts.fetchImpl, home: opts.home, harness: RUNTIME_TO_HARNESS[source.runtime] ?? source.runtime },
   );
 
   // If the share failed (auth-required shape), skip state mutation.
@@ -172,15 +186,14 @@ export async function shareSessionFromDisk(
 export const shareSessionTool: ToolDefinition = {
   name: 'share_session',
   description:
-    "Share the current Cowork session to Lore. With no arguments, " +
-    "resolves to the newest local session by mtime (or, if set, the " +
-    "session named by the COWORK_SESSION_ID env var). Pass " +
-    "`session_id` to share a specific older session — typically one " +
-    "surfaced by `list_local_sessions`. Requires authentication via " +
-    "lore_login on first use. Returns {thread_id, thread_url}. " +
-    "Always called with harness 'cowork' on this plugin (set " +
-    "automatically). The plugin reads the transcript off disk " +
-    "itself; the agent does not need to fetch it first.",
+    "Share the current session to Lore. Auto-detects Claude Code " +
+    "(via CLAUDE_SESSION_ID) or Cowork (via COWORK_SESSION_ID) and " +
+    "resolves the right transcript on disk. With no arguments, " +
+    "shares the active session; pass `session_id` to share a " +
+    "specific older one (typically surfaced by `list_local_sessions`). " +
+    "Requires authentication via lore_login on first use. Returns " +
+    "{thread_id, thread_url}. The plugin reads the transcript off " +
+    "disk itself; the agent does not need to fetch it first.",
   inputSchema: {
     type: 'object',
     properties: {

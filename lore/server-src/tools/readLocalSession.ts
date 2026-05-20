@@ -21,7 +21,7 @@
  *   - Specified session id not found (via arg or env): `McpError(InvalidParams)`
  *     with message `session not found: <id>`.
  *   - No sessions at all (no arg, no env, mtime resolution returns null):
- *     `McpError(InvalidParams, "no Cowork session found")`.
+ *     `McpError(InvalidParams, "no session found")`.
  *   - Lib-level errors from `readSession` (missing `local_*` subdir,
  *     missing transcript): `McpError(InvalidParams)` with the lib's
  *     message preserved so the agent can relay an actionable hint.
@@ -29,7 +29,7 @@
  *
  * Testability:
  *   `runReadLocalSession({ source, args, env })` is the pure core — tests
- *   pass a `CoworkSource` backed by a tmpdir and a controlled `env`
+ *   pass a `SessionSource` backed by a tmpdir and a controlled `env`
  *   object instead of mutating `process.env`. The production handler
  *   creates a `SessionSource` via `detectSource()` lazily.
  */
@@ -147,12 +147,12 @@ export function runReadLocalSession(opts: {
 export const readLocalSessionTool: ToolDefinition = {
   name: 'read_local_session',
   description:
-    'Read a local Cowork session and return its transcript bytes plus ' +
-    'the basenames of any uploaded inputs and generated outputs. With ' +
-    'no arguments, resolves to the newest session by mtime (or, if set, ' +
-    'the session named by the COWORK_SESSION_ID env var). Pass ' +
-    '`session_id` explicitly to pick a specific session — typically a ' +
-    'session_id surfaced by `list_local_sessions`.',
+    'Read a local session and return its transcript bytes plus ' +
+    'the basenames of any uploaded inputs and generated outputs. ' +
+    'Auto-detects Claude Code (CLAUDE_SESSION_ID) or Cowork ' +
+    '(COWORK_SESSION_ID). With no arguments, resolves to the active ' +
+    'session. Pass `session_id` explicitly to pick a specific ' +
+    'session — typically one surfaced by `list_local_sessions`.',
   inputSchema: {
     type: 'object',
     properties: {

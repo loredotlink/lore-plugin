@@ -100,12 +100,12 @@ describe('callCloudTool', () => {
   beforeEach(() => {
     home = makeTmpHome();
     __resetInFlightForTests();
-    process.env.LORE_MCP_BASE_URL = 'http://localhost:4000';
+    process.env.LORE_MCP_PROXY_BASE_URL = 'http://localhost:4000';
     __resetCloudBaseUrlForTests();
   });
   afterEach(() => {
     rmrf(home);
-    delete process.env.LORE_MCP_BASE_URL;
+    delete process.env.LORE_MCP_PROXY_BASE_URL;
     __resetCloudBaseUrlForTests();
     __resetInFlightForTests();
   });

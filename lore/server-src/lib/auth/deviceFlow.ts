@@ -108,16 +108,20 @@ const DeviceCodeResponseSchema = z.object({
 /**
  * Schema for the token endpoint's successful response during device-code polling.
  *
- * Matches `RefreshResponseSchema` in `lib/auth/refresh.ts` exactly: all five fields
- * required, `expires_in` is a positive integer. Any server-supplied `expires_at`
- * is ignored; we compute our own from the local clock.
+ * Matches `RefreshResponseSchema` in `lib/auth/refresh.ts`: token strings,
+ * token type, and `expires_in` are required, with `expires_in` as a positive
+ * integer. `scope` is optional because WorkOS AuthKit does not echo it in token
+ * responses even when it was requested in the device-code request.
+ *
+ * Any server-supplied `expires_at` is ignored; we compute our own from the local
+ * clock.
  */
 const TokenResponseSchema = z.object({
   access_token: z.string().min(1),
   refresh_token: z.string().min(1),
   expires_in: z.number().int().positive(),
   token_type: z.string().min(1),
-  scope: z.string(),
+  scope: z.string().optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -147,10 +151,11 @@ function defaultSleep(ms: number): Promise<void> {
  * Posts to `deviceAuthorizationEndpoint` with:
  *   - `client_id`  = AUTHKIT_CLIENT_ID
  *   - `scope`      = AUTHKIT_SCOPES ("openid email profile offline_access")
- *   - `audience`   = discovered audience from PRM (the resource server's identifier)
+ *   - `resource`   = discovered audience from PRM (the resource server's identifier)
  *
- * The `audience` parameter is required by WorkOS AuthKit for device-code
- * requests; without it the token would not be scoped to the correct resource.
+ * The `resource` parameter is required by WorkOS AuthKit's RFC 8707 resource
+ * indicator support for device-code requests; without it the token would not
+ * be scoped to the correct resource server audience.
  *
  * Validates the response with Zod; throws on any HTTP error or schema mismatch.
  * The error message deliberately excludes the response body — it may contain
@@ -166,7 +171,7 @@ export async function initiateDeviceCode(opts?: {
   const fetchFn = opts?.fetchImpl ?? fetch;
   const home = opts?.home;
 
-  const { deviceAuthorizationEndpoint, audience } = await discoverEndpoints({
+  const { deviceAuthorizationEndpoint, audience: resource } = await discoverEndpoints({
     fetchImpl: fetchFn,
     home,
   });
@@ -174,7 +179,7 @@ export async function initiateDeviceCode(opts?: {
   const body = new URLSearchParams({
     client_id: AUTHKIT_CLIENT_ID,
     scope: AUTHKIT_SCOPES,
-    audience,
+    resource,
   }).toString();
 
   const res = await fetchFn(deviceAuthorizationEndpoint, {
@@ -239,7 +244,7 @@ export async function initiateDeviceCode(opts?: {
  *               The cap protects against a misbehaving server pinning the agent.
  *
  * On success:
- *   - Validates the token response with Zod (same strictness as `lib/auth/refresh.ts`).
+ *   - Validates the token response with Zod (same contract as `lib/auth/refresh.ts`).
  *   - Computes `expires_at = now() + expires_in * 1000` from the local clock.
  *   - Persists tokens via `writeTokens` from `lib/auth/store.ts`.
  *   - Returns `{ ok: true }`.

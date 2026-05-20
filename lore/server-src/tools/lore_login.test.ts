@@ -198,7 +198,8 @@ describe('runLoreLogin', () => {
     const deviceParams = new URLSearchParams(deviceCall?.body ?? '');
     expect(deviceParams.get('client_id')).toBe(AUTHKIT_CLIENT_ID);
     expect(deviceParams.get('scope')).toBe(AUTHKIT_SCOPES);
-    expect(deviceParams.get('audience')).toBe(TEST_RESOURCE);
+    expect(deviceParams.get('resource')).toBe(TEST_RESOURCE);
+    expect(deviceParams.has('audience')).toBe(false);
     // Poll POST shape.
     const pollCall = calls.find((c) => c.url === TEST_TOKEN_ENDPOINT);
     expect(pollCall).toBeDefined();
@@ -238,6 +239,30 @@ describe('runLoreLogin', () => {
     expect(serialized).not.toContain('dev-CODE');
     expect(serialized).not.toContain('access-NEW');
     expect(serialized).not.toContain('refresh-NEW');
+  });
+
+  test('token response may omit scope and still authenticates for subsequent tools', async () => {
+    const now = () => 1_700_000_000_000;
+    const { scope: _scope, ...tokenBodyWithoutScope } = tokenPairBody();
+    const { fetchImpl } = makeFetch([
+      { url: TEST_DEVICE_ENDPOINT, res: jsonResponse(deviceCodeBody()) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse(tokenBodyWithoutScope) },
+    ]);
+    const { sleep } = makeSleep();
+
+    const result = await runLoreLogin({
+      fetchImpl,
+      spawnImpl: () => ({ status: 0 }),
+      now,
+      sleep,
+      home,
+    });
+
+    expect(result).toEqual({ ok: true });
+    const persisted = await readTokens(home);
+    expect(persisted?.access_token).toBe('access-NEW');
+    expect(persisted?.refresh_token).toBe('refresh-NEW');
+    expect(persisted?.scope).toBe(AUTHKIT_SCOPES);
   });
 
   test('browser open fails (exit 1): returns browser_open_failed, no polling, no tokens written', async () => {

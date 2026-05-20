@@ -4,18 +4,43 @@
  * These are public values — not secrets — and are safe to commit to source.
  * Per RFC 8252 §8.4, native OAuth clients (including CLI/MCP plugins) are
  * "public clients": the client_id is not a credential and its exposure to
- * end users is expected and intentional. WorkOS AuthKit enforces PKCE and
- * device-flow constraints on the client registration rather than relying on
- * a secret.
+ * end users is expected and intentional.
  */
 
 /**
- * WorkOS AuthKit client id registered for this plugin.
+ * WorkOS AuthKit client id for this plugin.
  *
  * Used in every OAuth token request — device-code polling, refresh — as the
- * `client_id` form parameter. This is a public OAuth client id (per
- * RFC 8252 §8.4): it is registered in WorkOS AuthKit, safe to commit to
- * source, and not a credential.
+ * `client_id` form parameter. This is a WorkOS Connect public application
+ * configured for CLI Auth / RFC 8628 device authorization. It is public,
+ * stable, safe to commit, and not a credential.
+ *
+ * Why static, not the CIMD URL:
+ *   The CIMD URL (https://lore.tanagram.ai/.well-known/oauth-client.json)
+ *   IS hosted and WorkOS Connect HAS CIMD enabled — but WorkOS's CIMD
+ *   support is scoped to the Authorization Code + PKCE flow, not the
+ *   device authorization grant. The AS metadata at
+ *   /.well-known/oauth-authorization-server lists grant_types_supported
+ *   as ['authorization_code', 'refresh_token'] only; the device grant
+ *   lives on a separate endpoint and ignores CIMD lookups, returning
+ *   `{error: "unauthorized"}` when given a CIMD URL as client_id.
+ *
+ *   This plugin must use the device flow because the auth-code +
+ *   loopback redirect pattern can't survive remote Cowork sessions
+ *   (browser callback can't reach a plugin-bound localhost listener
+ *   across the local↔remote network gap). So the static client_id is
+ *   the only client identity WorkOS device-auth accepts today.
+ *
+ *   The downstream consequence — WorkOS stamps the AuthKit app's own
+ *   client_id as the JWT `aud` instead of the requested resource
+ *   indicator — is handled by the `/mcp` resource server accepting
+ *   both audience values. See apps/api/src/authProviders/workosMcp.ts.
+ *
+ *   When either (a) Cowork fixes streamable-http OAuth state
+ *   persistence (re-enabling the spec-compliant auth-code path) or
+ *   (b) WorkOS extends CIMD + resource indicators to device flow,
+ *   this constant can switch to the CIMD URL and the audience-fallback
+ *   in workosMcp.ts can be removed.
  */
 export const AUTHKIT_CLIENT_ID = 'client_01KRSDB9SR20N7MB0D9MPS05Q6';
 

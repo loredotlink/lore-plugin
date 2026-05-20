@@ -283,7 +283,7 @@ describe('getValidAccessToken', () => {
     expect(params.get('client_id')).toBe(AUTHKIT_CLIENT_ID);
   });
 
-  test('client_id in the POST body is AUTHKIT_CLIENT_ID (new value, not legacy)', async () => {
+  test('client_id in the POST body is the registered WorkOS public CLI client', async () => {
     await writeTokens(expiredTokens(), home);
     let capturedBody: string | undefined;
     const fetchImpl = makeFullRoutingFetch({
@@ -295,7 +295,11 @@ describe('getValidAccessToken', () => {
     await getValidAccessToken({ now, fetchImpl, home });
     const params = new URLSearchParams(capturedBody);
     expect(params.get('client_id')).toBe('client_01KRSDB9SR20N7MB0D9MPS05Q6');
-    // Explicitly verify it is NOT the legacy value.
+    expect(params.get('client_id')).toBe(AUTHKIT_CLIENT_ID);
+    // WorkOS CLI Auth device flow is configured for this public client id;
+    // it is intentionally public and safe to commit per RFC 8252 §8.4.
+    expect(params.get('client_id')).toMatch(/^client_/);
+    // Explicitly verify it is NOT the legacy pre-AuthKit client id.
     expect(params.get('client_id')).not.toBe('lore-cowork-plugin');
   });
 
@@ -312,6 +316,25 @@ describe('getValidAccessToken', () => {
       refresh_token: 'refresh-NEW',
       expires_at: FIXED_NOW + 600 * 1000,
       scope: 'mcp.read mcp.write',
+    });
+  });
+
+  test('successful refresh may omit scope and preserves the existing stored scope', async () => {
+    await writeTokens(expiredTokens({ scope: 'openid email profile offline_access' }), home);
+    const { scope: _scope, ...refreshBodyWithoutScope } = successRefreshBody({ expires_in: 600 });
+    const fetchImpl = makeFullRoutingFetch({
+      tokenResponse: () => jsonResponse(refreshBodyWithoutScope),
+    });
+
+    const got = await getValidAccessToken({ now, fetchImpl, home });
+
+    expect(got).toBe('access-NEW');
+    const persisted = await readTokens(home);
+    expect(persisted).toEqual({
+      access_token: 'access-NEW',
+      refresh_token: 'refresh-NEW',
+      expires_at: FIXED_NOW + 600 * 1000,
+      scope: 'openid email profile offline_access',
     });
   });
 

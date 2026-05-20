@@ -1,11 +1,20 @@
 /**
  * SessionSource abstracts the on-disk layout for transcripts and
  * artifacts so tool handlers don't branch on runtime. The concrete
- * implementation is chosen once at startup by `detectSource()`.
+ * implementation is chosen once at startup by `detectSource()`:
  *
- * Phase 1 ships a single implementation (`CoworkSource`); Phase 2
- * adds `ClaudeCodeSource` and teaches the factory to choose between
- * them.
+ *   1. `CLAUDE_SESSION_ID` env set → `ClaudeCodeSource`.
+ *   2. `COWORK_SESSION_ID` env set → `CoworkSource`.
+ *   3. Neither set → pick the source whose newest on-disk session has
+ *      the most recent mtime. This handles the common Claude Code case
+ *      where the runtime injects `CLAUDE_PROJECT_DIR` but NOT
+ *      `CLAUDE_SESSION_ID` into MCP stdio children: we infer the
+ *      runtime from the presence of session files instead.
+ *   4. Neither source has any on-disk sessions → default to
+ *      `ClaudeCodeSource` so the resulting error message references
+ *      the Claude Code project dir (the more diagnostic path when the
+ *      user is presumably trying to share their current Claude Code
+ *      conversation).
  */
 
 import { ClaudeCodeSource } from './claudeCode.js';
@@ -74,11 +83,74 @@ export function nonBlank(value: unknown): string | null {
 }
 
 /**
- * Choose the right SessionSource for the current runtime.
- * Returns `ClaudeCodeSource` when `CLAUDE_SESSION_ID` is set,
- * otherwise falls back to `CoworkSource`.
+ * Optional injection hooks for `detectSource`. Real callers pass
+ * nothing (or just an `env` map); tests can inject pre-configured
+ * sources so they don't have to monkey-patch `os.homedir()`.
  */
-export function detectSource(env: NodeJS.ProcessEnv = process.env): SessionSource {
-  if (nonBlank(env.CLAUDE_SESSION_ID) !== null) return new ClaudeCodeSource();
-  return new CoworkSource();
+export type DetectSourceOptions = {
+  /** Override `process.env`. */
+  env?: NodeJS.ProcessEnv;
+  /** Inject a Claude Code source (typically with a tmpdir root). */
+  claudeCodeSource?: SessionSource;
+  /** Inject a Cowork source (typically with a tmpdir root). */
+  coworkSource?: SessionSource;
+};
+
+/**
+ * Choose the right SessionSource for the current runtime. See the
+ * file-level comment for the resolution order.
+ *
+ * Accepts either a bare `ProcessEnv` (legacy callers) or an options
+ * bag with injection hooks (tests). The argument is destructured by
+ * shape: a plain process env has no `claudeCodeSource`/`coworkSource`
+ * field, so the heuristic is robust.
+ */
+export function detectSource(
+  envOrOptions: NodeJS.ProcessEnv | DetectSourceOptions = {},
+): SessionSource {
+  const opts = isDetectSourceOptions(envOrOptions)
+    ? envOrOptions
+    : { env: envOrOptions };
+  const env = opts.env ?? process.env;
+  const claudeCode = opts.claudeCodeSource ?? new ClaudeCodeSource();
+  const cowork = opts.coworkSource ?? new CoworkSource();
+
+  // 1. Explicit env vars win — same as before.
+  if (nonBlank(env.CLAUDE_SESSION_ID) !== null) return claudeCode;
+  if (nonBlank(env.COWORK_SESSION_ID) !== null) return cowork;
+
+  // 2. Infer from disk: whichever source has more recent files wins.
+  // listSessions() returns newest-first, so [0] is the freshest entry.
+  const claudeCodeNewest = claudeCode.listSessions()[0]?.mtimeMs ?? 0;
+  const coworkNewest = cowork.listSessions()[0]?.mtimeMs ?? 0;
+  if (claudeCodeNewest === 0 && coworkNewest === 0) {
+    // Neither runtime has any sessions. Default to Claude Code so
+    // failure paths point the user at `~/.claude/projects/<cwd>/`
+    // rather than the Cowork sessions root — the former is the more
+    // useful "we couldn't find anything for your current project"
+    // diagnostic. (Cowork users explicitly running outside Cowork
+    // are uncommon; Claude Code users with an empty new project are
+    // not.)
+    return claudeCode;
+  }
+  return claudeCodeNewest >= coworkNewest ? claudeCode : cowork;
+}
+
+function isDetectSourceOptions(
+  value: NodeJS.ProcessEnv | DetectSourceOptions,
+): value is DetectSourceOptions {
+  if (typeof value !== 'object' || value === null) return false;
+  // ProcessEnv has only string values; DetectSourceOptions has
+  // structured object values for `env`/`claudeCodeSource`/
+  // `coworkSource`. Any of those three keys present with a non-string
+  // value is an unambiguous signal it's the options bag.
+  const v = value as Record<string, unknown>;
+  if (v.claudeCodeSource !== undefined && typeof v.claudeCodeSource !== 'string') {
+    return true;
+  }
+  if (v.coworkSource !== undefined && typeof v.coworkSource !== 'string') {
+    return true;
+  }
+  if (v.env !== undefined && typeof v.env !== 'string') return true;
+  return false;
 }

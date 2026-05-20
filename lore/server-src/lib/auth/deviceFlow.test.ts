@@ -18,10 +18,10 @@
  * needs to handle URLs 3 and 4.
  *
  * Acceptance bullets covered:
- *   ✓ initiateDeviceCode: POSTs correct body (client_id, scope, audience)
- *   ✓ initiateDeviceCode: audience from discovery is in the POST body
+ *   ✓ initiateDeviceCode: POSTs correct body (client_id, scope, resource)
+ *   ✓ initiateDeviceCode: resource from discovery is in the POST body
  *   ✓ initiateDeviceCode: scope is AUTHKIT_SCOPES (not legacy "mcp.read mcp.write")
- *   ✓ initiateDeviceCode: client_id is AUTHKIT_CLIENT_ID
+ *   ✓ initiateDeviceCode: client_id is the registered WorkOS public CLI client
  *   ✓ initiateDeviceCode: validates required fields via Zod (missing field throws)
  *   ✓ pollDeviceToken success: polls until 200, validates token response, writes to store
  *   ✓ pollDeviceToken authorization_pending: retries at the specified interval
@@ -241,7 +241,7 @@ describe('initiateDeviceCode', () => {
     expect(result.interval).toBe(5);
   });
 
-  test('POST body includes client_id = AUTHKIT_CLIENT_ID', async () => {
+  test('POST body includes client_id = registered WorkOS public CLI client', async () => {
     let capturedBody: string | undefined;
     const fetchImpl = makeRoutingFetch({
       deviceResponse: () => jsonResponse(makeDeviceCodeBody()),
@@ -251,8 +251,13 @@ describe('initiateDeviceCode', () => {
     });
     await initiateDeviceCode({ fetchImpl, home });
     const params = new URLSearchParams(capturedBody);
+    expect(params.get('client_id')).toBe('client_01KRSDB9SR20N7MB0D9MPS05Q6');
     expect(params.get('client_id')).toBe(AUTHKIT_CLIENT_ID);
-    // Must NOT be the legacy value.
+    // WorkOS CLI Auth device flow is configured for this public client id;
+    // it is intentionally public and safe to commit per RFC 8252 §8.4.
+    // See constants.ts for why we're not using the CIMD URL form here.
+    expect(params.get('client_id')).toMatch(/^client_/);
+    // Must NOT be the legacy pre-AuthKit client id.
     expect(params.get('client_id')).not.toBe('lore-cowork-plugin');
   });
 
@@ -272,7 +277,7 @@ describe('initiateDeviceCode', () => {
     expect(params.get('scope')).not.toBe('mcp.read mcp.write');
   });
 
-  test('POST body includes audience from discovery (PRM resource field)', async () => {
+  test('POST body includes resource from discovery (PRM resource field)', async () => {
     let capturedBody: string | undefined;
     const fetchImpl = makeRoutingFetch({
       deviceResponse: () => jsonResponse(makeDeviceCodeBody()),
@@ -282,8 +287,10 @@ describe('initiateDeviceCode', () => {
     });
     await initiateDeviceCode({ fetchImpl, home });
     const params = new URLSearchParams(capturedBody);
-    // The audience comes from PRM `resource` field = TEST_RESOURCE.
-    expect(params.get('audience')).toBe(TEST_RESOURCE);
+    // WorkOS AuthKit uses RFC 8707's `resource` parameter. The value comes
+    // from PRM `resource` field = TEST_RESOURCE.
+    expect(params.get('resource')).toBe(TEST_RESOURCE);
+    expect(params.has('audience')).toBe(false);
   });
 
   test('POSTs to the discovered device authorization endpoint, not a hardcoded URL', async () => {
@@ -461,6 +468,27 @@ describe('pollDeviceToken', () => {
     // Must be AUTHKIT_SCOPES regardless of what the server returned.
     expect(stored?.scope).toBe(AUTHKIT_SCOPES);
     expect(stored?.scope).not.toBe('some-other-scope');
+  });
+
+  test('token response may omit scope; stored scope is still AUTHKIT_SCOPES', async () => {
+    const { scope: _scope, ...tokenBodyWithoutScope } = makeTokenBody();
+    const fetchImpl = makeRoutingFetch({
+      tokenResponse: () => jsonResponse(tokenBodyWithoutScope),
+    });
+    const { sleep } = makeSleep();
+
+    await pollDeviceToken({
+      device_code: 'dev-CODE-ABCDEF',
+      expires_in_seconds: 600,
+      interval_seconds: 5,
+      fetchImpl,
+      home,
+      now: fixedNow,
+      sleep,
+    });
+
+    const stored = await readTokens(home);
+    expect(stored?.scope).toBe(AUTHKIT_SCOPES);
   });
 
   test('expires_at is computed as now() + expires_in * 1000 (client-anchored, not server clock)', async () => {

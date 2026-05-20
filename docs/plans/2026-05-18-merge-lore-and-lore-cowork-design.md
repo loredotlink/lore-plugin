@@ -128,7 +128,7 @@ Plugin uses a custom OAuth 2.0 device-code flow:
 
 2. **New client registration.** Need an AuthKit-issued `client_id` for the plugin. Public client (no secret), device flow enabled. One per plugin, not per user.
 
-3. **Token request shape.** Standard OIDC scopes: `openid email profile offline_access`. Drop `mcp.read` / `mcp.write`. Pass `audience=<LORE_OAUTH_AUDIENCE>` on the device-code initiation — this is the critical parameter that makes the resulting JWT acceptable to the hosted `/mcp`.
+3. **Token request shape.** Standard OIDC scopes: `openid email profile offline_access`. Drop `mcp.read` / `mcp.write`. Pass `resource=<PRM resource>` on the device-code initiation — WorkOS uses RFC 8707 resource indicators, and this is the critical parameter that makes the resulting JWT acceptable to the hosted `/mcp`.
 
 4. **Refresh.** Same RFC flow against AuthKit's token endpoint. Module-scope mutex (existing `inFlight` pattern in `lib/refresh.ts`) carries over.
 

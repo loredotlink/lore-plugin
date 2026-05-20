@@ -39,8 +39,10 @@
 const PROD_DEFAULT = 'https://mcp.lore.tanagram.ai';
 
 const ENV_VAR_NAME = 'LORE_MCP_BASE_URL';
+const MCP_PROXY_ENV_VAR_NAME = 'LORE_MCP_PROXY_BASE_URL';
 
 let cached: string | null = null;
+let cachedMcpProxy: string | null = null;
 
 /**
  * Read the env var, validate, and normalize. Throws a labeled error
@@ -52,8 +54,16 @@ let cached: string | null = null;
  * URL is never a valid override anyway.
  */
 function resolve(): string {
-  const raw = process.env[ENV_VAR_NAME];
-  if (raw === undefined || raw === '') return PROD_DEFAULT;
+  return resolveEnvUrl(ENV_VAR_NAME, PROD_DEFAULT);
+}
+
+function resolveMcpProxy(): string {
+  return resolveEnvUrl(MCP_PROXY_ENV_VAR_NAME, cloudBaseUrl());
+}
+
+function resolveEnvUrl(envVarName: string, fallback: string): string {
+  const raw = process.env[envVarName];
+  if (raw === undefined || raw === '') return fallback;
   // Validate before stripping slashes, so a bare "/" or similar nonsense
   // still trips the validator instead of normalizing to an empty string.
   let parsed: URL;
@@ -61,14 +71,14 @@ function resolve(): string {
     parsed = new URL(raw);
   } catch {
     throw new Error(
-      `${ENV_VAR_NAME} is not a valid URL: ${JSON.stringify(raw)}. ` +
+      `${envVarName} is not a valid URL: ${JSON.stringify(raw)}. ` +
         `Expected a fully-qualified origin like "http://localhost:4000" or "https://mcp.lore.tanagram.ai".`,
     );
   }
   // Only http(s) makes sense for an MCP origin.
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(
-      `${ENV_VAR_NAME} must use http or https; got ${JSON.stringify(raw)}.`,
+      `${envVarName} must use http or https; got ${JSON.stringify(raw)}.`,
     );
   }
   // Strip every trailing slash. `URL`'s own serialization normalizes a
@@ -90,6 +100,21 @@ export function cloudBaseUrl(): string {
 }
 
 /**
+ * Base URL used only for JSON-RPC proxy calls to `/mcp`.
+ *
+ * Defaults to `cloudBaseUrl()` so production uses the same origin for PRM,
+ * AuthKit discovery, refresh, login, and MCP tool calls. Test packages can set
+ * `LORE_MCP_PROXY_BASE_URL` to point only the proxied MCP call at a local API
+ * server while keeping OAuth discovery/refresh against production AuthKit.
+ */
+export function cloudMcpBaseUrl(): string {
+  if (cachedMcpProxy === null) {
+    cachedMcpProxy = resolveMcpProxy();
+  }
+  return cachedMcpProxy;
+}
+
+/**
  * Test-only: drop the cached value and re-resolve on the next call.
  * Synchronous, so callers can `__reset…(); expect(cloudBaseUrl()).toBe(…)`
  * without microtask boundaries between the two.
@@ -100,4 +125,5 @@ export function cloudBaseUrl(): string {
  */
 export function __resetCloudBaseUrlForTests(): void {
   cached = resolve();
+  cachedMcpProxy = resolveMcpProxy();
 }

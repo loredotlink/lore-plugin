@@ -35,7 +35,7 @@ import { randomUUID } from 'node:crypto';
 import { AuthRequiredError } from './errors';
 import { getValidAccessToken } from './auth/refresh.js';
 import { deleteTokens } from './auth/store.js';
-import { cloudBaseUrl } from './cloudBaseUrl';
+import { cloudMcpBaseUrl } from './cloudBaseUrl';
 
 interface Options {
   fetchImpl?: typeof fetch;
@@ -96,7 +96,7 @@ export async function callCloudTool<TResult = unknown>(
     },
   };
 
-  const url = `${cloudBaseUrl()}/mcp`;
+  const url = `${cloudMcpBaseUrl()}/mcp`;
   const res = await fetchFn(url, {
     method: 'POST',
     headers: {
