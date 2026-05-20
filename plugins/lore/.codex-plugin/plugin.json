@@ -1,0 +1,45 @@
+{
+  "name": "lore",
+  "version": "0.2.0",
+  "description": "Share Codex sessions to Lore and read threads back.",
+  "author": {
+    "name": "Tanagram",
+    "email": "contact@tanagram.ai",
+    "url": "https://tanagram.ai"
+  },
+  "homepage": "https://lore.tanagram.ai",
+  "repository": "https://github.com/tanagram/lore-plugin",
+  "license": "MIT",
+  "keywords": [
+    "lore",
+    "tanagram",
+    "codex",
+    "share",
+    "threads"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Lore",
+    "shortDescription": "Share Codex sessions and read Lore threads",
+    "longDescription": "Lore is a thin Codex plugin that bootstraps the @tanagram/lore CLI on first use so you can share the current Codex session to Lore and read Lore threads back without leaving Codex.",
+    "developerName": "Tanagram",
+    "category": "Coding",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://lore.tanagram.ai",
+    "privacyPolicyURL": "https://tanagram.ai/privacy-policy",
+    "termsOfServiceURL": "https://tanagram.ai/terms-of-use",
+    "defaultPrompt": [
+      "Share this Codex session to Lore.",
+      "Open Lore thread th_abc123.",
+      "Find recent Lore threads that touched apps/api."
+    ],
+    "brandColor": "#0F766E",
+    "composerIcon": "./assets/lore.svg",
+    "logo": "./assets/lore.svg",
+    "screenshots": []
+  }
+}
