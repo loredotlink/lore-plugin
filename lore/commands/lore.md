@@ -1,16 +1,17 @@
 ---
-description: Read from Lore — fetch a thread by ID/URL or list/search threads. Bootstraps the @tanagram/lore CLI on first use.
+description: Read from Lore — fetch a thread by ID/URL or list/search threads.
 ---
 
-Bootstrap the CLI if it's missing, then run the appropriate `lore` command based on `$ARGUMENTS`:
+Pick the right tool on the `lore-local` MCP server based on `$ARGUMENTS`:
 
-- If `$ARGUMENTS` looks like a thread ID (`th_...`) or a Lore URL (`https://lore.tanagram.ai/session/th_...`), run `lore get $ARGUMENTS`.
-- Otherwise, treat `$ARGUMENTS` as a natural-language query and translate it into `lore list` flags (`--filepath-prefixes`, `--author-ids`, `--created-at <unix>...<unix>`, `--before`, `--after`).
+- Thread ID (`th_...`) or a Lore URL (e.g. `https://lore.tanagram.ai/session/th_...`) → `get_thread({ thread_id })`. Extract the id from the URL path if needed.
+- Keyword phrase → `search_threads({ query: $ARGUMENTS, limit: 10 })`.
+- "recent", "latest", or empty `$ARGUMENTS` → `list_threads({ limit: 10 })`.
 
-```bash
-command -v lore >/dev/null 2>&1 || npm install -g @tanagram/lore
-```
+Render results in plain language:
 
-Both subcommands emit JSON. Parse it and summarize for the user (thread ID, title, author, URL, matching filepaths). For single-thread fetches, surface the URL prominently. For lists, show the top matches with one-line summaries; mention pagination cursors only if useful.
+- Single-thread fetches: surface the URL prominently along with the title and author.
+- Lists: show the top matches as one-liners (title, author, link). Mention pagination cursors only if it's useful.
+- Empty results: say nothing matched and suggest loosening the query.
 
-Failure modes: "not logged in" → tell the user to run `lore login`. Missing `npm` → tell them to install Node.js 18+ from https://nodejs.org. Empty list results → say no threads matched and suggest loosening filters.
+Tone rules: speak about "threads" and "shared sessions" — never say "transcript", "JSONL", or "MCP" to the user. Auth errors → call `lore_login` on `lore-local`, then retry the read once it succeeds. If `lore_login` returns `browser_open_failed`, tell the user to visit the provided verification URL, then call `lore_login_resume({ device_code })` with the returned device code and retry once it succeeds.
