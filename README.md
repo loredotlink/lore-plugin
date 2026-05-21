@@ -1,8 +1,10 @@
-# Lore — Claude Code plugin
+# Lore plugins
 
-Share your Claude Code sessions to [Lore](https://lore.tanagram.ai) and read threads back, without leaving the terminal.
+This repo contains the shared Lore plugin package under [`lore/`](./lore). It is structured to work across Claude Code and Codex, ships a bundled local MCP server, understands Claude Code, Cowork, and Codex session layouts, and talks directly to the Lore cloud MCP.
 
 ## Install
+
+### Claude Code
 
 In Claude Code:
 
@@ -11,22 +13,26 @@ In Claude Code:
 /plugin install lore@tanagram
 ```
 
-That's it. The first time you run `/share` or `/lore`, the plugin will install the `@tanagram/lore` CLI globally via `npm install -g @tanagram/lore`. Requires Node.js 18+.
+That's it. The plugin ships its own local stdio binary and authenticates in-place with `lore_login`; there is no separate CLI bootstrap step for the Claude Code plugin.
+
+### Codex
+
+Codex discovers the same shared package under [`lore/`](./lore) via [`.agents/plugins/marketplace.json`](./.agents/plugins/marketplace.json). It uses the same bundled MCP server and the same local-session-read + cloud-share flow as Claude Code.
 
 ## What you get
 
-- **`/share`** — export the current session to Lore. Returns a shareable URL (copied to clipboard on macOS/Linux/Windows when a clipboard tool is available). Defaults to workspace visibility; ask for "publicly" or "privately" to override.
-- **`/lore`** — fetch a Lore thread by ID/URL, or list/search threads (by author, filepath prefix, time range).
+- **`share`** — export the current session to Lore through the local MCP server, without round-tripping transcript bytes through the agent. Returns a shareable URL. Visibility is private in v1; re-share from the Lore web UI if you want a workspace-visible thread.
+- **`lore`** — fetch a Lore thread by ID/URL, or list/search threads.
 
-After the CLI installs, you also get the full `share` and `lore-read` skills registered globally (from `@tanagram/lore`'s install hook) — so natural-language phrasings like "share this" or "show me that Lore thread `th_...`" work too.
+Natural-language phrasings like "share this" or "show me that Lore thread `th_...`" work because the shared package exposes the same Lore tools and skills to each host agent.
 
 ## Architecture
 
-This plugin is a thin shim. It ships only the slash commands; the underlying skills, agents, and CLI all live in [`@tanagram/lore`](https://www.npmjs.com/package/@tanagram/lore). The plugin's job is to be discoverable from inside Claude Code (`/plugin`) and bootstrap the CLI on first use.
+The shared package under [`lore/`](./lore) is the implementation for every host: it bundles a local stdio MCP server, runtime-specific session readers, auth flow, cloud proxy tools, and shared prompts in one place. Host-specific manifests live side by side (`.claude-plugin/` and `.codex-plugin/`), while reusable prompts live under `skills/`.
 
 ## First-time setup
 
-After install, run `lore login` in your terminal once to authenticate. The plugin will remind you if you forget.
+Authentication happens inside the plugin via `lore_login` the first time you use Lore.
 
 ## License
 

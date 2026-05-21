@@ -12,6 +12,7 @@ import { AuthRequiredError, AUTH_REQUIRED_MESSAGE } from '../lib/errors';
 import { writeTokens, readTokens, type Tokens } from '../lib/auth/store';
 import { __resetCloudBaseUrlForTests } from '../lib/cloudBaseUrl';
 import { __resetInFlightForTests } from '../lib/auth/refresh';
+import { CodexSource } from '../lib/session/codex';
 import { CoworkSource } from '../lib/session/cowork';
 import { writePluginState, readPluginState } from '../lib/pluginState';
 
@@ -246,6 +247,47 @@ describe('shareSessionFromDisk', () => {
       outputs: [],
       harness: 'cowork',
     });
+  });
+
+  test('Codex sessions upload with harness=codex', async () => {
+    await writeTokens(validTokens(), home);
+    const codexRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'share-session-codex-root-'));
+    try {
+      const dayDir = path.join(codexRoot, '2026', '05', '21');
+      fs.mkdirSync(dayDir, { recursive: true });
+      const sessionId = '019e4b45-dc7c-7de2-a506-85efeaaa7a2d';
+      const transcriptPath = path.join(
+        dayDir,
+        `rollout-2026-05-21T12-02-10-${sessionId}.jsonl`,
+      );
+      fs.writeFileSync(
+        transcriptPath,
+        `${JSON.stringify({
+          timestamp: '2026-05-21T16:03:47.562Z',
+          type: 'session_meta',
+          payload: { id: sessionId, cwd: '/tmp/example' },
+        })}\nresponse_item\n`,
+        'utf8',
+      );
+
+      const source = new CodexSource({ sessionsRoot: codexRoot });
+      const { fetchImpl, calls } = captureFetch((req) =>
+        rpcSuccess(req.body.id, { thread_id: 'x', thread_url: 'y' }),
+      );
+      await shareSessionFromDisk(
+        {},
+        { fetchImpl, home, source, env: { CODEX_THREAD_ID: sessionId } },
+      );
+
+      expect(calls[0]!.body.params.arguments).toEqual({
+        transcript: fs.readFileSync(transcriptPath, 'utf8'),
+        uploads: [],
+        outputs: [],
+        harness: 'codex',
+      });
+    } finally {
+      rmrf(codexRoot);
+    }
   });
 
   test('explicit session_id arg picks that session', async () => {

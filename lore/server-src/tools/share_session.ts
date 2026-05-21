@@ -19,10 +19,10 @@
  *
  * Local plumbing:
  *   - Merges `harness` into the args passed cloud-side, derived from
- *     the detected runtime ('claude-code' or 'cowork'). The merge order
- *     deliberately puts the plugin's `harness` last, so even if a
- *     future schema change opened up an agent-controlled `harness`
- *     field, the plugin value wins.
+ *     the detected runtime. The merge order deliberately puts the
+ *     plugin's `harness` last, so even if a future schema change
+ *     opened up an agent-controlled `harness` field, the plugin value
+ *     wins.
  *   - Catches `AuthRequiredError` and returns the SDK's
  *     `authRequiredToMcpError()` shape so the agent can call
  *     `lore_login` and retry. Every other error bubbles to the
@@ -63,10 +63,14 @@ export type ShareSessionArgs = {
  * Map `SessionSource.runtime` values to the harness strings the Lore
  * cloud API accepts. The API uses camelCase (`claudeCode`) while the
  * internal runtime type uses kebab-case (`claude-code`).
+ *
+ * Codex has its own harness cloud-side, so Codex transcripts upload
+ * as `codex`.
  */
 const RUNTIME_TO_HARNESS: Record<string, string> = {
   'claude-code': 'claudeCode',
   cowork: 'cowork',
+  codex: 'codex',
 };
 
 /**
@@ -99,10 +103,10 @@ export async function runShareSession(
 
 /**
  * Handler orchestration: resolve the target session on the local
- * filesystem (Claude Code or Cowork), read its transcript, and forward to the cloud
- * `share_session` tool. The resolved transcript never appears in the
- * agent's tool-result stream — only the final `{thread_id, thread_url}`
- * (or auth-required shape) does.
+ * filesystem (Claude Code, Cowork, or Codex), read its transcript,
+ * and forward to the cloud `share_session` tool. The resolved
+ * transcript never appears in the agent's tool-result stream — only
+ * the final `{thread_id, thread_url}` (or auth-required shape) does.
  *
  * Dependency injection (`source`, `env`) exists so tests can pass a
  * `SessionSource` backed by a tmpdir without mutating `process.env`
@@ -187,13 +191,14 @@ export const shareSessionTool: ToolDefinition = {
   name: 'share_session',
   description:
     "Share the current session to Lore. Auto-detects Claude Code " +
-    "(via CLAUDE_SESSION_ID) or Cowork (via COWORK_SESSION_ID) and " +
-    "resolves the right transcript on disk. With no arguments, " +
-    "shares the active session; pass `session_id` to share a " +
-    "specific older one (typically surfaced by `list_local_sessions`). " +
-    "Requires authentication via lore_login on first use. Returns " +
-    "{thread_id, thread_url}. The plugin reads the transcript off " +
-    "disk itself; the agent does not need to fetch it first.",
+    "(via CLAUDE_SESSION_ID), Cowork (via COWORK_SESSION_ID), or " +
+    "Codex (via CODEX_THREAD_ID) and resolves the right transcript " +
+    "on disk. With no arguments, shares the active session; pass " +
+    "`session_id` to share a specific older one (typically surfaced " +
+    "by `list_local_sessions`). Requires authentication via " +
+    "lore_login on first use. Returns {thread_id, thread_url}. The " +
+    "plugin reads the transcript off disk itself; the agent does " +
+    "not need to fetch it first.",
   inputSchema: {
     type: 'object',
     properties: {

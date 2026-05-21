@@ -5,12 +5,13 @@
  *
  *   1. `CLAUDE_SESSION_ID` env set → `ClaudeCodeSource`.
  *   2. `COWORK_SESSION_ID` env set → `CoworkSource`.
- *   3. Neither set → pick the source whose newest on-disk session has
+ *   3. `CODEX_THREAD_ID` / `CODEX_SESSION_ID` env set → `CodexSource`.
+ *   4. None set → pick the source whose newest on-disk session has
  *      the most recent mtime. This handles the common Claude Code case
  *      where the runtime injects `CLAUDE_PROJECT_DIR` but NOT
  *      `CLAUDE_SESSION_ID` into MCP stdio children: we infer the
  *      runtime from the presence of session files instead.
- *   4. Neither source has any on-disk sessions → default to
+ *   5. None of the sources has any on-disk sessions → default to
  *      `ClaudeCodeSource` so the resulting error message references
  *      the Claude Code project dir (the more diagnostic path when the
  *      user is presumably trying to share their current Claude Code
@@ -18,6 +19,7 @@
  */
 
 import { ClaudeCodeSource } from './claudeCode.js';
+import { CodexSource } from './codex.js';
 import { CoworkSource } from './cowork.js';
 
 /** Summary returned by `listSessions` — one entry per session on disk. */
@@ -28,6 +30,8 @@ export type SessionSummary = {
   conversationId?: string;
   /** Absolute path to the session's on-disk directory. */
   sessionDir: string;
+  /** Absolute path to the transcript file when the runtime is file-based. */
+  transcriptPath?: string;
   /** mtime in ms since epoch — used for newest-first ordering. */
   mtimeMs: number;
 };
@@ -48,12 +52,14 @@ export type SessionPayload = {
 
 export interface SessionSource {
   /** Human label used in error messages. */
-  readonly runtime: 'claude-code' | 'cowork';
+  readonly runtime: 'claude-code' | 'cowork' | 'codex';
 
   /**
    * Resolve the active session per the runtime's rules:
    *   - Cowork: `COWORK_SESSION_ID` env, else newest-by-mtime.
-   *   - Claude Code (Phase 2): `CLAUDE_SESSION_ID` env (required).
+   *   - Claude Code: `CLAUDE_SESSION_ID` env, else newest-by-mtime.
+   *   - Codex: `CODEX_THREAD_ID` / `CODEX_SESSION_ID` env, else
+   *     newest-by-mtime.
    * Returns the resolved `SessionSummary`. Throws a plain `Error` with
    * an actionable message if no session can be resolved.
    */
@@ -94,6 +100,8 @@ export type DetectSourceOptions = {
   claudeCodeSource?: SessionSource;
   /** Inject a Cowork source (typically with a tmpdir root). */
   coworkSource?: SessionSource;
+  /** Inject a Codex source (typically with a tmpdir root). */
+  codexSource?: SessionSource;
 };
 
 /**
@@ -114,16 +122,20 @@ export function detectSource(
   const env = opts.env ?? process.env;
   const claudeCode = opts.claudeCodeSource ?? new ClaudeCodeSource();
   const cowork = opts.coworkSource ?? new CoworkSource();
+  const codex = opts.codexSource ?? new CodexSource();
 
   // 1. Explicit env vars win — same as before.
   if (nonBlank(env.CLAUDE_SESSION_ID) !== null) return claudeCode;
   if (nonBlank(env.COWORK_SESSION_ID) !== null) return cowork;
+  if (nonBlank(env.CODEX_THREAD_ID) !== null) return codex;
+  if (nonBlank(env.CODEX_SESSION_ID) !== null) return codex;
 
   // 2. Infer from disk: whichever source has more recent files wins.
   // listSessions() returns newest-first, so [0] is the freshest entry.
   const claudeCodeNewest = claudeCode.listSessions()[0]?.mtimeMs ?? 0;
   const coworkNewest = cowork.listSessions()[0]?.mtimeMs ?? 0;
-  if (claudeCodeNewest === 0 && coworkNewest === 0) {
+  const codexNewest = codex.listSessions()[0]?.mtimeMs ?? 0;
+  if (claudeCodeNewest === 0 && coworkNewest === 0 && codexNewest === 0) {
     // Neither runtime has any sessions. Default to Claude Code so
     // failure paths point the user at `~/.claude/projects/<cwd>/`
     // rather than the Cowork sessions root — the former is the more
@@ -133,7 +145,10 @@ export function detectSource(
     // not.)
     return claudeCode;
   }
-  return claudeCodeNewest >= coworkNewest ? claudeCode : cowork;
+  if (claudeCodeNewest >= coworkNewest && claudeCodeNewest >= codexNewest) {
+    return claudeCode;
+  }
+  return coworkNewest >= codexNewest ? cowork : codex;
 }
 
 function isDetectSourceOptions(
@@ -149,6 +164,9 @@ function isDetectSourceOptions(
     return true;
   }
   if (v.coworkSource !== undefined && typeof v.coworkSource !== 'string') {
+    return true;
+  }
+  if (v.codexSource !== undefined && typeof v.codexSource !== 'string') {
     return true;
   }
   if (v.env !== undefined && typeof v.env !== 'string') return true;

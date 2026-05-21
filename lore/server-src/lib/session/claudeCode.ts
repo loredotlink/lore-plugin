@@ -103,6 +103,7 @@ export class ClaudeCodeSource implements SessionSource {
       sessions.push({
         sessionId,
         sessionDir: this.projectDir,
+        transcriptPath: filePath,
         mtimeMs: stat.mtimeMs,
       });
     }
@@ -124,12 +125,15 @@ export class ClaudeCodeSource implements SessionSource {
     return {
       sessionId,
       sessionDir: this.projectDir,
+      transcriptPath: filePath,
       mtimeMs: stat.mtimeMs,
     };
   }
 
   readSession(session: SessionSummary): SessionPayload {
-    const transcriptPath = path.join(session.sessionDir, `${session.sessionId}.jsonl`);
+    const transcriptPath =
+      session.transcriptPath ??
+      path.join(session.sessionDir, `${session.sessionId}.jsonl`);
     let transcript: string;
     try {
       const stat = fs.statSync(transcriptPath);

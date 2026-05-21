@@ -6,7 +6,7 @@ import { detectSource, type SessionSource, type SessionSummary } from './index.j
  * Only the fields detectSource consults are populated.
  */
 function makeFakeSource(
-  runtime: 'claude-code' | 'cowork',
+  runtime: 'claude-code' | 'cowork' | 'codex',
   newestMtimeMs: number | null,
 ): SessionSource {
   const sessions: SessionSummary[] =
@@ -40,6 +40,7 @@ test('detectSource: returns ClaudeCodeSource when CLAUDE_SESSION_ID is set', () 
       env: { CLAUDE_SESSION_ID: 'sess-abc' },
       claudeCodeSource: makeFakeSource('claude-code', null),
       coworkSource: makeFakeSource('cowork', null),
+      codexSource: makeFakeSource('codex', null),
     }).runtime,
   ).toBe('claude-code');
 });
@@ -50,8 +51,20 @@ test('detectSource: returns CoworkSource when COWORK_SESSION_ID is set and CLAUD
       env: { COWORK_SESSION_ID: 'sess-xyz' },
       claudeCodeSource: makeFakeSource('claude-code', null),
       coworkSource: makeFakeSource('cowork', null),
+      codexSource: makeFakeSource('codex', null),
     }).runtime,
   ).toBe('cowork');
+});
+
+test('detectSource: returns CodexSource when CODEX_THREAD_ID is set and CLAUDE/COWORK are not', () => {
+  expect(
+    detectSource({
+      env: { CODEX_THREAD_ID: 'sess-codex' },
+      claudeCodeSource: makeFakeSource('claude-code', null),
+      coworkSource: makeFakeSource('cowork', null),
+      codexSource: makeFakeSource('codex', null),
+    }).runtime,
+  ).toBe('codex');
 });
 
 test('detectSource: CLAUDE_SESSION_ID wins over COWORK_SESSION_ID', () => {
@@ -60,8 +73,20 @@ test('detectSource: CLAUDE_SESSION_ID wins over COWORK_SESSION_ID', () => {
       env: { CLAUDE_SESSION_ID: 'sess-abc', COWORK_SESSION_ID: 'sess-xyz' },
       claudeCodeSource: makeFakeSource('claude-code', null),
       coworkSource: makeFakeSource('cowork', null),
+      codexSource: makeFakeSource('codex', null),
     }).runtime,
   ).toBe('claude-code');
+});
+
+test('detectSource: COWORK_SESSION_ID wins over CODEX_THREAD_ID', () => {
+  expect(
+    detectSource({
+      env: { COWORK_SESSION_ID: 'sess-cowork', CODEX_THREAD_ID: 'sess-codex' },
+      claudeCodeSource: makeFakeSource('claude-code', null),
+      coworkSource: makeFakeSource('cowork', null),
+      codexSource: makeFakeSource('codex', null),
+    }).runtime,
+  ).toBe('cowork');
 });
 
 test('detectSource: ignores blank CLAUDE_SESSION_ID and falls through to disk heuristic', () => {
@@ -73,6 +98,7 @@ test('detectSource: ignores blank CLAUDE_SESSION_ID and falls through to disk he
       env: { CLAUDE_SESSION_ID: '' },
       claudeCodeSource: makeFakeSource('claude-code', null),
       coworkSource: makeFakeSource('cowork', null),
+      codexSource: makeFakeSource('codex', null),
     }).runtime,
   ).toBe('claude-code');
   expect(
@@ -80,6 +106,7 @@ test('detectSource: ignores blank CLAUDE_SESSION_ID and falls through to disk he
       env: { CLAUDE_SESSION_ID: '   ' },
       claudeCodeSource: makeFakeSource('claude-code', null),
       coworkSource: makeFakeSource('cowork', null),
+      codexSource: makeFakeSource('codex', null),
     }).runtime,
   ).toBe('claude-code');
 });
@@ -92,6 +119,7 @@ test('detectSource: with no env vars, picks whichever source has newer on-disk s
       env: {},
       claudeCodeSource: makeFakeSource('claude-code', 5_000),
       coworkSource: makeFakeSource('cowork', 9_000),
+      codexSource: makeFakeSource('codex', 1_000),
     }).runtime,
   ).toBe('cowork');
   expect(
@@ -99,6 +127,26 @@ test('detectSource: with no env vars, picks whichever source has newer on-disk s
       env: {},
       claudeCodeSource: makeFakeSource('claude-code', 9_000),
       coworkSource: makeFakeSource('cowork', 5_000),
+      codexSource: makeFakeSource('codex', 1_000),
+    }).runtime,
+  ).toBe('claude-code');
+  expect(
+    detectSource({
+      env: {},
+      claudeCodeSource: makeFakeSource('claude-code', 5_000),
+      coworkSource: makeFakeSource('cowork', 1_000),
+      codexSource: makeFakeSource('codex', 9_000),
+    }).runtime,
+  ).toBe('codex');
+});
+
+test('detectSource: ties still break to Claude Code when Codex is present too', () => {
+  expect(
+    detectSource({
+      env: {},
+      claudeCodeSource: makeFakeSource('claude-code', 7_000),
+      coworkSource: makeFakeSource('cowork', 7_000),
+      codexSource: makeFakeSource('codex', 7_000),
     }).runtime,
   ).toBe('claude-code');
 });
@@ -113,6 +161,7 @@ test('detectSource: ties break to Claude Code (newest-first scan order)', () => 
       env: {},
       claudeCodeSource: makeFakeSource('claude-code', 7_000),
       coworkSource: makeFakeSource('cowork', 7_000),
+      codexSource: makeFakeSource('codex', 1_000),
     }).runtime,
   ).toBe('claude-code');
 });
@@ -123,6 +172,7 @@ test('detectSource: when only one source has sessions, that source wins', () => 
       env: {},
       claudeCodeSource: makeFakeSource('claude-code', 5_000),
       coworkSource: makeFakeSource('cowork', null),
+      codexSource: makeFakeSource('codex', null),
     }).runtime,
   ).toBe('claude-code');
   expect(
@@ -130,8 +180,28 @@ test('detectSource: when only one source has sessions, that source wins', () => 
       env: {},
       claudeCodeSource: makeFakeSource('claude-code', null),
       coworkSource: makeFakeSource('cowork', 5_000),
+      codexSource: makeFakeSource('codex', null),
     }).runtime,
   ).toBe('cowork');
+  expect(
+    detectSource({
+      env: {},
+      claudeCodeSource: makeFakeSource('claude-code', null),
+      coworkSource: makeFakeSource('cowork', null),
+      codexSource: makeFakeSource('codex', 5_000),
+    }).runtime,
+  ).toBe('codex');
+});
+
+test('detectSource: ignores blank CODEX_THREAD_ID and falls through to disk heuristic', () => {
+  expect(
+    detectSource({
+      env: { CODEX_THREAD_ID: '   ' },
+      claudeCodeSource: makeFakeSource('claude-code', null),
+      coworkSource: makeFakeSource('cowork', null),
+      codexSource: makeFakeSource('codex', 5_000),
+    }).runtime,
+  ).toBe('codex');
 });
 
 test('detectSource: when neither source has sessions, defaults to ClaudeCodeSource', () => {
@@ -143,6 +213,7 @@ test('detectSource: when neither source has sessions, defaults to ClaudeCodeSour
       env: {},
       claudeCodeSource: makeFakeSource('claude-code', null),
       coworkSource: makeFakeSource('cowork', null),
+      codexSource: makeFakeSource('codex', null),
     }).runtime,
   ).toBe('claude-code');
 });
@@ -154,4 +225,5 @@ test('detectSource: accepts a bare ProcessEnv (legacy signature)', () => {
   // by env without hitting real disk.
   expect(detectSource({ CLAUDE_SESSION_ID: 'sess-abc' }).runtime).toBe('claude-code');
   expect(detectSource({ COWORK_SESSION_ID: 'sess-xyz' }).runtime).toBe('cowork');
+  expect(detectSource({ CODEX_THREAD_ID: 'sess-codex' }).runtime).toBe('codex');
 });
