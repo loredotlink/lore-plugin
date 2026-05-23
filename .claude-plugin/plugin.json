@@ -1,0 +1,12 @@
+{
+  "name": "lore",
+  "description": "Share Claude Code and Cowork sessions to Lore and read threads back.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Tanagram",
+    "url": "https://tanagram.ai"
+  },
+  "homepage": "https://lore.tanagram.ai",
+  "license": "MIT",
+  "keywords": ["lore", "tanagram", "share", "threads", "collaboration"]
+}

@@ -1,0 +1,47 @@
+{
+  "name": "lore",
+  "version": "1.0.0",
+  "description": "Share Claude Code, Cowork, and Codex sessions to Lore and read threads back.",
+  "author": {
+    "name": "Tanagram",
+    "email": "contact@tanagram.ai",
+    "url": "https://tanagram.ai"
+  },
+  "homepage": "https://lore.tanagram.ai",
+  "repository": "https://github.com/tanagram/lore-plugin",
+  "license": "MIT",
+  "keywords": [
+    "lore",
+    "tanagram",
+    "codex",
+    "claude",
+    "share",
+    "threads"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Lore",
+    "shortDescription": "Share sessions and read Lore threads",
+    "longDescription": "Lore bundles a local MCP server plus shared skills so Claude Code and Codex can resolve the active local session, upload it to Lore, and read Lore threads back without routing transcript bytes through the agent context.",
+    "developerName": "Tanagram",
+    "category": "Coding",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://lore.tanagram.ai",
+    "privacyPolicyURL": "https://tanagram.ai/privacy-policy",
+    "termsOfServiceURL": "https://tanagram.ai/terms-of-use",
+    "defaultPrompt": [
+      "Share this session to Lore.",
+      "Open Lore thread th_abc123.",
+      "Find recent Lore threads that touched apps/api."
+    ],
+    "brandColor": "#0F766E",
+    "composerIcon": "./assets/lore.svg",
+    "logo": "./assets/lore.svg",
+    "screenshots": []
+  }
+}
