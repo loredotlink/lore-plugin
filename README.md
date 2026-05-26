@@ -9,9 +9,19 @@ Share your Claude Code, Cowork, Codex, or Amp session to [Lore](https://lore.tan
 
 ### Claude Code
 
+From inside a session, run `/plugins` to open the interactive plugins TUI:
+
 ```text
-/plugin marketplace add tanagram/lore-plugin
-/plugin install lore@tanagram
+/plugins
+```
+
+In the TUI, switch to the **Marketplaces** tab, choose **Add Marketplace**, enter `tanagram/lore-plugin`, then open the new **tanagram** marketplace and install the **Lore** plugin.
+
+From a plain terminal (outside a session), you can do it in one shot:
+
+```bash
+claude plugin marketplace add tanagram/lore-plugin
+claude plugin install lore@tanagram
 ```
 
 ### Codex
