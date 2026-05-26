@@ -30,21 +30,40 @@ Codex uses the same shared package through [`.agents/plugins/marketplace.json`](
 
 ### Amp
 
-Amp does not use the Claude/Codex manifests. For local development, use Amp's documented plugin paths:
+Amp does not use the Claude/Codex manifests. Amp loads TypeScript plugins from local files:
 
 - Project plugin: `.amp/plugins/*.ts`
 - System plugin: `~/.config/amp/plugins/*.ts`
 
-The canonical Amp implementation is [`amp/lore.ts`](./amp/lore.ts). This package also includes [`./.amp/plugins/lore.ts`](./.amp/plugins/lore.ts), a thin Amp-layout entrypoint that delegates to the canonical implementation without duplicating command or tool registration. Keep that package layout intact; the `.amp/plugins/lore.ts` file is not standalone.
+For a user-level install from the published plugin repository:
 
-For this repository, run Amp from `packages/lore-plugin` so it can load `packages/lore-plugin/.amp/plugins/lore.ts`. For a user-level local install while iterating on this checkout, symlink the canonical Amp implementation file and keep the relative package files available:
+```bash
+git clone https://github.com/tanagram/lore-plugin ~/.local/share/lore-plugin
+cd ~/.local/share/lore-plugin
+bun install --frozen-lockfile
+
+mkdir -p ~/.config/amp/plugins
+ln -sf ~/.local/share/lore-plugin/amp/lore.ts ~/.config/amp/plugins/lore.ts
+```
+
+Then reload plugins from Amp's command palette with `plugins: reload`. The command palette should show **Lore: Share active Amp thread**. You can also verify from a shell:
+
+```bash
+amp plugins list
+```
+
+The output should include `/Users/.../.config/amp/plugins/lore.ts active`, the **Lore: Share active Amp thread** command, and the Lore tools.
+
+The canonical Amp implementation is [`amp/lore.ts`](./amp/lore.ts). This package also includes [`./.amp/plugins/lore.ts`](./.amp/plugins/lore.ts), a thin Amp-layout entrypoint that delegates to the canonical implementation without duplicating command or tool registration. Keep that package layout intact; neither `.amp/plugins/lore.ts` nor `amp/lore.ts` is standalone — they import shared files from this checkout.
+
+For local development in the Lore monorepo, run Amp from `packages/lore-plugin` so it can load `packages/lore-plugin/.amp/plugins/lore.ts`. For a user-level local install while iterating on a monorepo checkout, symlink the canonical Amp implementation file and keep the relative package files available:
 
 ```bash
 mkdir -p ~/.config/amp/plugins
 ln -s "$(pwd)/packages/lore-plugin/amp/lore.ts" ~/.config/amp/plugins/lore.ts
 ```
 
-If you run those commands from `packages/lore-plugin`, use `$(pwd)/amp/lore.ts` as the symlink target instead. After installing or changing the file, reload plugins from Amp's command palette with `plugins: reload`. The command palette should then show **Lore: Share active Amp thread**.
+If you run those commands from `packages/lore-plugin`, use `$(pwd)/amp/lore.ts` as the symlink target instead.
 
 ## What you get
 
