@@ -35,24 +35,36 @@ Amp does not use the Claude/Codex manifests. Amp loads TypeScript plugins from l
 - Project plugin: `.amp/plugins/*.ts`
 - System plugin: `~/.config/amp/plugins/*.ts`
 
-For a user-level install from the published plugin repository:
+For a user-level install from the published plugin repository, copy-paste the full block below:
 
 ```bash
-git clone https://github.com/tanagram/lore-plugin ~/.local/share/lore-plugin
+if [ -d ~/.local/share/lore-plugin/.git ]; then
+  git -C ~/.local/share/lore-plugin pull --ff-only
+else
+  git clone https://github.com/tanagram/lore-plugin ~/.local/share/lore-plugin
+fi
+
 cd ~/.local/share/lore-plugin
 bun install --frozen-lockfile
 
 mkdir -p ~/.config/amp/plugins
 ln -sf ~/.local/share/lore-plugin/amp/lore.ts ~/.config/amp/plugins/lore.ts
-```
 
-Then reload plugins from Amp's command palette with `plugins: reload`. The command palette should show **Lore: Share active Amp thread**. You can also verify from a shell:
-
-```bash
 amp plugins list
 ```
 
-The output should include `/Users/.../.config/amp/plugins/lore.ts active`, the **Lore: Share active Amp thread** command, and the Lore tools.
+Then reload plugins from Amp's command palette with `plugins: reload`. The command palette should show **Lore: Share active Amp thread**. `amp plugins list` should include:
+
+```text
+✓ /Users/.../.config/amp/plugins/lore.ts active
+  Command: Lore: Share active Amp thread
+  Tool: share_current_amp_thread
+  Tool: lore_login
+  Tool: lore_login_resume
+  Tool: get_thread
+  Tool: list_threads
+  Tool: search_threads
+```
 
 The canonical Amp implementation is [`amp/lore.ts`](./amp/lore.ts). This package also includes [`./.amp/plugins/lore.ts`](./.amp/plugins/lore.ts), a thin Amp-layout entrypoint that delegates to the canonical implementation without duplicating command or tool registration. Keep that package layout intact; neither `.amp/plugins/lore.ts` nor `amp/lore.ts` is standalone — they import shared files from this checkout.
 
