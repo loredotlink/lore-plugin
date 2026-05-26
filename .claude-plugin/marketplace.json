@@ -1,5 +1,6 @@
 {
   "name": "tanagram",
+  "description": "Tanagram plugins for Claude Code.",
   "owner": {
     "name": "Tanagram",
     "url": "https://tanagram.ai"
@@ -7,7 +8,7 @@
   "plugins": [
     {
       "name": "lore",
-      "source": ".",
+      "source": "./",
       "description": "Share local sessions to Lore and read Lore threads back.",
       "homepage": "https://lore.tanagram.ai",
       "license": "MIT",
