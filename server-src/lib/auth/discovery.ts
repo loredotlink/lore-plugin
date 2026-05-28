@@ -13,7 +13,7 @@
  *   requires no plugin update.
  *
  * Resolution chain (per RFC 8707 / RFC 8414):
- *   1. GET `${cloudBaseUrl()}/.well-known/oauth-protected-resource`
+ *   1. GET `${cloudBaseUrl()}/.well-known/oauth-protected-resource/mcp`
  *      → Protected Resource Metadata (PRM). Extract:
  *        - `resource`             → becomes `audience`
  *        - `authorization_servers[0]` → the AS we'll query next
@@ -132,6 +132,18 @@ const AsMetadataSchema = z.object({
   // We deliberately do NOT read `device_authorization_endpoint` — WorkOS
   // does not advertise it, and we derive it from the issuer instead.
 });
+
+/**
+ * Lore's MCP resource identifier is the cloud MCP endpoint itself:
+ * `${cloudBaseUrl()}/mcp`. RFC 9728 places the well-known segment
+ * before the resource path, so the corresponding PRM URL is
+ * `${origin}/.well-known/oauth-protected-resource/mcp`.
+ */
+function protectedResourceMetadataUrl(base: string): string {
+  const resource = new URL(`${base}/mcp`);
+  const trailingPath = resource.pathname === '/' ? '' : resource.pathname;
+  return `${resource.origin}/.well-known/oauth-protected-resource${trailingPath}`;
+}
 
 // ---------------------------------------------------------------------------
 // File path
@@ -285,7 +297,7 @@ async function tryRevalidate(
     return null;
   }
 
-  const prmUrl = `${base}/.well-known/oauth-protected-resource`;
+  const prmUrl = protectedResourceMetadataUrl(base);
   let res: Response;
   try {
     res = await fetchFn(prmUrl, {
@@ -336,7 +348,7 @@ async function fetchAndCache(params: {
 }): Promise<DiscoveredEndpoints> {
   const { cached, base, fetchFn, home, nowFn } = params;
 
-  const prmUrl = `${base}/.well-known/oauth-protected-resource`;
+  const prmUrl = protectedResourceMetadataUrl(base);
 
   // --- Step 1: Fetch PRM ---
   let prmRes: Response;

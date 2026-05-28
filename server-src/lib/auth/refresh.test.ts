@@ -8,7 +8,7 @@
  * The new refresh path calls `discoverEndpoints()` before posting to the
  * token endpoint, so a test's injected `fetchImpl` must handle THREE
  * distinct URLs in the expired-token path:
- *   1. `${cloudBaseUrl()}/.well-known/oauth-protected-resource`   (PRM)
+ *   1. `${cloudBaseUrl()}/.well-known/oauth-protected-resource/mcp` (PRM)
  *   2. `https://signin.lore.tanagram.ai/.well-known/oauth-authorization-server` (AS metadata)
  *   3. `https://signin.lore.tanagram.ai/oauth2/token`             (token endpoint)
  *

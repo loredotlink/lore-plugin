@@ -7,7 +7,7 @@
  *
  * Because both `initiateDeviceCode` and `pollDeviceToken` call
  * `discoverEndpoints()` internally, the injected `fetchImpl` must handle:
- *   1. `${cloudBaseUrl()}/.well-known/oauth-protected-resource`       (PRM)
+ *   1. `${cloudBaseUrl()}/.well-known/oauth-protected-resource/mcp`   (PRM)
  *   2. `${TEST_AS}/.well-known/oauth-authorization-server`             (AS metadata)
  *   3. `${TEST_ISSUER}/oauth2/device_authorization`                    (device-code mint)
  *   4. `${TEST_TOKEN_ENDPOINT}`                                        (device-code polling)

@@ -6,7 +6,7 @@
  * temp directory so tests do not pollute ~/Library/Application Support/.
  *
  * Acceptance bullets covered (see task description for canonical list):
- *   ✓ Happy path: PRM → AS metadata → returns all three fields
+ *   ✓ Happy path: PRM at the MCP resource path → AS metadata → returns all three fields
  *   ✓ Cache hit: second call within 24h returns cached data, no HTTP
  *   ✓ ETag revalidation: expired cache sends If-None-Match; 304 refreshes TTL
  *   ✓ Network failure with stale cache: returns last-known-good
@@ -54,7 +54,8 @@ const FRESH_NOW = () => FIXED_NOW + 23 * 60 * 60 * 1000;
 // Production-like fixture values (match the live server as of plan date).
 const TEST_BASE = 'https://mcp.lore.tanagram.ai';
 const TEST_AS = 'https://signin.lore.tanagram.ai';
-const TEST_RESOURCE = 'https://api.lore.tanagram.ai';
+const TEST_RESOURCE = 'https://mcp.lore.tanagram.ai/mcp';
+const TEST_PRM_URL = 'https://mcp.lore.tanagram.ai/.well-known/oauth-protected-resource/mcp';
 const TEST_TOKEN_ENDPOINT = 'https://signin.lore.tanagram.ai/oauth2/token';
 const TEST_ISSUER = 'https://signin.lore.tanagram.ai';
 const TEST_DEVICE_AUTH_ENDPOINT = `${TEST_ISSUER}/oauth2/device_authorization`;
@@ -168,7 +169,7 @@ describe('happy path', () => {
 
     // Should have made exactly two HTTP calls.
     expect(calls).toHaveLength(2);
-    expect(calls[0].url).toContain('oauth-protected-resource');
+    expect(calls[0].url).toBe(TEST_PRM_URL);
     expect(calls[1].url).toContain('oauth-authorization-server');
   });
 
@@ -266,7 +267,7 @@ describe('ETag revalidation', () => {
 
     // Should have sent exactly one request (PRM only, with If-None-Match).
     expect(secondCalls).toHaveLength(1);
-    expect(secondCalls[0].url).toContain('oauth-protected-resource');
+    expect(secondCalls[0].url).toBe(TEST_PRM_URL);
     expect(secondCalls[0].headers?.['if-none-match']).toBe('"abc123"');
 
     // AS metadata should NOT have been fetched again.
@@ -434,7 +435,7 @@ describe('different cloudBaseUrl invalidates cache', () => {
     await discoverEndpoints({ fetchImpl: stagingFetch, home, now });
 
     // PRM was fetched from the new base URL, not the cached one.
-    expect(prmCallUrl).toContain(ALT_BASE);
+    expect(prmCallUrl).toBe(`${ALT_BASE}/.well-known/oauth-protected-resource/mcp`);
   });
 
   test('wrong-baseUrl cache is NOT used as last-known-good fallback on network failure', async () => {
