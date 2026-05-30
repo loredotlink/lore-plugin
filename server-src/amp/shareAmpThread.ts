@@ -9,6 +9,7 @@ const execFileAsync = promisify(execFile);
 export type ShareAmpThreadArgs = {
   threadId?: string;
   visibility?: AmpShareVisibility;
+  highlight?: string;
 };
 
 export type AmpShareVisibility = 'private' | 'workspace' | 'public';
@@ -16,6 +17,7 @@ export type AmpShareVisibility = 'private' | 'workspace' | 'public';
 export type ShareCurrentAmpThreadToolInput = {
   thread_id?: string;
   visibility?: AmpShareVisibility;
+  highlight?: string;
 };
 
 export type ShareAmpThreadDeps = {
@@ -75,6 +77,11 @@ export function createShareCurrentAmpThreadTool(deps: ShareAmpThreadDeps): AmpPl
       properties: {
         thread_id: { type: 'string' },
         visibility: { type: 'string', enum: ['private', 'workspace', 'public'] },
+        highlight: {
+          type: 'string',
+          description:
+            'Natural-language description of the block or block range to highlight in the returned Lore URL.',
+        },
       },
       additionalProperties: false,
     },
@@ -84,6 +91,7 @@ export function createShareCurrentAmpThreadTool(deps: ShareAmpThreadDeps): AmpPl
           {
             threadId: optionalString(input.thread_id),
             visibility: optionalVisibility(input.visibility),
+            highlight: optionalString(input.highlight),
           },
           deps,
         );
@@ -130,6 +138,11 @@ export async function shareAmpThread(
 
   if (args.visibility !== undefined) {
     shareArgs.visibility = args.visibility;
+  }
+
+  const highlight = args.highlight?.trim();
+  if (highlight) {
+    shareArgs.highlight = highlight;
   }
 
   return deps.share(shareArgs, { harness: 'amp' });

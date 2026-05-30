@@ -66,8 +66,16 @@ If the user just says "share" without mentioning a channel, skip the Slack step 
 ## Tool Flow
 
 1. Call the `lore-local` MCP tool `share_session` with no arguments.
-2. If the user asked for a specific older session, call `list_local_sessions`, pick the match, then call `share_session({ session_id })`.
-3. Surface `thread_url` prominently. If the result includes `_tip`, show it after the link.
+2. If the user includes a natural-language highlight request after `/share`, pass that request as `highlight`. For example, `/share where I made the parser handle Amp exports` should call `share_session({ highlight: "where I made the parser handle Amp exports" })`.
+3. If the user asked for a specific older session, call `list_local_sessions`, pick the match, then call `share_session({ session_id })` (or `share_session({ session_id, highlight })` when they also asked for a highlight).
+4. Surface `thread_url` prominently. If `highlight` was supplied and resolved, `thread_url` already includes the selected block anchor or range. If the result includes `_tip`, show it after the link.
+
+The share result is a JSON object with:
+
+- `thread_id` — the Lore thread id.
+- `thread_url` — the shareable Lore link. Always show this to the user as the primary result.
+- `highlight` — present only when a highlight query was supplied and Lore resolved it. It includes `query`, `matched`, `start_block_id`, and `end_block_id`; when `matched` is true, `thread_url` is already anchored.
+- `_tip` — optional plugin tip text.
 
 ## Failure Modes
 

@@ -41,7 +41,7 @@ describe('shareAmpThread', () => {
     }> = [];
 
     const result = await shareAmpThread(
-      { threadId: 'explicit-thread', visibility: 'workspace' },
+      { threadId: 'explicit-thread', visibility: 'workspace', highlight: ' where the parser changed ' },
       {
         env: { AMP_CURRENT_THREAD_ID: 'env-thread' },
         ampBaseUrl: new URL('https://ampcode.com/threads/'),
@@ -68,6 +68,7 @@ describe('shareAmpThread', () => {
       title: 'Amp Thread Title',
       source_url: 'https://ampcode.com/threads/explicit-thread',
       visibility: 'workspace',
+      highlight: 'where the parser changed',
     });
   });
 
@@ -167,7 +168,14 @@ describe('shareAmpThread', () => {
       },
     });
 
-    const result = await tool.execute({ thread_id: 'explicit-tool-thread', visibility: 'public' }, {});
+    const result = await tool.execute(
+      {
+        thread_id: 'explicit-tool-thread',
+        visibility: 'public',
+        highlight: 'show the API fix',
+      },
+      {},
+    );
 
     expect(tool.name).toBe('share_current_amp_thread');
     expect(tool.inputSchema).toEqual({
@@ -175,6 +183,11 @@ describe('shareAmpThread', () => {
       properties: {
         thread_id: { type: 'string' },
         visibility: { type: 'string', enum: ['private', 'workspace', 'public'] },
+        highlight: {
+          type: 'string',
+          description:
+            'Natural-language description of the block or block range to highlight in the returned Lore URL.',
+        },
       },
       additionalProperties: false,
     });
@@ -186,6 +199,7 @@ describe('shareAmpThread', () => {
           transcript: exportJson,
           title: 'Tool Share',
           visibility: 'public',
+          highlight: 'show the API fix',
         },
         opts: { harness: 'amp' },
       },

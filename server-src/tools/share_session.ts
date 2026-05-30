@@ -53,10 +53,17 @@ export const WATCHER_TIP =
 export type ShareSessionResult = {
   thread_id: string;
   thread_url: string;
+  highlight?: {
+    query: string;
+    matched: boolean;
+    start_block_id: string | null;
+    end_block_id: string | null;
+  };
 };
 
 export type ShareSessionArgs = {
   session_id?: string;
+  highlight?: string;
 };
 
 /**
@@ -135,11 +142,13 @@ export async function shareSessionFromDisk(
     args: { session_id: args.session_id },
     env,
   });
+  const highlight = args.highlight?.trim();
   const result = await runShareSession(
     {
       transcript: session.transcript,
       uploads: session.uploads,
       outputs: session.outputs,
+      ...(highlight ? { highlight } : {}),
     },
     { fetchImpl: opts.fetchImpl, home: opts.home, harness: RUNTIME_TO_HARNESS[source.runtime] ?? source.runtime },
   );
@@ -195,7 +204,8 @@ export const shareSessionTool: ToolDefinition = {
     "Codex (via CODEX_THREAD_ID) and resolves the right transcript " +
     "on disk. With no arguments, shares the active session; pass " +
     "`session_id` to share a specific older one (typically surfaced " +
-    "by `list_local_sessions`). Requires authentication via " +
+    "by `list_local_sessions`). Pass `highlight` with a natural-language " +
+    "description to return a Lore URL anchored to matching thread blocks. Requires authentication via " +
     "lore_login on first use. Returns {thread_id, thread_url}. The " +
     "plugin reads the transcript off disk itself; the agent does " +
     "not need to fetch it first.",
@@ -203,6 +213,11 @@ export const shareSessionTool: ToolDefinition = {
     type: 'object',
     properties: {
       session_id: { type: 'string' },
+      highlight: {
+        type: 'string',
+        description:
+          'Natural-language description of the block or block range to highlight in the returned Lore URL.',
+      },
     },
     additionalProperties: false,
   },

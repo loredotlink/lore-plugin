@@ -173,7 +173,7 @@ describe('share_session tool', () => {
     const propertyNames = Object.keys(
       shareSessionTool.inputSchema.properties!,
     );
-    expect(propertyNames).toEqual(['session_id']);
+    expect(propertyNames).toEqual(['session_id', 'highlight']);
     expect(shareSessionTool.inputSchema.additionalProperties).toBe(false);
     expect(shareSessionTool.inputSchema.required ?? []).toEqual([]);
   });
@@ -243,6 +243,49 @@ describe('shareSessionFromDisk', () => {
     expect(calls[0]!.body.params.name).toBe('share_session');
     expect(calls[0]!.body.params.arguments).toEqual({
       transcript: transcriptBytes,
+      uploads: [],
+      outputs: [],
+      harness: 'cowork',
+    });
+  });
+
+  test('forwards a trimmed highlight query to the cloud share tool', async () => {
+    await writeTokens(validTokens(), home);
+    stageSession('highlight-transcript');
+
+    const { fetchImpl, calls } = captureFetch((req) =>
+      rpcSuccess(req.body.id, { thread_id: 't_highlight', thread_url: 'https://lore/t_highlight#tb_1' }),
+    );
+
+    await shareSessionFromDisk(
+      { highlight: ' where the parser changed ' },
+      { fetchImpl, home, source, env: {} },
+    );
+
+    expect(calls[0]!.body.params.arguments).toEqual({
+      transcript: 'highlight-transcript',
+      uploads: [],
+      outputs: [],
+      highlight: 'where the parser changed',
+      harness: 'cowork',
+    });
+  });
+
+  test('omits blank highlight queries from the cloud share args', async () => {
+    await writeTokens(validTokens(), home);
+    stageSession('blank-highlight-transcript');
+
+    const { fetchImpl, calls } = captureFetch((req) =>
+      rpcSuccess(req.body.id, { thread_id: 't_blank', thread_url: 'https://lore/t_blank' }),
+    );
+
+    await shareSessionFromDisk(
+      { highlight: '   ' },
+      { fetchImpl, home, source, env: {} },
+    );
+
+    expect(calls[0]!.body.params.arguments).toEqual({
+      transcript: 'blank-highlight-transcript',
       uploads: [],
       outputs: [],
       harness: 'cowork',
