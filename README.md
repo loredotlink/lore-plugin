@@ -79,16 +79,16 @@ If you run those commands from `packages/lore-plugin`, use `$(pwd)/amp/lore.ts` 
 
 ## What you get
 
-- **`share`** — in Claude Code/Cowork/Codex, post the current local session to Lore. Returns a shareable URL, plus a brief note if your session included uploaded or generated files. Visibility is private in v1; re-share from the Lore web UI to make a thread workspace-visible.
+- **`/lore:share`** — in Claude Code/Cowork/Codex, post the current local session to Lore. Returns a shareable URL, plus a brief note if your session included uploaded or generated files. Visibility is private in v1; re-share from the Lore web UI to make a thread workspace-visible.
 - **`Lore: Share active Amp thread`** — in Amp, export the active Amp thread with the local Amp CLI, upload the raw export to Lore as `harness: 'amp'`, include the Lore URL in the notification, append it back into the Amp thread, copy it to the clipboard, and show it in a copyable dialog only when the thread append or clipboard copy is unavailable.
+- **`/lore:read`** / read tools — fetch a Lore thread by ID or URL, or list and search threads by title.
 - **`share_current_amp_thread`** — an Amp tool for explicit natural-language invocation. It accepts `{ thread_id?: string, visibility?: 'private' | 'workspace' | 'public', highlight?: string }`; if `thread_id` is omitted, `AMP_CURRENT_THREAD_ID` must be set or the tool returns an actionable error. `highlight` is a natural-language description of the block or block range to emphasize in the returned Lore URL.
-- **`lore` / read tools** — fetch a Lore thread by ID or URL, or list and search threads by title.
 
 Natural-language phrasings work in hosts that surface the plugin tools and skills on every turn. Amp's safe MVP is explicit: use the command-palette share command for the active thread, or call `share_current_amp_thread` with a known Amp `thread_id`. The Amp tool does not guess the active thread from undocumented tool context.
 
 ## First-time setup
 
-The first time you use `share`, `lore`, or the Amp share/read tools, the plugin's `lore_login` tool opens a browser to the WorkOS AuthKit consent screen with a device code pre-filled. Sign in, click Allow, and the tool returns. The plugin persists tokens under `~/Library/Application Support/tanagram/lore/tokens.json` (mode 0600) and refreshes them silently on subsequent calls. If the browser cannot be opened automatically (SSH, no GUI), `lore_login` returns a `verification_uri` + `device_code` and the agent calls `lore_login_resume` once you complete the flow on another device.
+The first time you use `/lore:share`, `/lore:read`, or the Amp share/read tools, the plugin's `lore_login` tool opens a browser to the WorkOS AuthKit consent screen with a device code pre-filled. Sign in, click Allow, and the tool returns. The plugin persists tokens under `~/Library/Application Support/tanagram/lore/tokens.json` (mode 0600) and refreshes them silently on subsequent calls. If the browser cannot be opened automatically (SSH, no GUI), `lore_login` returns a `verification_uri` + `device_code` and the agent calls `lore_login_resume` once you complete the flow on another device.
 
 ## Architecture
 

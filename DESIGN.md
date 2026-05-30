@@ -33,7 +33,7 @@ plugin-root/
 ├── assets/
 │   └── lore.svg
 ├── skills/
-│   ├── lore/SKILL.md
+│   ├── read/SKILL.md
 │   └── share/SKILL.md
 ├── server/
 │   └── lore-mcp
@@ -147,7 +147,7 @@ No Amp marketplace distribution is assumed or documented for this MVP.
 
 ## Read flow
 
-The shared `skills/lore/SKILL.md` routes user intent to the Lore thread tools:
+The shared `skills/read/SKILL.md` surfaces as `/lore:read` and routes user intent to the Lore thread tools:
 
 - thread id or Lore URL -> `get_thread`
 - keyword query -> `search_threads`

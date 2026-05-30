@@ -1,5 +1,5 @@
 ---
-name: lore
+name: read
 description: Read from Lore by fetching a thread by ID or URL, or by listing and searching threads. Use when the user asks to open a Lore thread, find recent Lore sessions, or search Lore for a topic, author, or filepath.
 ---
 
