@@ -36,6 +36,8 @@
  *   half of the defense-in-depth pair; the merge-order rule above is
  *   the runtime half.
  */
+import { mcpShareSessionPluginToolSpec } from '@lore/contracts/mcp';
+
 import type { ToolDefinition } from '../lib/tool.js';
 import { callCloudTool } from '../lib/cloudCall.js';
 import { AuthRequiredError, authRequiredToMcpError } from '../lib/errors.js';
@@ -197,30 +199,9 @@ export async function shareSessionFromDisk(
 }
 
 export const shareSessionTool: ToolDefinition = {
-  name: 'share_session',
-  description:
-    "Share the current session to Lore. Auto-detects Claude Code " +
-    "(via CLAUDE_SESSION_ID), Cowork (via COWORK_SESSION_ID), or " +
-    "Codex (via CODEX_THREAD_ID) and resolves the right transcript " +
-    "on disk. With no arguments, shares the active session; pass " +
-    "`session_id` to share a specific older one (typically surfaced " +
-    "by `list_local_sessions`). Pass `highlight` with a natural-language " +
-    "description to return a Lore URL anchored to matching thread blocks. Requires authentication via " +
-    "lore_login on first use. Returns {thread_id, thread_url}. The " +
-    "plugin reads the transcript off disk itself; the agent does " +
-    "not need to fetch it first.",
-  inputSchema: {
-    type: 'object',
-    properties: {
-      session_id: { type: 'string' },
-      highlight: {
-        type: 'string',
-        description:
-          'Natural-language description of the block or block range to highlight in the returned Lore URL.',
-      },
-    },
-    additionalProperties: false,
-  },
+  name: mcpShareSessionPluginToolSpec.name,
+  description: mcpShareSessionPluginToolSpec.description,
+  inputSchema: mcpShareSessionPluginToolSpec.inputSchema,
   handler: async (args: unknown): Promise<unknown> => {
     // Dispatcher validates against inputSchema before invoking the
     // handler, so by the time we get here the cast is safe.

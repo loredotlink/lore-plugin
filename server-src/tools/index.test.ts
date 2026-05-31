@@ -10,8 +10,8 @@ describe('tools barrel', () => {
       'lore_login',
       'lore_login_resume',
       'share_session',
-      'get_thread',
       'list_threads',
+      'get_thread',
       'search_threads',
     ]);
   });

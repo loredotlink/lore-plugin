@@ -71,6 +71,8 @@ That server exposes two kinds of tools:
 - Local session tools: `list_local_sessions`, `read_local_session`, `share_session`
 - Lore cloud proxy tools: `get_thread`, `list_threads`, `search_threads`, `lore_login`, `lore_login_resume`
 
+Cloud proxy tool metadata is generated from the shared specs in `packages/contracts/src/mcp.ts`, so the plugin does not carry a second copy of cloud-owned tool schemas. `share_session` stays custom because the local stdio tool hides `harness` and `transcript`, reads the active session from disk, then forwards the cloud-shaped payload internally.
+
 From Claude Code/Cowork/Codex, there is just one MCP server. The local process decides whether a request needs filesystem access, cloud access, or both. Amp uses the same cloud/auth tool implementations for reads and login, but its share command/tool calls the Amp adapter because Amp threads come from the Amp CLI export command rather than `server-src/lib/session`.
 
 ## Session detection

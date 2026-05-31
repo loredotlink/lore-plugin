@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@lore/contracts": "workspace:*",
     "@lore/identity-store": "workspace:*",
     "@lore/transcript-locate": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
