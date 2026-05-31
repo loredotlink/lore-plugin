@@ -1,42 +1,10 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { claudeProjectsRoot, encodeCwdToDir } from '@lore/transcript-locate';
 import { nonBlank, type SessionPayload, type SessionSource, type SessionSummary } from './index.js';
 
-/**
- * Default Claude Code projects root on macOS/Linux. Accepts a `home`
- * override for tests.
- */
-export function defaultClaudeCodeProjectsRoot(home: string = os.homedir()): string {
-  return path.join(home, '.claude', 'projects');
-}
-
-/**
- * Encode an absolute cwd the way Claude Code does to build the per-project
- * directory name. Claude Code replaces any character outside
- * `[A-Za-z0-9_-]` with `-`, which means BOTH path separators and dots
- * collapse to dashes — consecutive specials produce consecutive dashes.
- *
- * Examples (verified against `~/.claude/projects/` entries on macOS):
- *   '/Users/q/repos/foo'              -> '-Users-q-repos-foo'
- *   '/Users/q/.config/amp'            -> '-Users-q--config-amp'   (note the double dash)
- *   '/Users/q/repos/lore/.claude/wt'  -> '-Users-q-repos-lore--claude-wt'
- *
- * The previous implementation only replaced `/`, leaving literal dots
- * intact (e.g. `-Users-q-.config-amp`). That looks plausible but
- * doesn't match what Claude Code writes to disk, so the plugin's
- * ClaudeCodeSource was reading from a directory that did not exist,
- * silently returning an empty `listSessions()` and forcing the
- * runtime detection to fall through to Cowork. Replacing every
- * non-alphanumeric (and non-`_`/-`-`) character keeps the encoder
- * aligned with Claude Code's own implementation.
- */
-export function encodeCwdForClaudeCode(cwd: string): string {
-  return cwd.replace(/[^A-Za-z0-9_-]/g, '-');
-}
-
 export type ClaudeCodeSourceOptions = {
-  /** Override the projects root. Defaults to `defaultClaudeCodeProjectsRoot()`. */
+  /** Override the projects root. Defaults to `claudeProjectsRoot()`. */
   projectsRoot?: string;
   /** Override `os.homedir()` for tests when `projectsRoot` isn't set. */
   home?: string;
@@ -49,7 +17,7 @@ export class ClaudeCodeSource implements SessionSource {
   private readonly projectDir: string;
 
   constructor(opts: ClaudeCodeSourceOptions = {}) {
-    const root = opts.projectsRoot ?? defaultClaudeCodeProjectsRoot(opts.home);
+    const root = opts.projectsRoot ?? claudeProjectsRoot(opts.home);
     // Resolution order for the cwd that maps to the Claude Code project
     // directory:
     //   1. Explicit `opts.cwd` — tests, advanced callers.
@@ -62,7 +30,7 @@ export class ClaudeCodeSource implements SessionSource {
     //      directly during testing).
     const cwd =
       opts.cwd ?? nonBlank(process.env.CLAUDE_PROJECT_DIR) ?? process.cwd();
-    this.projectDir = path.join(root, encodeCwdForClaudeCode(cwd));
+    this.projectDir = path.join(root, encodeCwdToDir(cwd));
   }
 
   resolveActive(env: NodeJS.ProcessEnv): SessionSummary {

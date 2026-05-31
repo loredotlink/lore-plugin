@@ -1,40 +1,16 @@
 import { test, expect } from 'bun:test';
-import { ClaudeCodeSource, encodeCwdForClaudeCode } from './claudeCode.js';
+import { encodeCwdToDir } from '@lore/transcript-locate';
+import { ClaudeCodeSource } from './claudeCode.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// The cwd→dir encoder (`encodeCwdToDir`) and its encoding rules are owned and
+// unit-tested by `@lore/transcript-locate`; this suite covers ClaudeCodeSource.
+
 test('ClaudeCodeSource reports runtime = "claude-code"', () => {
   const source = new ClaudeCodeSource({ projectsRoot: '/tmp/nonexistent', cwd: '/tmp/x' });
   expect(source.runtime).toBe('claude-code');
-});
-
-// Lock in the encoding rules against what Claude Code actually writes
-// to `~/.claude/projects/`. Verified empirically — any character outside
-// [A-Za-z0-9_-] collapses to a single dash, and consecutive specials
-// each produce their own dash (so `/.claude/` becomes `--claude-`).
-//
-// Regression: before May 2026 the encoder only replaced `/`, leaving
-// dots in the encoded path. That meant the plugin's ClaudeCodeSource
-// looked for sessions in a directory that didn't exist on disk for
-// any `.claude/...` path (e.g. `.claude/worktrees/...`), silently
-// returning an empty list and falling through to Cowork.
-test('encodeCwdForClaudeCode: replaces "/" with "-"', () => {
-  expect(encodeCwdForClaudeCode('/Users/q/repos/foo')).toBe('-Users-q-repos-foo');
-});
-
-test('encodeCwdForClaudeCode: replaces "." with "-" too (matches Claude Code)', () => {
-  // `/.config/` → `--config-` (two dashes: one for `/`, one for `.`).
-  expect(encodeCwdForClaudeCode('/Users/q/.config/amp')).toBe('-Users-q--config-amp');
-  // `/repos/lore/.claude/worktrees/foo` is the case the original bug
-  // surfaced under (worktree paths under `.claude/`).
-  expect(
-    encodeCwdForClaudeCode('/Users/q/repos/lore/.claude/worktrees/foo'),
-  ).toBe('-Users-q-repos-lore--claude-worktrees-foo');
-});
-
-test('encodeCwdForClaudeCode: preserves underscores and existing dashes', () => {
-  expect(encodeCwdForClaudeCode('/Users/q/my_repo-name/sub')).toBe('-Users-q-my_repo-name-sub');
 });
 
 function makeTmpRoot(): string {
@@ -42,7 +18,7 @@ function makeTmpRoot(): string {
 }
 
 function stageProject(root: string, cwd: string): string {
-  const dir = path.join(root, encodeCwdForClaudeCode(cwd));
+  const dir = path.join(root, encodeCwdToDir(cwd));
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }

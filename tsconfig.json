@@ -10,7 +10,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "allowImportingTsExtensions": false,
+    "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": false,
     "forceConsistentCasingInFileNames": true

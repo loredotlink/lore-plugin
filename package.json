@@ -10,6 +10,8 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@lore/identity-store": "workspace:*",
+    "@lore/transcript-locate": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/bun": "^1.3.14",
     "@types/node": "^22.16.5",
