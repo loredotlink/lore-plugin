@@ -80,7 +80,7 @@ If you run those commands from `packages/lore-plugin`, use `$(pwd)/amp/lore.ts` 
 
 ## What you get
 
-- **`/lore:share`** — in Claude Code/Cowork/Codex, post the current local session to Lore. Returns a shareable URL, plus a brief note if your session included uploaded or generated files. Visibility is private in v1; re-share from the Lore web UI to make a thread workspace-visible.
+- **`/lore:share`** — in Claude Code/Cowork/Codex, post the current local session to Lore. Returns a shareable URL and copies it to the clipboard when a local clipboard tool is available, plus a brief note if your session included uploaded or generated files. Visibility is private in v1; re-share from the Lore web UI to make a thread workspace-visible.
 - **`/lore:fork`** — distill a visible Lore thread into intent-conditioned handoff context for continuing work.
 - **`Lore: Share active Amp thread`** — in Amp, export the active Amp thread with the local Amp CLI, upload the raw export to Lore as `harness: 'amp'`, include the Lore URL in the notification, append it back into the Amp thread, copy it to the clipboard, and show it in a copyable dialog only when the thread append or clipboard copy is unavailable.
 - **`/lore:read`** / read tools — fetch a Lore thread by ID or URL, or list and search threads by title.

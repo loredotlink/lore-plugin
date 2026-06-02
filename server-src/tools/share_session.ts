@@ -43,6 +43,7 @@ import { callCloudTool } from '../lib/cloudCall.js';
 import { AuthRequiredError, authRequiredToMcpError } from '../lib/errors.js';
 import { detectSource, type SessionSource } from '../lib/session/index.js';
 import { runReadLocalSession } from './readLocalSession.js';
+import { copyToClipboard } from '../lib/clipboard.js';
 import {
   readPluginState,
   writePluginState,
@@ -55,6 +56,7 @@ export const WATCHER_TIP =
 export type ShareSessionResult = {
   thread_id: string;
   thread_url: string;
+  clipboard_copied?: boolean;
   highlight?: {
     query: string;
     matched: boolean;
@@ -135,6 +137,7 @@ export async function shareSessionFromDisk(
     home?: string;
     source?: SessionSource;
     env?: NodeJS.ProcessEnv;
+    copyToClipboard?: (text: string) => Promise<boolean>;
   } = {},
 ): Promise<unknown> {
   const source = opts.source ?? detectSource(opts.env);
@@ -164,6 +167,11 @@ export async function shareSessionFromDisk(
     return result;
   }
 
+  const resultWithClipboard = await attachClipboardStatus(
+    result,
+    opts.copyToClipboard ?? copyToClipboard,
+  );
+
   // Read state, compute tip visibility, write incremented state.
   // Errors here must NOT fail the share — log to stderr and move on.
   let tipText: string | null = null;
@@ -179,23 +187,46 @@ export async function shareSessionFromDisk(
   }
 
   if (tipText === null) {
-    return result;
+    return resultWithClipboard;
   }
 
   // Append tip to content array if result is MCP content shape, otherwise
   // wrap both in a combined object.
   if (
-    result !== null &&
-    typeof result === 'object' &&
-    Array.isArray((result as Record<string, unknown>).content)
+    resultWithClipboard !== null &&
+    typeof resultWithClipboard === 'object' &&
+    Array.isArray((resultWithClipboard as Record<string, unknown>).content)
   ) {
-    const r = result as { content: unknown[] };
+    const r = resultWithClipboard as { content: unknown[] };
     return { ...r, content: [...r.content, { type: 'text', text: tipText }] };
   }
 
   // Result is a plain object (e.g. {thread_id, thread_url}); attach tip
   // as a separate property so the caller still gets the structured data.
-  return { ...(result as object), _tip: tipText };
+  return { ...(resultWithClipboard as object), _tip: tipText };
+}
+
+async function attachClipboardStatus(
+  result: unknown,
+  copier: (text: string) => Promise<boolean>,
+): Promise<unknown> {
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) {
+    return result;
+  }
+
+  const threadUrl = (result as Record<string, unknown>).thread_url;
+  if (typeof threadUrl !== 'string' || threadUrl.length === 0) {
+    return result;
+  }
+
+  let clipboardCopied = false;
+  try {
+    clipboardCopied = await copier(threadUrl);
+  } catch {
+    clipboardCopied = false;
+  }
+
+  return { ...(result as object), clipboard_copied: clipboardCopied };
 }
 
 export const shareSessionTool: ToolDefinition = {

@@ -217,6 +217,16 @@ describe('shareSessionFromDisk', () => {
     return sessId;
   }
 
+  function shareSessionFromDiskForTest(
+    args: Parameters<typeof shareSessionFromDisk>[0],
+    opts: Parameters<typeof shareSessionFromDisk>[1],
+  ): ReturnType<typeof shareSessionFromDisk> {
+    return shareSessionFromDisk(args, {
+      copyToClipboard: async () => false,
+      ...opts,
+    });
+  }
+
   test('happy path: reads transcript from disk and forwards to cloud — agent never sees transcript bytes', async () => {
     await writeTokens(validTokens(), home);
     const transcriptBytes = 'envelope-wrapped-jsonl-line-1\nenvelope-line-2\n';
@@ -227,7 +237,7 @@ describe('shareSessionFromDisk', () => {
       rpcSuccess(req.body.id, expected),
     );
 
-    const result = await shareSessionFromDisk(
+    const result = await shareSessionFromDiskForTest(
       {},
       { fetchImpl, home, source, env: {} },
     );
@@ -257,7 +267,7 @@ describe('shareSessionFromDisk', () => {
       rpcSuccess(req.body.id, { thread_id: 't_highlight', thread_url: 'https://lore/t_highlight#tb_1' }),
     );
 
-    await shareSessionFromDisk(
+    await shareSessionFromDiskForTest(
       { highlight: ' where the parser changed ' },
       { fetchImpl, home, source, env: {} },
     );
@@ -279,7 +289,7 @@ describe('shareSessionFromDisk', () => {
       rpcSuccess(req.body.id, { thread_id: 't_blank', thread_url: 'https://lore/t_blank' }),
     );
 
-    await shareSessionFromDisk(
+    await shareSessionFromDiskForTest(
       { highlight: '   ' },
       { fetchImpl, home, source, env: {} },
     );
@@ -317,7 +327,7 @@ describe('shareSessionFromDisk', () => {
       const { fetchImpl, calls } = captureFetch((req) =>
         rpcSuccess(req.body.id, { thread_id: 'x', thread_url: 'y' }),
       );
-      await shareSessionFromDisk(
+      await shareSessionFromDiskForTest(
         {},
         { fetchImpl, home, source, env: { CODEX_THREAD_ID: sessionId } },
       );
@@ -341,7 +351,7 @@ describe('shareSessionFromDisk', () => {
     const { fetchImpl, calls } = captureFetch((req) =>
       rpcSuccess(req.body.id, { thread_id: 'x', thread_url: 'y' }),
     );
-    await shareSessionFromDisk(
+    await shareSessionFromDiskForTest(
       { session_id: 'sess-old' },
       { fetchImpl, home, source, env: {} },
     );
@@ -363,7 +373,7 @@ describe('shareSessionFromDisk', () => {
     const { fetchImpl, calls } = captureFetch((req) =>
       rpcSuccess(req.body.id, { thread_id: 'x', thread_url: 'y' }),
     );
-    await shareSessionFromDisk(
+    await shareSessionFromDiskForTest(
       {},
       { fetchImpl, home, source, env: {} },
     );
@@ -383,7 +393,7 @@ describe('shareSessionFromDisk', () => {
     const { fetchImpl, calls } = captureFetch((req) =>
       rpcSuccess(req.body.id, { thread_id: 'x', thread_url: 'y' }),
     );
-    await shareSessionFromDisk(
+    await shareSessionFromDiskForTest(
       {},
       {
         fetchImpl,
@@ -403,7 +413,7 @@ describe('shareSessionFromDisk', () => {
 
     let caught: unknown;
     try {
-      await shareSessionFromDisk(
+      await shareSessionFromDiskForTest(
         {},
         { fetchImpl, home, source, env: {} },
       );
@@ -423,7 +433,7 @@ describe('shareSessionFromDisk', () => {
     const { fetchImpl, calls } = captureFetch(() => jsonResponse({}));
     let caught: unknown;
     try {
-      await shareSessionFromDisk(
+      await shareSessionFromDiskForTest(
         { session_id: 'nope' },
         { fetchImpl, home, source, env: {} },
       );
@@ -441,7 +451,7 @@ describe('shareSessionFromDisk', () => {
     // orchestration layer must pass it through unchanged.
     stageSession('some-transcript');
     const { fetchImpl, calls } = captureFetch(() => jsonResponse({}));
-    const result = await shareSessionFromDisk(
+    const result = await shareSessionFromDiskForTest(
       {},
       { fetchImpl, home, source, env: {} },
     );
@@ -450,6 +460,89 @@ describe('shareSessionFromDisk', () => {
       content: [{ type: 'text', text: AUTH_REQUIRED_MESSAGE }],
     });
     expect(calls.length).toBe(0);
+  });
+
+  test('copies the returned Lore URL to the clipboard and reports success', async () => {
+    await writeTokens(validTokens(), home);
+    stageSession('clipboard-transcript');
+    const copied: string[] = [];
+    const { fetchImpl } = captureFetch((req) =>
+      rpcSuccess(req.body.id, { thread_id: 't_clip', thread_url: 'https://lore/t_clip' }),
+    );
+
+    const result = await shareSessionFromDisk(
+      {},
+      {
+        fetchImpl,
+        home,
+        source,
+        env: {},
+        copyToClipboard: async (url) => {
+          copied.push(url);
+          return true;
+        },
+      },
+    );
+
+    expect(copied).toEqual(['https://lore/t_clip']);
+    expect(result).toMatchObject({
+      thread_id: 't_clip',
+      thread_url: 'https://lore/t_clip',
+      clipboard_copied: true,
+    });
+  });
+
+  test('clipboard failures do not fail the share', async () => {
+    await writeTokens(validTokens(), home);
+    stageSession('clipboard-failure-transcript');
+    const { fetchImpl } = captureFetch((req) =>
+      rpcSuccess(req.body.id, { thread_id: 't_clip_fail', thread_url: 'https://lore/t_clip_fail' }),
+    );
+
+    const result = await shareSessionFromDisk(
+      {},
+      {
+        fetchImpl,
+        home,
+        source,
+        env: {},
+        copyToClipboard: async () => {
+          throw new Error('clipboard unavailable');
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      thread_id: 't_clip_fail',
+      thread_url: 'https://lore/t_clip_fail',
+      clipboard_copied: false,
+    });
+  });
+
+  test('auth-required result does not attempt clipboard copy', async () => {
+    stageSession('auth-no-clipboard-transcript');
+    const copied: string[] = [];
+    const { fetchImpl } = makeSuccessFetch();
+
+    const result = await shareSessionFromDisk(
+      {},
+      {
+        fetchImpl,
+        home,
+        source,
+        env: {},
+        copyToClipboard: async (url) => {
+          copied.push(url);
+          return true;
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      isError: true,
+      content: [{ type: 'text', text: AUTH_REQUIRED_MESSAGE }],
+    });
+    expect(copied).toEqual([]);
   });
 
   // ── Watcher soft-prompt tests ─────────────────────────────────────────────
@@ -464,7 +557,7 @@ describe('shareSessionFromDisk', () => {
     await writeTokens(validTokens(), home);
     stageSession('transcript-a');
     const { fetchImpl } = makeSuccessFetch();
-    const result = await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
+    const result = await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
     expect(result).toMatchObject({ thread_id: 't_tip', thread_url: 'https://lore/t_tip' });
     expect((result as Record<string, unknown>)._tip).toBe(WATCHER_TIP);
   });
@@ -474,7 +567,7 @@ describe('shareSessionFromDisk', () => {
     await writePluginState({ share_count: 1, watcher_prompt_dismissed: false }, home);
     stageSession('transcript-b');
     const { fetchImpl } = makeSuccessFetch();
-    const result = await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
+    const result = await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
     expect((result as Record<string, unknown>)._tip).toBe(WATCHER_TIP);
   });
 
@@ -483,7 +576,7 @@ describe('shareSessionFromDisk', () => {
     await writePluginState({ share_count: 2, watcher_prompt_dismissed: false }, home);
     stageSession('transcript-c');
     const { fetchImpl } = makeSuccessFetch();
-    const result = await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
+    const result = await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
     expect((result as Record<string, unknown>)._tip).toBe(WATCHER_TIP);
   });
 
@@ -492,7 +585,7 @@ describe('shareSessionFromDisk', () => {
     await writePluginState({ share_count: 3, watcher_prompt_dismissed: false }, home);
     stageSession('transcript-d');
     const { fetchImpl } = makeSuccessFetch();
-    const result = await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
+    const result = await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
     expect((result as Record<string, unknown>)._tip).toBeUndefined();
   });
 
@@ -501,7 +594,7 @@ describe('shareSessionFromDisk', () => {
     await writePluginState({ share_count: 0, watcher_prompt_dismissed: true }, home);
     stageSession('transcript-e');
     const { fetchImpl } = makeSuccessFetch();
-    const result = await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
+    const result = await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
     expect((result as Record<string, unknown>)._tip).toBeUndefined();
   });
 
@@ -510,7 +603,7 @@ describe('shareSessionFromDisk', () => {
     await writePluginState({ share_count: 3, watcher_prompt_dismissed: false }, home);
     stageSession('transcript-f');
     const { fetchImpl } = makeSuccessFetch();
-    await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
+    await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
     const state = await readPluginState(home);
     expect(state.share_count).toBe(4);
   });
@@ -519,7 +612,7 @@ describe('shareSessionFromDisk', () => {
     await writeTokens(validTokens(), home);
     stageSession('transcript-g'); // share_count starts at 0
     const { fetchImpl } = makeSuccessFetch();
-    await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
+    await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
     const state = await readPluginState(home);
     expect(state.share_count).toBe(1);
   });
@@ -535,7 +628,7 @@ describe('shareSessionFromDisk', () => {
     stageSession('transcript-h');
     const { fetchImpl } = makeSuccessFetch();
     // Should not throw; should still return the cloud result.
-    const result = await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
+    const result = await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
     expect(result).toMatchObject({ thread_id: 't_tip', thread_url: 'https://lore/t_tip' });
   });
 
@@ -543,7 +636,7 @@ describe('shareSessionFromDisk', () => {
     // No tokens: share fails with auth-required, plugin state must not change.
     stageSession('transcript-i');
     const { fetchImpl } = makeSuccessFetch();
-    await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
+    await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
     // File should not have been created (still at defaults).
     const state = await readPluginState(home);
     expect(state.share_count).toBe(0);
