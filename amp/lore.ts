@@ -17,6 +17,7 @@ const SAFE_AMP_TOOL_NAMES = new Set([
   'lore_login_resume',
   'get_thread',
   'list_threads',
+  'fork_thread',
   'search_threads',
 ]);
 

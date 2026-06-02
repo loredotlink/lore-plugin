@@ -3,7 +3,7 @@
  *
  * Why this module exists:
  *   Every proxy tool (share_session, get_thread, list_threads,
- *   search_threads) shares the same five lines of plumbing: get a bearer
+ *   fork_thread, search_threads) shares the same five lines of plumbing: get a bearer
  *   token, build a JSON-RPC envelope with a fresh id, POST it, handle
  *   401 specifically, propagate everything else. Centralizing here lets
  *   each tool be a thin pass-through.

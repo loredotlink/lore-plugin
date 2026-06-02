@@ -48,6 +48,7 @@ describe('generated cloud proxy tools', () => {
     expect(cloudProxyTools.map((tool) => tool.name)).toEqual([
       'list_threads',
       'get_thread',
+      'fork_thread',
       'search_threads',
     ]);
 
@@ -62,6 +63,11 @@ describe('generated cloud proxy tools', () => {
     const getThreadTool = cloudProxyTools.find((tool) => tool.name === 'get_thread')!;
     expect(getThreadTool.inputSchema.required).toEqual(['thread_id']);
     expect(getThreadTool.inputSchema.properties).toHaveProperty('thread_id');
+
+    const forkThreadTool = cloudProxyTools.find((tool) => tool.name === 'fork_thread')!;
+    expect(forkThreadTool.inputSchema.required).toEqual(['thread_id', 'forker_intent']);
+    expect(forkThreadTool.inputSchema.properties).toHaveProperty('thread_id');
+    expect(forkThreadTool.inputSchema.properties).toHaveProperty('forker_intent');
 
     const searchThreadsTool = cloudProxyTools.find((tool) => tool.name === 'search_threads')!;
     expect(searchThreadsTool.inputSchema.required).toEqual(['query']);

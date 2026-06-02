@@ -64,6 +64,7 @@ Then reload plugins from Amp's command palette with `plugins: reload`. The comma
   Tool: get_thread
   Tool: list_threads
   Tool: search_threads
+  Tool: fork_thread
 ```
 
 The canonical Amp implementation is [`amp/lore.ts`](./amp/lore.ts). This package also includes [`./.amp/plugins/lore.ts`](./.amp/plugins/lore.ts), a thin Amp-layout entrypoint that delegates to the canonical implementation without duplicating command or tool registration. Keep that package layout intact; neither `.amp/plugins/lore.ts` nor `amp/lore.ts` is standalone — they import shared files from this checkout.
@@ -80,6 +81,7 @@ If you run those commands from `packages/lore-plugin`, use `$(pwd)/amp/lore.ts` 
 ## What you get
 
 - **`/lore:share`** — in Claude Code/Cowork/Codex, post the current local session to Lore. Returns a shareable URL, plus a brief note if your session included uploaded or generated files. Visibility is private in v1; re-share from the Lore web UI to make a thread workspace-visible.
+- **`/lore:fork`** — distill a visible Lore thread into intent-conditioned handoff context for continuing work.
 - **`Lore: Share active Amp thread`** — in Amp, export the active Amp thread with the local Amp CLI, upload the raw export to Lore as `harness: 'amp'`, include the Lore URL in the notification, append it back into the Amp thread, copy it to the clipboard, and show it in a copyable dialog only when the thread append or clipboard copy is unavailable.
 - **`/lore:read`** / read tools — fetch a Lore thread by ID or URL, or list and search threads by title.
 - **`share_current_amp_thread`** — an Amp tool for explicit natural-language invocation. It accepts `{ thread_id?: string, visibility?: 'private' | 'workspace' | 'public', highlight?: string }`; if `thread_id` is omitted, `AMP_CURRENT_THREAD_ID` must be set or the tool returns an actionable error. `highlight` is a natural-language description of the block or block range to emphasize in the returned Lore URL.
@@ -94,7 +96,7 @@ The first time you use `/lore:share`, `/lore:read`, or the Amp share/read tools,
 
 The shared package contains host-specific manifests for Claude Code and Codex, an Amp TypeScript plugin entrypoint, one bundled stdio MCP server that reads Claude/Cowork/Codex local session bytes off disk, and the proxy/auth code that talks to the Lore cloud MCP at `https://lore.tanagram.ai/mcp`. The stdio binary is a Bun-compiled single executable. Auth runs in-process via the `lib/auth/` library: RFC 8628 device-code flow against WorkOS AuthKit, discovery-driven (PRM → AS metadata, cached at `~/Library/Application Support/tanagram/lore/discovery-cache.json`), with silent refresh and 401-triggered re-login. See [`DESIGN.md`](./DESIGN.md) for the full breakdown.
 
-Cloud-facing Lore MCP tool metadata lives in `packages/contracts/src/mcp.ts`. The plugin imports those specs to generate stdio proxy tools for cloud-owned tools such as `list_threads`, `get_thread`, and `search_threads`; it should not hand-maintain separate copies of those schemas. `share_session` is the intentional exception: the cloud schema requires `harness` and `transcript`, while the plugin-facing schema exposes only local session selection and highlight fields. The plugin reads the transcript from disk and forwards the cloud-shaped payload internally.
+Cloud-facing Lore MCP tool metadata lives in `packages/contracts/src/mcp.ts`. The plugin imports those specs to generate stdio proxy tools for cloud-owned tools such as `list_threads`, `get_thread`, `fork_thread`, and `search_threads`; it should not hand-maintain separate copies of those schemas. `share_session` is the intentional exception: the cloud schema requires `harness` and `transcript`, while the plugin-facing schema exposes only local session selection and highlight fields. The plugin reads the transcript from disk and forwards the cloud-shaped payload internally.
 
 Amp sharing is host-specific because Amp sessions are exported through `amp threads export <thread_id>` instead of the shared on-disk session detector. The Amp command and natural-language tool both call the same `shareAmpThread` helper, which delegates upload/auth behavior to the existing `runShareSession` core.
 

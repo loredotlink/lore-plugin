@@ -12,6 +12,7 @@ describe('tools barrel', () => {
       'share_session',
       'list_threads',
       'get_thread',
+      'fork_thread',
       'search_threads',
     ]);
   });

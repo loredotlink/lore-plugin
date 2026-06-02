@@ -69,7 +69,7 @@ The shared prompts live under `skills/` rather than a host-specific `commands/` 
 That server exposes two kinds of tools:
 
 - Local session tools: `list_local_sessions`, `read_local_session`, `share_session`
-- Lore cloud proxy tools: `get_thread`, `list_threads`, `search_threads`, `lore_login`, `lore_login_resume`
+- Lore cloud proxy tools: `get_thread`, `list_threads`, `fork_thread`, `search_threads`, `lore_login`, `lore_login_resume`
 
 Cloud proxy tool metadata is generated from the shared specs in `packages/contracts/src/mcp.ts`, so the plugin does not carry a second copy of cloud-owned tool schemas. `share_session` stays custom because the local stdio tool hides `harness` and `transcript`, reads the active session from disk, then forwards the cloud-shaped payload internally.
 
@@ -156,6 +156,8 @@ The shared `skills/read/SKILL.md` surfaces as `/lore:read` and routes user inten
 - recent/latest/no query -> `list_threads`
 
 These calls do not need local session access. They are simple authenticated proxies to the Lore cloud MCP, and the Amp plugin registers the same safe read/auth tools through the shared tools barrel.
+
+The shared `skills/fork/SKILL.md` surfaces as `/lore:fork` and calls `fork_thread({ thread_id, forker_intent })` to fetch `source_distilled`, an intent-conditioned handoff summary for continuing from a visible Lore thread.
 
 ## Auth flow
 
