@@ -7,12 +7,19 @@ description: Read from Lore by fetching a thread by ID or URL, or by listing and
 
 Use the bundled `lore-local` MCP server to fetch or search Lore threads.
 
+You can search threads semantically with a natural-language query. Use `search_threads` when the user asks an open-ended question about prior discussions, decisions, or work, not just when they provide exact keywords.
+
 ## Tool Selection
 
 - Thread ID like `th_...` or a Lore URL:
   Call `get_thread({ thread_id })`. Extract the id from the URL path if needed.
 - Keyword phrase:
   Call `search_threads({ query, limit: 10 })`.
+- Semantic/open-ended question:
+  Call `search_threads({ query: question, limit: 10 })`. Use this when the user asks about threads in a broad way that cannot be captured by deterministic filters. Examples:
+  - "what have we been thinking about our open-source strategy?"
+  - "what did we say about running multiple fastify replicas in railway?"
+  - "what are some recent decisions we've made about our Posthog setup?"
 - "recent", "latest", or no specific query:
   Call `list_threads({ limit: 10 })`.
 
