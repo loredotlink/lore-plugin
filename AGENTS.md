@@ -1,5 +1,12 @@
 # Lore plugin invariants
 
+## Plugin changes require reviewed version bumps
+
+- **Banned pattern:** PR changes under `packages/lore-plugin/` without increasing `version` in `package.json`, `.claude-plugin/plugin.json`, and `.codex-plugin/plugin.json`.
+- **Allowed exceptions:** PRs that only touch those three version manifest files.
+- **Why:** the monorepo is the plugin source of truth, and distribution changes must land through protected PRs with an explicit reviewed version bump.
+- **Enforced by:** `.github/workflows/lore-plugin-version-check.yml` via `scripts/check-lore-plugin-version-bump.mjs`.
+
 ## Cloud MCP tools are generated from shared specs
 
 - **Banned pattern:** new hand-written `server-src/tools/get_thread.ts`, `server-src/tools/list_threads.ts`, `server-src/tools/search_threads.ts`, or duplicated `inputSchema`/`description` for cloud-owned tools.
