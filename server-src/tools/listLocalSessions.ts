@@ -41,7 +41,8 @@ import type { ToolDefinition } from '../lib/tool.js';
 export type ListLocalSessionsResult = {
   sessions: Array<{
     session_id: string;
-    conversation_id: string;
+    account_id: string;
+    org_id: string;
     mtime_ms: number;
   }>;
 };
@@ -55,7 +56,8 @@ export function runListLocalSessions(source: SessionSource): ListLocalSessionsRe
   return {
     sessions: sessions.map((s) => ({
       session_id: s.sessionId,
-      conversation_id: s.conversationId ?? '',
+      account_id: s.accountId ?? '',
+      org_id: s.orgId ?? '',
       mtime_ms: s.mtimeMs,
     })),
   };

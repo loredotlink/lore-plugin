@@ -14,9 +14,9 @@ function makeTmpRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'cowork-source-test-'));
 }
 
-function stageSession(root: string, convId: string, sessId: string, mtimeMs: number): string {
-  const sessionDir = path.join(root, convId, sessId);
-  fs.mkdirSync(sessionDir, { recursive: true });
+function stageSession(root: string, accountId: string, orgId: string, sessionId: string, mtimeMs: number): string {
+  const sessionDir = path.join(root, accountId, orgId);
+  fs.mkdirSync(path.join(sessionDir, `local_${sessionId}`), { recursive: true });
   fs.utimesSync(sessionDir, new Date(mtimeMs), new Date(mtimeMs));
   return sessionDir;
 }
@@ -26,35 +26,37 @@ test('listSessions: returns empty array when root does not exist', () => {
   expect(source.listSessions()).toEqual([]);
 });
 
-test('listSessions: enumerates conv/sess pairs, newest first', () => {
+test('listSessions: enumerates account/org scopes with session ids, newest first', () => {
   const root = makeTmpRoot();
-  stageSession(root, 'conv-A', 'sess-1', 1_000);
-  stageSession(root, 'conv-A', 'sess-2', 3_000);
-  stageSession(root, 'conv-B', 'sess-3', 2_000);
+  stageSession(root, 'account-A', 'org-1', 'sess-1', 1_000);
+  stageSession(root, 'account-A', 'org-2', 'sess-2', 3_000);
+  stageSession(root, 'account-B', 'org-3', 'sess-3', 2_000);
 
   const source = new CoworkSource({ sessionsRoot: root });
   const result = source.listSessions();
 
   expect(result.map((s) => s.sessionId)).toEqual(['sess-2', 'sess-3', 'sess-1']);
-  expect(result[0]?.conversationId).toBe('conv-A');
-  expect(result[1]?.conversationId).toBe('conv-B');
+  expect(result[0]?.accountId).toBe('account-A');
+  expect(result[0]?.orgId).toBe('org-2');
+  expect(result[1]?.accountId).toBe('account-B');
 });
 
 test('findById: returns the matching session', () => {
   const root = makeTmpRoot();
-  stageSession(root, 'conv-A', 'sess-target', 1_000);
-  stageSession(root, 'conv-A', 'sess-other', 2_000);
+  stageSession(root, 'account-A', 'org-target', 'sess-target', 1_000);
+  stageSession(root, 'account-A', 'org-other', 'sess-other', 2_000);
 
   const source = new CoworkSource({ sessionsRoot: root });
   const found = source.findById('sess-target');
 
   expect(found.sessionId).toBe('sess-target');
-  expect(found.conversationId).toBe('conv-A');
+  expect(found.accountId).toBe('account-A');
+  expect(found.orgId).toBe('org-target');
 });
 
 test('findById: throws when session does not exist', () => {
   const root = makeTmpRoot();
-  stageSession(root, 'conv-A', 'sess-real', 1_000);
+  stageSession(root, 'account-A', 'org-real', 'sess-real', 1_000);
 
   const source = new CoworkSource({ sessionsRoot: root });
   expect(() => source.findById('sess-ghost')).toThrow(/sess-ghost/);
@@ -62,8 +64,8 @@ test('findById: throws when session does not exist', () => {
 
 test('resolveActive: returns newest session when env unset', () => {
   const root = makeTmpRoot();
-  stageSession(root, 'conv-A', 'sess-old', 1_000);
-  stageSession(root, 'conv-A', 'sess-new', 9_000);
+  stageSession(root, 'account-A', 'org-old', 'sess-old', 1_000);
+  stageSession(root, 'account-A', 'org-new', 'sess-new', 9_000);
 
   const source = new CoworkSource({ sessionsRoot: root });
   expect(source.resolveActive({}).sessionId).toBe('sess-new');
@@ -71,8 +73,8 @@ test('resolveActive: returns newest session when env unset', () => {
 
 test('resolveActive: COWORK_SESSION_ID env wins over newest-by-mtime', () => {
   const root = makeTmpRoot();
-  stageSession(root, 'conv-A', 'sess-targeted', 1_000);
-  stageSession(root, 'conv-A', 'sess-newer', 9_000);
+  stageSession(root, 'account-A', 'org-targeted', 'sess-targeted', 1_000);
+  stageSession(root, 'account-A', 'org-newer', 'sess-newer', 9_000);
 
   const source = new CoworkSource({ sessionsRoot: root });
   expect(
@@ -82,7 +84,7 @@ test('resolveActive: COWORK_SESSION_ID env wins over newest-by-mtime', () => {
 
 test('resolveActive: trims whitespace from COWORK_SESSION_ID', () => {
   const root = makeTmpRoot();
-  stageSession(root, 'conv-A', 'sess-target', 1_000);
+  stageSession(root, 'account-A', 'org-target', 'sess-target', 1_000);
 
   const source = new CoworkSource({ sessionsRoot: root });
   expect(
@@ -92,7 +94,7 @@ test('resolveActive: trims whitespace from COWORK_SESSION_ID', () => {
 
 test('resolveActive: blank COWORK_SESSION_ID is ignored', () => {
   const root = makeTmpRoot();
-  stageSession(root, 'conv-A', 'sess-newest', 9_000);
+  stageSession(root, 'account-A', 'org-newest', 'sess-newest', 9_000);
 
   const source = new CoworkSource({ sessionsRoot: root });
   expect(
@@ -107,7 +109,7 @@ test('resolveActive: throws when no sessions on disk', () => {
 
 test('resolveActive: throws when COWORK_SESSION_ID names a missing session', () => {
   const root = makeTmpRoot();
-  stageSession(root, 'conv-A', 'sess-real', 1_000);
+  stageSession(root, 'account-A', 'org-real', 'sess-real', 1_000);
 
   const source = new CoworkSource({ sessionsRoot: root });
   expect(() =>
@@ -117,8 +119,9 @@ test('resolveActive: throws when COWORK_SESSION_ID names a missing session', () 
 
 function stageFullSession(
   root: string,
-  convId: string,
-  sessId: string,
+  accountId: string,
+  orgId: string,
+  sessionId: string,
   opts: {
     transcript?: string;
     transcriptName?: 'audit.jsonl' | 'transcript.jsonl';
@@ -127,8 +130,8 @@ function stageFullSession(
     localSubdir?: string;
   } = {},
 ): SessionSummary {
-  const sessionDir = path.join(root, convId, sessId);
-  const localDir = path.join(sessionDir, opts.localSubdir ?? 'local_abc');
+  const sessionDir = path.join(root, accountId, orgId);
+  const localDir = path.join(sessionDir, opts.localSubdir ?? `local_${sessionId}`);
   fs.mkdirSync(localDir, { recursive: true });
   if (opts.transcript !== undefined) {
     fs.writeFileSync(
@@ -146,8 +149,9 @@ function stageFullSession(
   }
   const stat = fs.statSync(sessionDir);
   return {
-    sessionId: sessId,
-    conversationId: convId,
+    sessionId,
+    accountId,
+    orgId,
     sessionDir,
     mtimeMs: stat.mtimeMs,
   };
@@ -155,7 +159,7 @@ function stageFullSession(
 
 test('readSession: returns transcript bytes and artifact filenames', () => {
   const root = makeTmpRoot();
-  const summary = stageFullSession(root, 'conv-A', 'sess-A', {
+  const summary = stageFullSession(root, 'account-A', 'org-A', 'sess-A', {
     transcript: '{"role":"user"}\n',
     uploads: ['a.txt', 'b.png'],
     outputs: ['out.json'],
@@ -172,7 +176,7 @@ test('readSession: returns transcript bytes and artifact filenames', () => {
 
 test('readSession: accepts transcript.jsonl as a fallback filename', () => {
   const root = makeTmpRoot();
-  const summary = stageFullSession(root, 'conv-A', 'sess-A', {
+  const summary = stageFullSession(root, 'account-A', 'org-A', 'sess-A', {
     transcript: 'fallback\n',
     transcriptName: 'transcript.jsonl',
   });
@@ -183,11 +187,12 @@ test('readSession: accepts transcript.jsonl as a fallback filename', () => {
 
 test('readSession: throws when session has no local_* subdirectory', () => {
   const root = makeTmpRoot();
-  const sessionDir = path.join(root, 'conv-A', 'sess-A');
+  const sessionDir = path.join(root, 'account-A', 'org-A');
   fs.mkdirSync(sessionDir, { recursive: true });
   const summary: SessionSummary = {
     sessionId: 'sess-A',
-    conversationId: 'conv-A',
+    accountId: 'account-A',
+    orgId: 'org-A',
     sessionDir,
     mtimeMs: fs.statSync(sessionDir).mtimeMs,
   };
@@ -198,7 +203,7 @@ test('readSession: throws when session has no local_* subdirectory', () => {
 
 test('readSession: throws when local_* subdir has no transcript', () => {
   const root = makeTmpRoot();
-  const summary = stageFullSession(root, 'conv-A', 'sess-A', {});
+  const summary = stageFullSession(root, 'account-A', 'org-A', 'sess-A', {});
 
   const source = new CoworkSource({ sessionsRoot: root });
   expect(() => source.readSession(summary)).toThrow(/transcript file/);
@@ -206,7 +211,7 @@ test('readSession: throws when local_* subdir has no transcript', () => {
 
 test('readSession: picks the local_* subdir with newest transcript mtime', () => {
   const root = makeTmpRoot();
-  const sessionDir = path.join(root, 'conv-A', 'sess-A');
+  const sessionDir = path.join(root, 'account-A', 'org-A');
   fs.mkdirSync(path.join(sessionDir, 'local_old'), { recursive: true });
   fs.mkdirSync(path.join(sessionDir, 'local_new'), { recursive: true });
   fs.writeFileSync(path.join(sessionDir, 'local_old', 'audit.jsonl'), 'OLD\n');
@@ -224,7 +229,8 @@ test('readSession: picks the local_* subdir with newest transcript mtime', () =>
 
   const summary: SessionSummary = {
     sessionId: 'sess-A',
-    conversationId: 'conv-A',
+    accountId: 'account-A',
+    orgId: 'org-A',
     sessionDir,
     mtimeMs: fs.statSync(sessionDir).mtimeMs,
   };

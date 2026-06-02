@@ -201,20 +201,20 @@ describe('shareSessionFromDisk', () => {
 
   /**
    * Stage a session layout matching the real Cowork on-disk shape:
-   *   <root>/<convId>/<sessId>/local_<id>/audit.jsonl
+   *   <root>/<accountId>/<orgId>/local_<sessionId>/audit.jsonl
    * Returns the staged session_id.
    */
   function stageSession(
     transcript: string,
-    convId = 'conv-A',
-    sessId = 'sess-A',
-    localId = 'local-A',
+    accountId = 'account-A',
+    orgId = 'org-A',
+    sessionId = 'sess-A',
   ): string {
-    const sessionDir = path.join(sessionsRoot, convId, sessId);
-    const innerDir = path.join(sessionDir, `local_${localId}`);
+    const sessionDir = path.join(sessionsRoot, accountId, orgId);
+    const innerDir = path.join(sessionDir, `local_${sessionId}`);
     fs.mkdirSync(innerDir, { recursive: true });
     fs.writeFileSync(path.join(innerDir, 'audit.jsonl'), transcript);
-    return sessId;
+    return sessionId;
   }
 
   function shareSessionFromDiskForTest(
@@ -345,8 +345,8 @@ describe('shareSessionFromDisk', () => {
 
   test('explicit session_id arg picks that session', async () => {
     await writeTokens(validTokens(), home);
-    stageSession('older-transcript', 'conv-A', 'sess-old', 'local-old');
-    stageSession('newer-transcript', 'conv-A', 'sess-new', 'local-new');
+    stageSession('older-transcript', 'account-A', 'org-old', 'sess-old');
+    stageSession('newer-transcript', 'account-A', 'org-new', 'sess-new');
 
     const { fetchImpl, calls } = captureFetch((req) =>
       rpcSuccess(req.body.id, { thread_id: 'x', thread_url: 'y' }),
@@ -362,13 +362,13 @@ describe('shareSessionFromDisk', () => {
 
   test('no session_id and no env → resolves newest by mtime', async () => {
     await writeTokens(validTokens(), home);
-    stageSession('older-transcript', 'conv-A', 'sess-old', 'local-old');
+    stageSession('older-transcript', 'account-A', 'org-old', 'sess-old');
     // Force a measurable mtime gap so the newer session wins
     // regardless of filesystem timestamp granularity.
-    const oldDir = path.join(sessionsRoot, 'conv-A', 'sess-old');
+    const oldDir = path.join(sessionsRoot, 'account-A', 'org-old');
     const past = new Date(Date.now() - 10_000);
     fs.utimesSync(oldDir, past, past);
-    stageSession('newer-transcript', 'conv-A', 'sess-new', 'local-new');
+    stageSession('newer-transcript', 'account-A', 'org-new', 'sess-new');
 
     const { fetchImpl, calls } = captureFetch((req) =>
       rpcSuccess(req.body.id, { thread_id: 'x', thread_url: 'y' }),
@@ -384,11 +384,11 @@ describe('shareSessionFromDisk', () => {
 
   test('COWORK_SESSION_ID env wins over newest-by-mtime when no arg', async () => {
     await writeTokens(validTokens(), home);
-    stageSession('env-pick', 'conv-A', 'sess-env', 'local-env');
-    const envDir = path.join(sessionsRoot, 'conv-A', 'sess-env');
+    stageSession('env-pick', 'account-A', 'org-env', 'sess-env');
+    const envDir = path.join(sessionsRoot, 'account-A', 'org-env');
     const past = new Date(Date.now() - 10_000);
     fs.utimesSync(envDir, past, past);
-    stageSession('newer-transcript', 'conv-A', 'sess-new', 'local-new');
+    stageSession('newer-transcript', 'account-A', 'org-new', 'sess-new');
 
     const { fetchImpl, calls } = captureFetch((req) =>
       rpcSuccess(req.body.id, { thread_id: 'x', thread_url: 'y' }),

@@ -26,8 +26,10 @@ import { CoworkSource } from './cowork.js';
 export type SessionSummary = {
   /** Stable session identifier as the runtime understands it. */
   sessionId: string;
-  /** Conversation/thread id when the runtime exposes one (Cowork). */
-  conversationId?: string;
+  /** Cowork account id when the runtime exposes one. */
+  accountId?: string;
+  /** Cowork organization id when the runtime exposes one. */
+  orgId?: string;
   /** Absolute path to the session's on-disk directory. */
   sessionDir: string;
   /** Absolute path to the transcript file when the runtime is file-based. */
@@ -39,7 +41,8 @@ export type SessionSummary = {
 /** Bytes + metadata returned by `readSession`. */
 export type SessionPayload = {
   sessionId: string;
-  conversationId?: string;
+  accountId?: string;
+  orgId?: string;
   /** Absolute path to the transcript file. */
   transcriptPath: string;
   /** Raw bytes of the transcript file as a UTF-8 string. */

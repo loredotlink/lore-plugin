@@ -18,19 +18,20 @@ function rmrf(dir: string): void {
 }
 
 /**
- * Create a session directory at `<root>/<conv>/<sess>/local_<id>/` with
+ * Create a session directory at `<root>/<account>/<org>/local_<session>/` with
  * a minimal audit.jsonl so it's a recognisable session. mtime is set
  * on the session directory (not its parent or children) — that's what
  * `listSessions` orders by.
  */
 function makeSession(
   root: string,
-  conversationId: string,
+  accountId: string,
+  orgId: string,
   sessionId: string,
   mtimeMs: number,
 ): void {
-  const sessionDir = path.join(root, conversationId, sessionId);
-  const localDir = path.join(sessionDir, 'local_abc');
+  const sessionDir = path.join(root, accountId, orgId);
+  const localDir = path.join(sessionDir, `local_${sessionId}`);
   fs.mkdirSync(localDir, { recursive: true });
   fs.writeFileSync(path.join(localDir, 'audit.jsonl'), '{}\n', 'utf8');
   const t = mtimeMs / 1000;
@@ -89,26 +90,29 @@ describe('runListLocalSessions — behavior', () => {
   test('returns sessions newest-first, mapped to snake_case keys', () => {
     const root = path.join(tmp, 'root');
     fs.mkdirSync(root);
-    makeSession(root, 'convA', 'sess-old', 1_000_000);
-    makeSession(root, 'convB', 'sess-mid', 2_000_000);
-    makeSession(root, 'convA', 'sess-new', 3_000_000);
+    makeSession(root, 'accountA', 'org-old', 'sess-old', 1_000_000);
+    makeSession(root, 'accountB', 'org-mid', 'sess-mid', 2_000_000);
+    makeSession(root, 'accountA', 'org-new', 'sess-new', 3_000_000);
 
     const source = new CoworkSource({ sessionsRoot: root });
     const result = runListLocalSessions(source);
     expect(result.sessions).toHaveLength(3);
     expect(result.sessions[0]).toEqual({
       session_id: 'sess-new',
-      conversation_id: 'convA',
+      account_id: 'accountA',
+      org_id: 'org-new',
       mtime_ms: 3_000_000,
     });
     expect(result.sessions[1]).toEqual({
       session_id: 'sess-mid',
-      conversation_id: 'convB',
+      account_id: 'accountB',
+      org_id: 'org-mid',
       mtime_ms: 2_000_000,
     });
     expect(result.sessions[2]).toEqual({
       session_id: 'sess-old',
-      conversation_id: 'convA',
+      account_id: 'accountA',
+      org_id: 'org-old',
       mtime_ms: 1_000_000,
     });
   });
@@ -116,7 +120,7 @@ describe('runListLocalSessions — behavior', () => {
   test('result is JSON-serializable (no Date instances, no cycles)', () => {
     const root = path.join(tmp, 'root');
     fs.mkdirSync(root);
-    makeSession(root, 'conv', 'sess', 1_000_000);
+    makeSession(root, 'account', 'org', 'sess', 1_000_000);
 
     const source = new CoworkSource({ sessionsRoot: root });
     const result = runListLocalSessions(source);
@@ -129,13 +133,14 @@ describe('runListLocalSessions — behavior', () => {
   test('only exposes the documented snake_case keys (no camelCase leakage)', () => {
     const root = path.join(tmp, 'root');
     fs.mkdirSync(root);
-    makeSession(root, 'conv', 'sess', 1_000_000);
+    makeSession(root, 'account', 'org', 'sess', 1_000_000);
 
     const source = new CoworkSource({ sessionsRoot: root });
     const result = runListLocalSessions(source);
     expect(Object.keys(result.sessions[0]).sort()).toEqual([
-      'conversation_id',
+      'account_id',
       'mtime_ms',
+      'org_id',
       'session_id',
     ]);
   });
@@ -154,7 +159,8 @@ describe('listLocalSessionsTool.handler — integration', () => {
     // Every entry — if any — must match the documented snake_case shape.
     for (const entry of result.sessions) {
       expect(typeof entry.session_id).toBe('string');
-      expect(typeof entry.conversation_id).toBe('string');
+      expect(typeof entry.account_id).toBe('string');
+      expect(typeof entry.org_id).toBe('string');
       expect(typeof entry.mtime_ms).toBe('number');
     }
   });

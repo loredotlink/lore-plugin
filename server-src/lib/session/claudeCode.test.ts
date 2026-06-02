@@ -47,7 +47,7 @@ test('listSessions: enumerates *.jsonl, newest first', () => {
   const result = source.listSessions();
 
   expect(result.map((s) => s.sessionId)).toEqual(['sess-new', 'sess-mid', 'sess-old']);
-  expect(result[0]?.conversationId).toBeUndefined();
+  expect(result[0]?.accountId).toBeUndefined();
 });
 
 test('listSessions: ignores non-jsonl files and subdirectories', () => {

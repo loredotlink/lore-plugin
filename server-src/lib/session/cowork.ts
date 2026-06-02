@@ -64,7 +64,8 @@ export class CoworkSource implements SessionSource {
     }
     return {
       sessionId: session.sessionId,
-      conversationId: session.conversationId,
+      accountId: session.accountId,
+      orgId: session.orgId,
       transcriptPath,
       transcript: fs.readFileSync(transcriptPath, 'utf8'),
       uploads: listCoworkArtifactFiles(localDir, 'uploads'),

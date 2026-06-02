@@ -48,7 +48,8 @@ export type ReadLocalSessionArgs = {
 
 export type ReadLocalSessionResult = {
   session_id: string;
-  conversation_id: string;
+  account_id: string;
+  org_id: string;
   transcript: string;
   uploads: string[];
   outputs: string[];
@@ -138,7 +139,8 @@ export function runReadLocalSession(opts: {
 
   return {
     session_id: payload.sessionId,
-    conversation_id: payload.conversationId ?? '',
+    account_id: payload.accountId ?? '',
+    org_id: payload.orgId ?? '',
     transcript: payload.transcript,
     uploads: payload.uploads,
     outputs: payload.outputs,

@@ -19,13 +19,14 @@ function rmrf(dir: string): void {
 }
 
 /**
- * Create a session at `<root>/<conv>/<sess>/local_<id>/` with a
+ * Create a session at `<root>/<account>/<org>/local_<session>/` with a
  * recognisable transcript + optional uploads/outputs. mtime is set on
  * the session directory.
  */
 function makeSession(
   root: string,
-  conversationId: string,
+  accountId: string,
+  orgId: string,
   sessionId: string,
   opts: {
     transcript?: string;
@@ -36,10 +37,10 @@ function makeSession(
     noTranscript?: boolean;
   } = {},
 ): string {
-  const sessionDir = path.join(root, conversationId, sessionId);
+  const sessionDir = path.join(root, accountId, orgId);
   fs.mkdirSync(sessionDir, { recursive: true });
   if (!opts.noLocalSubdir) {
-    const localDir = path.join(sessionDir, 'local_abc');
+    const localDir = path.join(sessionDir, `local_${sessionId}`);
     fs.mkdirSync(localDir, { recursive: true });
     if (!opts.noTranscript) {
       fs.writeFileSync(
@@ -105,13 +106,13 @@ describe('runReadLocalSession — resolution priority', () => {
     fs.mkdirSync(root);
     source = new CoworkSource({ sessionsRoot: root });
     // Two sessions: A older, B newer.
-    makeSession(root, 'convA', 'sess-A', {
+    makeSession(root, 'accountA', 'org-A', 'sess-A', {
       mtimeMs: 1_000_000,
       transcript: 'A-transcript\n',
       uploads: ['a-up.txt'],
       outputs: ['a-out.json'],
     });
-    makeSession(root, 'convB', 'sess-B', {
+    makeSession(root, 'accountB', 'org-B', 'sess-B', {
       mtimeMs: 5_000_000,
       transcript: 'B-transcript\n',
       uploads: ['b-up.txt'],
@@ -125,7 +126,8 @@ describe('runReadLocalSession — resolution priority', () => {
   test('no args, no env → newest by mtime (B)', () => {
     const result = runReadLocalSession({ source, args: {}, env: {} });
     expect(result.session_id).toBe('sess-B');
-    expect(result.conversation_id).toBe('convB');
+    expect(result.account_id).toBe('accountB');
+    expect(result.org_id).toBe('org-B');
     expect(result.transcript).toBe('B-transcript\n');
     expect(result.uploads).toEqual(['b-up.txt']);
     expect(result.outputs).toEqual(['b-out.json']);
@@ -138,7 +140,8 @@ describe('runReadLocalSession — resolution priority', () => {
       env: { COWORK_SESSION_ID: 'sess-A' },
     });
     expect(result.session_id).toBe('sess-A');
-    expect(result.conversation_id).toBe('convA');
+    expect(result.account_id).toBe('accountA');
+    expect(result.org_id).toBe('org-A');
     expect(result.transcript).toBe('A-transcript\n');
   });
 
@@ -149,7 +152,7 @@ describe('runReadLocalSession — resolution priority', () => {
       env: { COWORK_SESSION_ID: 'sess-B' },
     });
     expect(result.session_id).toBe('sess-A');
-    expect(result.conversation_id).toBe('convA');
+    expect(result.account_id).toBe('accountA');
     expect(result.transcript).toBe('A-transcript\n');
   });
 
@@ -215,7 +218,7 @@ describe('runReadLocalSession — resolution priority', () => {
       env: {},
     });
     expect(result.session_id).toBe('sess-A');
-    expect(result.conversation_id).toBe('convA');
+    expect(result.account_id).toBe('accountA');
   });
 
   test('whitespace-padded COWORK_SESSION_ID env resolves the trimmed real session', () => {
@@ -225,7 +228,7 @@ describe('runReadLocalSession — resolution priority', () => {
       env: { COWORK_SESSION_ID: '  sess-A  ' },
     });
     expect(result.session_id).toBe('sess-A');
-    expect(result.conversation_id).toBe('convA');
+    expect(result.account_id).toBe('accountA');
   });
 });
 
@@ -241,7 +244,7 @@ describe('runReadLocalSession — error paths', () => {
   test('bogus session_id arg → McpError(InvalidParams) including the id', () => {
     const root = path.join(tmp, 'root');
     fs.mkdirSync(root);
-    makeSession(root, 'conv', 'real-session', { mtimeMs: 1_000_000 });
+    makeSession(root, 'account', 'org', 'real-session', { mtimeMs: 1_000_000 });
     const source = new CoworkSource({ sessionsRoot: root });
 
     let thrown: unknown;
@@ -263,7 +266,7 @@ describe('runReadLocalSession — error paths', () => {
   test('bogus COWORK_SESSION_ID env → McpError(InvalidParams) including the id', () => {
     const root = path.join(tmp, 'root');
     fs.mkdirSync(root);
-    makeSession(root, 'conv', 'real-session', { mtimeMs: 1_000_000 });
+    makeSession(root, 'account', 'org', 'real-session', { mtimeMs: 1_000_000 });
     const source = new CoworkSource({ sessionsRoot: root });
 
     let thrown: unknown;
@@ -317,7 +320,7 @@ describe('runReadLocalSession — error paths', () => {
   test('missing transcript file → McpError(InvalidParams) with lib message', () => {
     const root = path.join(tmp, 'root');
     fs.mkdirSync(root);
-    makeSession(root, 'conv', 'no-transcript', {
+    makeSession(root, 'account', 'org', 'no-transcript', {
       mtimeMs: 1_000_000,
       noTranscript: true,
     });
@@ -337,10 +340,10 @@ describe('runReadLocalSession — error paths', () => {
     expect(e.message).toContain('audit.jsonl');
   });
 
-  test('missing local_* subdirectory → McpError(InvalidParams) with lib message', () => {
+  test('missing local_* subdirectory → McpError(InvalidParams) because no session is listable', () => {
     const root = path.join(tmp, 'root');
     fs.mkdirSync(root);
-    makeSession(root, 'conv', 'no-local-subdir', {
+    makeSession(root, 'account', 'org', 'no-local-subdir', {
       mtimeMs: 1_000_000,
       noLocalSubdir: true,
     });
@@ -355,7 +358,7 @@ describe('runReadLocalSession — error paths', () => {
     expect(thrown).toBeInstanceOf(McpError);
     const e = thrown as McpError;
     expect(e.code).toBe(ErrorCode.InvalidParams);
-    expect(e.message).toContain('no local_* subdirectory');
+    expect(e.message).toContain('no Cowork session found');
   });
 });
 
@@ -371,7 +374,7 @@ describe('runReadLocalSession — return shape', () => {
   test('returns only the documented snake_case keys', () => {
     const root = path.join(tmp, 'root');
     fs.mkdirSync(root);
-    makeSession(root, 'conv', 'sess', {
+    makeSession(root, 'account', 'org', 'sess', {
       mtimeMs: 1_000_000,
       transcript: 'x',
       uploads: ['u.txt'],
@@ -381,7 +384,8 @@ describe('runReadLocalSession — return shape', () => {
 
     const result = runReadLocalSession({ source, args: {}, env: {} });
     expect(Object.keys(result).sort()).toEqual([
-      'conversation_id',
+      'account_id',
+      'org_id',
       'outputs',
       'session_id',
       'transcript',
@@ -393,7 +397,7 @@ describe('runReadLocalSession — return shape', () => {
     const root = path.join(tmp, 'root');
     fs.mkdirSync(root);
     const raw = 'not-json-at-all\n{"a":1}\nthird line';
-    makeSession(root, 'conv', 'sess', {
+    makeSession(root, 'account', 'org', 'sess', {
       mtimeMs: 1_000_000,
       transcript: raw,
     });
@@ -406,7 +410,7 @@ describe('runReadLocalSession — return shape', () => {
   test('result is JSON-serializable', () => {
     const root = path.join(tmp, 'root');
     fs.mkdirSync(root);
-    makeSession(root, 'conv', 'sess', {
+    makeSession(root, 'account', 'org', 'sess', {
       mtimeMs: 1_000_000,
       transcript: 'x',
       uploads: ['a.txt'],
