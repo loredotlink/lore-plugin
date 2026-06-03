@@ -16,8 +16,11 @@ function makeTmpRoot(): string {
 
 function stageSession(root: string, accountId: string, orgId: string, sessionId: string, mtimeMs: number): string {
   const sessionDir = path.join(root, accountId, orgId);
-  fs.mkdirSync(path.join(sessionDir, `local_${sessionId}`), { recursive: true });
-  fs.utimesSync(sessionDir, new Date(mtimeMs), new Date(mtimeMs));
+  const localDir = path.join(sessionDir, `local_${sessionId}`);
+  fs.mkdirSync(localDir, { recursive: true });
+  const transcriptPath = path.join(localDir, 'audit.jsonl');
+  fs.writeFileSync(transcriptPath, '{}\n');
+  fs.utimesSync(transcriptPath, new Date(mtimeMs), new Date(mtimeMs));
   return sessionDir;
 }
 

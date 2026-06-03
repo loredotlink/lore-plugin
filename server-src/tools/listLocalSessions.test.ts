@@ -20,7 +20,7 @@ function rmrf(dir: string): void {
 /**
  * Create a session directory at `<root>/<account>/<org>/local_<session>/` with
  * a minimal audit.jsonl so it's a recognisable session. mtime is set
- * on the session directory (not its parent or children) — that's what
+ * on the transcript file (not its parent or children) — that's what
  * `listSessions` orders by.
  */
 function makeSession(
@@ -33,9 +33,10 @@ function makeSession(
   const sessionDir = path.join(root, accountId, orgId);
   const localDir = path.join(sessionDir, `local_${sessionId}`);
   fs.mkdirSync(localDir, { recursive: true });
-  fs.writeFileSync(path.join(localDir, 'audit.jsonl'), '{}\n', 'utf8');
+  const transcriptPath = path.join(localDir, 'audit.jsonl');
+  fs.writeFileSync(transcriptPath, '{}\n', 'utf8');
   const t = mtimeMs / 1000;
-  fs.utimesSync(sessionDir, t, t);
+  fs.utimesSync(transcriptPath, t, t);
 }
 
 describe('listLocalSessionsTool — shape', () => {

@@ -202,6 +202,8 @@ describe('shareSessionFromDisk', () => {
   /**
    * Stage a session layout matching the real Cowork on-disk shape:
    *   <root>/<accountId>/<orgId>/local_<sessionId>/audit.jsonl
+   * When provided, mtimeMs is applied to the transcript because Cowork
+   * sessions are ordered by transcript mtime.
    * Returns the staged session_id.
    */
   function stageSession(
@@ -209,11 +211,16 @@ describe('shareSessionFromDisk', () => {
     accountId = 'account-A',
     orgId = 'org-A',
     sessionId = 'sess-A',
+    mtimeMs?: number,
   ): string {
     const sessionDir = path.join(sessionsRoot, accountId, orgId);
     const innerDir = path.join(sessionDir, `local_${sessionId}`);
     fs.mkdirSync(innerDir, { recursive: true });
-    fs.writeFileSync(path.join(innerDir, 'audit.jsonl'), transcript);
+    const transcriptPath = path.join(innerDir, 'audit.jsonl');
+    fs.writeFileSync(transcriptPath, transcript);
+    if (mtimeMs !== undefined) {
+      fs.utimesSync(transcriptPath, new Date(mtimeMs), new Date(mtimeMs));
+    }
     return sessionId;
   }
 
@@ -362,13 +369,8 @@ describe('shareSessionFromDisk', () => {
 
   test('no session_id and no env → resolves newest by mtime', async () => {
     await writeTokens(validTokens(), home);
-    stageSession('older-transcript', 'account-A', 'org-old', 'sess-old');
-    // Force a measurable mtime gap so the newer session wins
-    // regardless of filesystem timestamp granularity.
-    const oldDir = path.join(sessionsRoot, 'account-A', 'org-old');
-    const past = new Date(Date.now() - 10_000);
-    fs.utimesSync(oldDir, past, past);
-    stageSession('newer-transcript', 'account-A', 'org-new', 'sess-new');
+    stageSession('older-transcript', 'account-A', 'org-old', 'sess-old', 1_000);
+    stageSession('newer-transcript', 'account-A', 'org-new', 'sess-new', 2_000);
 
     const { fetchImpl, calls } = captureFetch((req) =>
       rpcSuccess(req.body.id, { thread_id: 'x', thread_url: 'y' }),
@@ -384,11 +386,8 @@ describe('shareSessionFromDisk', () => {
 
   test('COWORK_SESSION_ID env wins over newest-by-mtime when no arg', async () => {
     await writeTokens(validTokens(), home);
-    stageSession('env-pick', 'account-A', 'org-env', 'sess-env');
-    const envDir = path.join(sessionsRoot, 'account-A', 'org-env');
-    const past = new Date(Date.now() - 10_000);
-    fs.utimesSync(envDir, past, past);
-    stageSession('newer-transcript', 'account-A', 'org-new', 'sess-new');
+    stageSession('env-pick', 'account-A', 'org-env', 'sess-env', 1_000);
+    stageSession('newer-transcript', 'account-A', 'org-new', 'sess-new', 2_000);
 
     const { fetchImpl, calls } = captureFetch((req) =>
       rpcSuccess(req.body.id, { thread_id: 'x', thread_url: 'y' }),
