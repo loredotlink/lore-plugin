@@ -3,7 +3,7 @@
 Source of truth lives in `tanagram/lore` under `packages/lore-plugin`. The
 standalone `tanagram/lore-plugin` repository is mirrored from this directory.
 
-Share your Claude Code, Cowork, Codex, or Amp session to [Lore](https://lore.tanagram.ai) and read threads back, without leaving the agent.
+Share your Claude Code, Cowork, Codex, or Amp session to [Lore](https://lore.link) and read threads back, without leaving the agent.
 
 ## Install
 
@@ -94,7 +94,7 @@ The first time you use `/lore:share`, `/lore:read`, or the Amp share/read tools,
 
 ## Architecture
 
-The shared package contains host-specific manifests for Claude Code and Codex, an Amp TypeScript plugin entrypoint, one bundled stdio MCP server that reads Claude/Cowork/Codex local session bytes off disk, and the proxy/auth code that talks to the Lore cloud MCP at `https://lore.tanagram.ai/mcp`. The stdio binary is a Bun-compiled single executable. Auth runs in-process via the `lib/auth/` library: RFC 8628 device-code flow against WorkOS AuthKit, discovery-driven (PRM → AS metadata, cached at `~/Library/Application Support/tanagram/lore/discovery-cache.json`), with silent refresh and 401-triggered re-login. See [`DESIGN.md`](./DESIGN.md) for the full breakdown.
+The shared package contains host-specific manifests for Claude Code and Codex, an Amp TypeScript plugin entrypoint, one bundled stdio MCP server that reads Claude/Cowork/Codex local session bytes off disk, and the proxy/auth code that talks to the Lore cloud MCP at `https://mcp.lore.link/mcp`. The stdio binary is a Bun-compiled single executable. Auth runs in-process via the `lib/auth/` library: RFC 8628 device-code flow against WorkOS AuthKit, discovery-driven (PRM → AS metadata, cached at `~/Library/Application Support/tanagram/lore/discovery-cache.json`), with silent refresh and 401-triggered re-login. See [`DESIGN.md`](./DESIGN.md) for the full breakdown.
 
 Cloud-facing Lore MCP tool metadata lives in `packages/contracts/src/mcp.ts`. The plugin imports those specs to generate stdio proxy tools for cloud-owned tools such as `list_threads`, `get_thread`, `fork_thread`, and `search_threads`; it should not hand-maintain separate copies of those schemas. `share_session` is the intentional exception: the cloud schema requires `harness` and `transcript`, while the plugin-facing schema exposes only local session selection and highlight fields. The plugin reads the transcript from disk and forwards the cloud-shaped payload internally.
 

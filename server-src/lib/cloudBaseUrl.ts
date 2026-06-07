@@ -36,7 +36,7 @@
  * Production origin. Trailing slash deliberately absent so all call
  * sites can write `${cloudBaseUrl()}/oauth/token` without doubling.
  */
-const PROD_DEFAULT = 'https://mcp.lore.tanagram.ai';
+const PROD_DEFAULT = 'https://mcp.lore.link';
 
 const ENV_VAR_NAME = 'LORE_MCP_BASE_URL';
 const MCP_PROXY_ENV_VAR_NAME = 'LORE_MCP_PROXY_BASE_URL';
@@ -72,7 +72,7 @@ function resolveEnvUrl(envVarName: string, fallback: string): string {
   } catch {
     throw new Error(
       `${envVarName} is not a valid URL: ${JSON.stringify(raw)}. ` +
-        `Expected a fully-qualified origin like "http://localhost:4000" or "https://mcp.lore.tanagram.ai".`,
+        `Expected a fully-qualified origin like "http://localhost:4000" or "https://mcp.lore.link".`,
     );
   }
   // Only http(s) makes sense for an MCP origin.

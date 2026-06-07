@@ -10,7 +10,7 @@
       "name": "lore",
       "source": "./",
       "description": "Share local sessions to Lore and read Lore threads back.",
-      "homepage": "https://lore.tanagram.ai",
+      "homepage": "https://lore.link",
       "license": "MIT",
       "category": "collaboration",
       "keywords": ["lore", "tanagram", "share", "threads", "collaboration"]

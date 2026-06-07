@@ -7,7 +7,7 @@ import {
 
 const ENV_KEY = 'LORE_MCP_BASE_URL';
 const MCP_ENV_KEY = 'LORE_MCP_PROXY_BASE_URL';
-const PROD_DEFAULT = 'https://mcp.lore.tanagram.ai';
+const PROD_DEFAULT = 'https://mcp.lore.link';
 
 describe('cloudBaseUrl', () => {
   let saved: string | undefined;

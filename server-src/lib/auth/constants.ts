@@ -16,7 +16,7 @@
  * stable, safe to commit, and not a credential.
  *
  * Why static, not the CIMD URL:
- *   The CIMD URL (https://lore.tanagram.ai/.well-known/oauth-client.json)
+ *   The CIMD URL (https://lore.link/.well-known/oauth-client.json)
  *   IS hosted and WorkOS Connect HAS CIMD enabled — but WorkOS's CIMD
  *   support is scoped to the Authorization Code + PKCE flow, not the
  *   device authorization grant. The AS metadata at
