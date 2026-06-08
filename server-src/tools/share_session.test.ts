@@ -173,7 +173,7 @@ describe('share_session tool', () => {
     const propertyNames = Object.keys(
       shareSessionTool.inputSchema.properties!,
     );
-    expect(propertyNames).toEqual(['session_id', 'highlight']);
+    expect(propertyNames).toEqual(['session_id', 'highlight', 'title']);
     expect(shareSessionTool.inputSchema.additionalProperties).toBe(false);
     expect(shareSessionTool.inputSchema.required ?? []).toEqual([]);
   });
@@ -303,6 +303,49 @@ describe('shareSessionFromDisk', () => {
 
     expect(calls[0]!.body.params.arguments).toEqual({
       transcript: 'blank-highlight-transcript',
+      uploads: [],
+      outputs: [],
+      harness: 'cowork',
+    });
+  });
+
+  test('forwards a trimmed title to the cloud share tool', async () => {
+    await writeTokens(validTokens(), home);
+    stageSession('title-transcript');
+
+    const { fetchImpl, calls } = captureFetch((req) =>
+      rpcSuccess(req.body.id, { thread_id: 't_title', thread_url: 'https://lore/t_title' }),
+    );
+
+    await shareSessionFromDiskForTest(
+      { title: '  My Custom Thread  ' },
+      { fetchImpl, home, source, env: {} },
+    );
+
+    expect(calls[0]!.body.params.arguments).toEqual({
+      transcript: 'title-transcript',
+      uploads: [],
+      outputs: [],
+      title: 'My Custom Thread',
+      harness: 'cowork',
+    });
+  });
+
+  test('omits a blank title from the cloud share args', async () => {
+    await writeTokens(validTokens(), home);
+    stageSession('blank-title-transcript');
+
+    const { fetchImpl, calls } = captureFetch((req) =>
+      rpcSuccess(req.body.id, { thread_id: 't_blank_title', thread_url: 'https://lore/t_blank_title' }),
+    );
+
+    await shareSessionFromDiskForTest(
+      { title: '   ' },
+      { fetchImpl, home, source, env: {} },
+    );
+
+    expect(calls[0]!.body.params.arguments).toEqual({
+      transcript: 'blank-title-transcript',
       uploads: [],
       outputs: [],
       harness: 'cowork',

@@ -68,6 +68,7 @@ export type ShareSessionResult = {
 export type ShareSessionArgs = {
   session_id?: string;
   highlight?: string;
+  title?: string;
 };
 
 /**
@@ -148,12 +149,14 @@ export async function shareSessionFromDisk(
     env,
   });
   const highlight = args.highlight?.trim();
+  const title = args.title?.trim();
   const result = await runShareSession(
     {
       transcript: session.transcript,
       uploads: session.uploads,
       outputs: session.outputs,
       ...(highlight ? { highlight } : {}),
+      ...(title ? { title } : {}),
     },
     { fetchImpl: opts.fetchImpl, home: opts.home, harness: RUNTIME_TO_HARNESS[source.runtime] ?? source.runtime },
   );

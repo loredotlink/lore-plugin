@@ -18,6 +18,15 @@ Use this skill when the user asks to:
 
 Do not call `read_local_session` before sharing. The transcript bytes should not pass through the agent context.
 
+## Naming the Thread
+
+If the user asks to name the thread while sharing — for example "share and name it My Thread", "share as Auth refactor", "share this and call it X" — extract the requested name and pass it as the `title` argument to the share tool. The title sets the thread's name instead of letting Lore auto-generate one from the transcript.
+
+- "share and name it Onboarding redesign" → call the share tool with `title: "Onboarding redesign"`.
+- "share this session" (no name given) → omit `title`; Lore generates one.
+
+Strip framing words ("name it", "call it", "titled", surrounding quotes) and pass only the title itself.
+
 ## Slack Integration
 
 If the user says "share to #channel", "post to #eng", or includes a Slack channel name (with or without the `#` prefix), do the following **after** the Lore export succeeds:
