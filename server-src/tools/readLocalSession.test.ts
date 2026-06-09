@@ -20,8 +20,11 @@ function rmrf(dir: string): void {
 
 /**
  * Create a session at `<root>/<account>/<org>/local_<session>/` with a
- * recognisable transcript + optional uploads/outputs. mtime is set on
- * the session directory.
+ * recognisable transcript + optional uploads/outputs. mtime is set on the
+ * transcript file (falling back to the `local_*` directory) to match what
+ * `listCoworkSessions` actually orders on — setting it on the `<account>/<org>`
+ * directory would be ignored and leave ordering at the mercy of real write
+ * times, which tie under coarse-granularity filesystems in CI.
  */
 function makeSession(
   root: string,
@@ -66,7 +69,18 @@ function makeSession(
   }
   if (opts.mtimeMs !== undefined) {
     const t = opts.mtimeMs / 1000;
-    fs.utimesSync(sessionDir, t, t);
+    // Order is determined by the transcript file's mtime, falling back to the
+    // `local_*` directory's mtime (see listCoworkSessions). Set it on whichever
+    // the implementation will read.
+    const localDir = path.join(sessionDir, `local_${sessionId}`);
+    const transcriptPath = path.join(localDir, 'audit.jsonl');
+    if (!opts.noLocalSubdir && !opts.noTranscript) {
+      fs.utimesSync(transcriptPath, t, t);
+    } else if (!opts.noLocalSubdir) {
+      fs.utimesSync(localDir, t, t);
+    } else {
+      fs.utimesSync(sessionDir, t, t);
+    }
   }
   return sessionDir;
 }
