@@ -168,7 +168,7 @@ Flow summary:
 1. Discover the protected resource and authorization server from Lore
 2. Start WorkOS AuthKit device authorization when needed
 3. Open the browser automatically when possible
-4. Persist tokens under `~/Library/Application Support/tanagram/lore/tokens.json`
+4. Persist tokens through `@lore/identity-store` under the canonical `~/.lore/tokens.json` shared with the CLI
 5. Refresh silently when access tokens are near expiry
 6. On cloud-side 401, clear local tokens and ask the agent to run `lore_login` again
 

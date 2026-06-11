@@ -3,7 +3,7 @@
  *
  * All HTTP interactions are mocked via `fetchImpl` injection — no real network
  * calls. On-disk paths use `home` override pointing to a temp directory so
- * tests do not pollute ~/Library/Application Support/.
+ * tests do not pollute the canonical ~/.lore state dir.
  *
  * Because both `initiateDeviceCode` and `pollDeviceToken` call
  * `discoverEndpoints()` internally, the injected `fetchImpl` must handle:

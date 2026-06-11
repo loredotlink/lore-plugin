@@ -3,7 +3,7 @@
  *
  * All HTTP interactions are mocked via `fetchImpl` injection — no real
  * network calls. On-disk cache paths use `home` override pointing to a
- * temp directory so tests do not pollute ~/Library/Application Support/.
+ * temp directory so tests do not pollute the canonical ~/.lore state dir.
  *
  * Acceptance bullets covered (see task description for canonical list):
  *   ✓ Happy path: PRM at the MCP resource path → AS metadata → returns all three fields
@@ -133,22 +133,13 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('discoveryCacheFilePath', () => {
-  test('returns path alongside tokens.json in the Application Support directory', () => {
+  test('returns path alongside the canonical ~/.lore tokens.json', () => {
     const h = '/Users/test';
-    expect(discoveryCacheFilePath(h)).toBe(
-      '/Users/test/Library/Application Support/tanagram/lore/discovery-cache.json',
-    );
+    expect(discoveryCacheFilePath(h)).toBe('/Users/test/.lore/discovery-cache.json');
   });
 
   test('defaults to os.homedir() when no override is passed', () => {
-    const expected = path.join(
-      os.homedir(),
-      'Library',
-      'Application Support',
-      'tanagram',
-      'lore',
-      'discovery-cache.json',
-    );
+    const expected = path.join(os.homedir(), '.lore', 'discovery-cache.json');
     expect(discoveryCacheFilePath()).toBe(expected);
   });
 });
@@ -197,7 +188,7 @@ describe('happy path', () => {
     expect(cache.endpoints.audience).toBe(TEST_RESOURCE);
     expect(cache.endpoints.tokenEndpoint).toBe(TEST_TOKEN_ENDPOINT);
     expect(cache.endpoints.deviceAuthorizationEndpoint).toBe(TEST_DEVICE_AUTH_ENDPOINT);
-    expect(cache.baseUrl).toBe(TEST_BASE);
+    expect(cache.resource).toBe(`${TEST_BASE}/mcp`);
   });
 });
 
@@ -407,7 +398,7 @@ describe('network failure with no cache', () => {
 // ---------------------------------------------------------------------------
 
 describe('different cloudBaseUrl invalidates cache', () => {
-  test('re-fetches when cached baseUrl differs from current cloudBaseUrl()', async () => {
+  test('re-fetches when cached resource differs from current cloudBaseUrl()', async () => {
     // Populate cache for TEST_BASE.
     const { fetchImpl: firstFetch } = makeTwoStepFetch();
     await discoverEndpoints({ fetchImpl: firstFetch, home, now });
@@ -438,8 +429,8 @@ describe('different cloudBaseUrl invalidates cache', () => {
     expect(prmCallUrl).toBe(`${ALT_BASE}/.well-known/oauth-protected-resource/mcp`);
   });
 
-  test('wrong-baseUrl cache is NOT used as last-known-good fallback on network failure', async () => {
-    // Pre-populate the cache file with a DIFFERENT baseUrl than what
+  test('wrong-resource cache is NOT used as last-known-good fallback on network failure', async () => {
+    // Pre-populate the cache file with a DIFFERENT resource than what
     // cloudBaseUrl() currently returns. This simulates having previously
     // logged into staging, then switching to prod.
     const cacheDir = path.dirname(discoveryCacheFilePath(home));
@@ -447,7 +438,7 @@ describe('different cloudBaseUrl invalidates cache', () => {
     fs.writeFileSync(
       discoveryCacheFilePath(home),
       JSON.stringify({
-        baseUrl: 'https://staging.mcp.lore.tanagram.ai', // != TEST_BASE
+        resource: 'https://staging.mcp.lore.tanagram.ai/mcp', // != `${TEST_BASE}/mcp`
         endpoints: {
           audience: 'https://staging.api.lore.tanagram.ai',
           deviceAuthorizationEndpoint:

@@ -54,9 +54,17 @@
  *     `invalid_grant` triggers deletion.
  */
 
-import { z } from 'zod';
+import fs from 'node:fs';
+import {
+  OAuthInvalidGrantError,
+  OAuthNoAuthorizationServerError,
+  refreshLockDirPath,
+  refreshOAuthTokens,
+  tokenEndpointFromAccessTokenIssuer,
+  withTokenRefreshLock,
+} from '@lore/identity-store';
 import { AuthRequiredError } from '../errors';
-import { readTokens, writeTokens, deleteTokens, type Tokens } from './store';
+import { readTokens, writeTokens, deleteTokens, stateDir, type Tokens } from './store';
 import { discoverEndpoints } from './discovery';
 import { AUTHKIT_CLIENT_ID } from './constants';
 
@@ -68,35 +76,11 @@ import { AUTHKIT_CLIENT_ID } from './constants';
 const REFRESH_SKEW_MS = 30_000;
 
 /**
- * Schema for the cloud's successful refresh response.
- *
- * Token strings, token type, and `expires_in` are required. `expires_in` must be
- * a positive integer (seconds) — a float here usually means someone confused
- * seconds with milliseconds upstream, and we'd rather fail loud than silently
- * truncate to a window that expires in the past.
- *
- * `scope` is optional because WorkOS AuthKit does not echo it in token responses.
- * When omitted, we preserve the scope already stored on disk.
- *
- * We intentionally do NOT model server-provided `expires_at` even if
- * one appears: the plugin computes its own from `now() + expires_in *
- * 1000`. Any extra fields the server includes are ignored.
- */
-const RefreshResponseSchema = z.object({
-  access_token: z.string().min(1),
-  refresh_token: z.string().min(1),
-  expires_in: z.number().int().positive(),
-  token_type: z.string().min(1),
-  scope: z.string().optional(),
-});
-
-type RefreshResponse = z.infer<typeof RefreshResponseSchema>;
-
-/**
  * The module-scope mutex. Exactly one concurrent refresh per process.
  * Tests can clear it via `__resetInFlightForTests`.
  */
 let inFlight: Promise<string> | null = null;
+let activeRefreshLockStateDir: string | null = null;
 
 interface Options {
   now?: () => number;
@@ -153,7 +137,21 @@ async function doGet(opts: Options): Promise<string> {
     return tokens.access_token;
   }
 
-  return refreshAndPersist(tokens, nowFn, fetchFn, home);
+  const lockStateDir = stateDir(home);
+  activeRefreshLockStateDir = lockStateDir;
+  return withTokenRefreshLock(lockStateDir, async () => {
+    const latest = await readTokens(home);
+    if (latest === null) {
+      throw new AuthRequiredError();
+    }
+
+    const latestRemaining = latest.expires_at - nowFn();
+    if (latestRemaining > REFRESH_SKEW_MS) {
+      return latest.access_token;
+    }
+
+    return refreshAndPersist(latest, nowFn, fetchFn, home);
+  });
 }
 
 async function refreshAndPersist(
@@ -167,79 +165,32 @@ async function refreshAndPersist(
   // a fast read. If discovery itself fails (network error, 5xx on PRM),
   // the error propagates as-is WITHOUT deleting the tokens file — the
   // user's refresh token is still valid and the failure is transient.
-  const { tokenEndpoint } = await discoverEndpoints({ fetchImpl: fetchFn, home, now: nowFn });
-
-  const body = new URLSearchParams({
-    grant_type: 'refresh_token',
-    refresh_token: current.refresh_token,
-    client_id: AUTHKIT_CLIENT_ID,
-  }).toString();
-
-  const res = await fetchFn(tokenEndpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body,
-  });
-
-  if (!res.ok) {
-    // Try to read the body as JSON to detect `invalid_grant`. If the
-    // body isn't JSON or doesn't contain an `error` field, we treat
-    // this as a generic transient failure and rethrow without touching
-    // the tokens file. The user's refresh token is preserved across
-    // 429s, 503s, intermittent network blips, etc.
-    let parsedError: { error?: unknown } | undefined;
-    try {
-      parsedError = (await res.json()) as { error?: unknown };
-    } catch {
-      parsedError = undefined;
-    }
-    if (parsedError && parsedError.error === 'invalid_grant') {
-      // Refresh token is dead. Wipe the file so the next call lands on
-      // the "no tokens" path (which throws AuthRequiredError cleanly)
-      // and the agent can call lore_login.
+  let tokenEndpoint: string;
+  try {
+    ({ tokenEndpoint } = await discoverEndpoints({ fetchImpl: fetchFn, home, now: nowFn }));
+  } catch (error) {
+    if (!(error instanceof OAuthNoAuthorizationServerError)) throw error;
+    const fallback = tokenEndpointFromAccessTokenIssuer(current.access_token);
+    if (fallback === null) throw error;
+    tokenEndpoint = fallback;
+  }
+  try {
+    const updated = await refreshOAuthTokens({
+      current,
+      tokenEndpoint,
+      clientId: AUTHKIT_CLIENT_ID,
+      fetchImpl: fetchFn,
+      now: nowFn,
+    });
+    await writeTokens(updated, home);
+    return updated.access_token;
+  } catch (error) {
+    if (error instanceof OAuthInvalidGrantError) {
       await deleteTokens(home);
       throw new AuthRequiredError();
     }
-    // Other 4xx / 5xx: leave the tokens file alone and surface the
-    // failure. Include the status so the agent log is legible; do NOT
-    // include the response body (could contain echoed credentials).
-    throw new Error(
-      `Cloud refresh failed with HTTP ${res.status}; tokens preserved for retry.`,
-    );
+    throw error;
   }
-
-  let json: unknown;
-  try {
-    json = await res.json();
-  } catch {
-    // Do NOT include the parser error message: some JSON parsers echo a
-    // snippet of the offending input, and on the success path the body
-    // contains an access token. Status alone is enough for diagnosis.
-    throw new Error(
-      `Cloud refresh response was not valid JSON (HTTP ${res.status}).`,
-    );
-  }
-  const parsed = RefreshResponseSchema.safeParse(json);
-  if (!parsed.success) {
-    // Zod issues reference field paths and expected types, but not
-    // the failing values themselves, so this message can safely be
-    // surfaced upward. We do not include the raw response body —
-    // it contains an access token on the success path.
-    throw new Error(
-      `Cloud refresh response failed schema validation: ${parsed.error.message}`,
-    );
-  }
-
-  const fresh: RefreshResponse = parsed.data;
-  const updated: Tokens = {
-    access_token: fresh.access_token,
-    refresh_token: fresh.refresh_token,
-    // Compute locally — never trust a server-supplied expires_at.
-    expires_at: nowFn() + fresh.expires_in * 1000,
-    scope: fresh.scope ?? current.scope,
-  };
-  await writeTokens(updated, home);
-  return updated.access_token;
 }
 
 /**
@@ -254,4 +205,8 @@ async function refreshAndPersist(
  */
 export function __resetInFlightForTests(): void {
   inFlight = null;
+  if (activeRefreshLockStateDir !== null) {
+    fs.rmSync(refreshLockDirPath(activeRefreshLockStateDir), { recursive: true, force: true });
+    activeRefreshLockStateDir = null;
+  }
 }

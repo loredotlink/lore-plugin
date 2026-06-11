@@ -38,7 +38,7 @@ export { TokensSchema, type Tokens };
  * ships on macOS only but `~/.lore` is the CLI's cross-platform home, so both
  * clients resolve to the same path in production.
  */
-function stateDir(home: string = os.homedir()): string {
+export function stateDir(home: string = os.homedir()): string {
   return path.join(home, '.lore');
 }
 

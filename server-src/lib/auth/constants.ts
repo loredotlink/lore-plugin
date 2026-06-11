@@ -1,3 +1,8 @@
+import {
+  AUTHKIT_CLIENT_ID as SHARED_AUTHKIT_CLIENT_ID,
+  AUTHKIT_SCOPES as SHARED_AUTHKIT_SCOPES,
+} from '@lore/identity-store';
+
 /**
  * Shared OAuth client constants for the AuthKit migration.
  *
@@ -42,7 +47,7 @@
  *   this constant can switch to the CIMD URL and the audience-fallback
  *   in workosMcp.ts can be removed.
  */
-export const AUTHKIT_CLIENT_ID = 'client_01KRSDB9SR20N7MB0D9MPS05Q6';
+export const AUTHKIT_CLIENT_ID = SHARED_AUTHKIT_CLIENT_ID;
 
 /**
  * OAuth scopes requested by the device-code and refresh flows.
@@ -67,4 +72,4 @@ export const AUTHKIT_CLIENT_ID = 'client_01KRSDB9SR20N7MB0D9MPS05Q6';
  * rejected or silently ignored; requesting OIDC scopes is the correct contract
  * for a public device-flow client.
  */
-export const AUTHKIT_SCOPES = 'openid email profile offline_access';
+export const AUTHKIT_SCOPES = SHARED_AUTHKIT_SCOPES;

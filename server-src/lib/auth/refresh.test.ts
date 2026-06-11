@@ -3,7 +3,7 @@
  *
  * All HTTP interactions are mocked via `fetchImpl` injection — no real
  * network calls. On-disk paths use `home` override pointing to a temp
- * directory so tests do not pollute ~/Library/Application Support/.
+ * directory so tests do not pollute the canonical ~/.lore state dir.
  *
  * The new refresh path calls `discoverEndpoints()` before posting to the
  * token endpoint, so a test's injected `fetchImpl` must handle THREE
@@ -51,7 +51,7 @@ import {
   __resetInFlightForTests,
 } from './refresh';
 import { readTokens, writeTokens, tokensFilePath, type Tokens } from './store';
-import { discoverEndpoints, __resetInFlightForTests as __resetDiscoveryInFlightForTests } from './discovery';
+import { discoverEndpoints, discoveryCacheFilePath, __resetInFlightForTests as __resetDiscoveryInFlightForTests } from './discovery';
 import { __resetCloudBaseUrlForTests } from '../cloudBaseUrl';
 import { AUTHKIT_CLIENT_ID } from './constants';
 
@@ -129,6 +129,12 @@ function successRefreshBody(overrides: Record<string, unknown> = {}) {
     scope: 'mcp.read mcp.write',
     ...overrides,
   };
+}
+
+function jwtWithIssuer(issuer: string): string {
+  const header = Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ iss: issuer })).toString('base64url');
+  return `${header}.${payload}.signature`;
 }
 
 /**
@@ -436,14 +442,7 @@ describe('getValidAccessToken', () => {
     const tokens = expiredTokens();
     await writeTokens(tokens, home);
     // Wipe the discovery cache so we force a live discovery attempt.
-    const cacheDir = path.join(
-      home,
-      'Library',
-      'Application Support',
-      'tanagram',
-      'lore',
-    );
-    const cacheFile = path.join(cacheDir, 'discovery-cache.json');
+    const cacheFile = discoveryCacheFilePath(home);
     if (fs.existsSync(cacheFile)) fs.unlinkSync(cacheFile);
 
     // PRM returns 503 — discovery will fail.
@@ -463,19 +462,42 @@ describe('getValidAccessToken', () => {
     expect(await readTokens(home)).toEqual(tokens);
   });
 
+  test('falls back to the stored token issuer when PRM has no authorization server', async () => {
+    __resetDiscoveryInFlightForTests();
+    const issuer = 'https://issuer.test';
+    await writeTokens(expiredTokens({ access_token: jwtWithIssuer(issuer) }), home);
+    const cacheFile = discoveryCacheFilePath(home);
+    if (fs.existsSync(cacheFile)) fs.unlinkSync(cacheFile);
+
+    let capturedBody: string | undefined;
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      const urlStr =
+        typeof url === 'string' ? url : url instanceof URL ? url.toString() : (url as Request).url;
+      if (urlStr.includes('oauth-protected-resource')) {
+        return jsonResponse({
+          resource: TEST_RESOURCE,
+          authorization_servers: [],
+        });
+      }
+      if (urlStr === `${issuer}/oauth2/token`) {
+        capturedBody = init?.body as string;
+        return jsonResponse(successRefreshBody());
+      }
+      throw new Error(`Unexpected URL: ${urlStr}`);
+    }) as unknown as typeof fetch;
+
+    expect(await getValidAccessToken({ now, fetchImpl, home })).toBe('access-NEW');
+    const params = new URLSearchParams(capturedBody);
+    expect(params.get('refresh_token')).toBe('refresh-OLD');
+    expect((await readTokens(home))?.refresh_token).toBe('refresh-NEW');
+  });
+
   test('discovery is called BEFORE the token POST in the expired-token path', async () => {
     // Reset so discovery runs fresh.
     __resetDiscoveryInFlightForTests();
     const tokens = expiredTokens();
     await writeTokens(tokens, home);
-    const cacheDir = path.join(
-      home,
-      'Library',
-      'Application Support',
-      'tanagram',
-      'lore',
-    );
-    const cacheFile = path.join(cacheDir, 'discovery-cache.json');
+    const cacheFile = discoveryCacheFilePath(home);
     if (fs.existsSync(cacheFile)) fs.unlinkSync(cacheFile);
 
     const callOrder: string[] = [];
