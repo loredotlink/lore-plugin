@@ -21,13 +21,38 @@
  * always surface the consent prompt or capture status.
  */
 
+import { execFile } from 'node:child_process';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import {
   buildConsentSurface,
   buildSetupStatus,
 } from '../lib/consentSurface.js';
-import { readPluginState } from '../lib/pluginState.js';
-import type { ToolDefinition } from '../lib/tool.js';
+import { readPluginState, writePluginState, type ConsentState } from '../lib/pluginState.js';
+import type { ToolDefinition, ToolDispatchOpts } from '../lib/tool.js';
+
+type CliStatusReport = {
+  health?: unknown;
+  healthy?: unknown;
+  enabled?: unknown;
+  running?: unknown;
+  status?: { state?: unknown };
+};
+
+type CliCommandResult = { status: number | null; stdout: string; stderr: string };
+
+type BackgroundCaptureStatusResult =
+  | {
+      ok: true;
+      consent: Extract<ConsentState, 'installed' | 'idle' | 'capturing'>;
+      report: CliStatusReport;
+      warning?: string;
+    }
+  | { ok: false; message: string };
+
+type LoreSetupOpts = {
+  home?: string;
+  readBackgroundCaptureStatus?: () => Promise<BackgroundCaptureStatusResult>;
+};
 
 /**
  * Core setup handler, separated from the tool definition so tests can
@@ -36,7 +61,7 @@ import type { ToolDefinition } from '../lib/tool.js';
  */
 export async function runLoreSetup(
   _args: Record<string, never>,
-  opts: { home?: string } = {},
+  opts: LoreSetupOpts = {},
 ): Promise<CallToolResult> {
   const state = await readPluginState(opts.home);
 
@@ -45,6 +70,18 @@ export async function runLoreSetup(
       macSupported: process.platform === 'darwin',
       consent: state.consent,
     });
+  }
+
+  if (state.consent === 'installed' || state.consent === 'idle' || state.consent === 'capturing') {
+    const status = await (opts.readBackgroundCaptureStatus ?? readBackgroundCaptureStatus)();
+    if (status.ok) {
+      if (status.consent !== state.consent) {
+        await writePluginState({ ...state, consent: status.consent }, opts.home);
+      }
+      const result = appendCliStatus(buildSetupStatus(status.consent), status.report);
+      return status.warning ? appendCliStatusWarning(result, status.warning) : result;
+    }
+    return appendCliStatusWarning(buildSetupStatus(state.consent), status.message);
   }
 
   return buildSetupStatus(state.consent);
@@ -62,7 +99,79 @@ export const loreSetupTool: ToolDefinition = {
     properties: {},
     additionalProperties: false,
   },
-  handler: async (args: unknown): Promise<unknown> => {
-    return runLoreSetup(args as Record<string, never>);
+  handler: async (args: unknown, opts?: ToolDispatchOpts): Promise<unknown> => {
+    return runLoreSetup(args as Record<string, never>, { home: opts?.home });
   },
 };
+
+export async function readBackgroundCaptureStatus(
+  opts: { runCommand?: (args: string[]) => Promise<CliCommandResult> } = {},
+): Promise<BackgroundCaptureStatusResult> {
+  const result = await (opts.runCommand ?? runLoreCli)(['status', '--json']);
+  let report: CliStatusReport;
+  try {
+    report = JSON.parse(result.stdout) as CliStatusReport;
+  } catch (error) {
+    if (result.status !== 0) {
+      return { ok: false, message: commandError(result) };
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, message: `invalid JSON from lore status --json: ${message}` };
+  }
+  return {
+    ok: true,
+    consent: consentFromStatusReport(report),
+    report,
+    ...(result.status === 0 ? {} : { warning: commandError(result) }),
+  };
+}
+
+function runLoreCli(args: string[]): Promise<CliCommandResult> {
+  return new Promise((resolve) => {
+    execFile('lore', args, { encoding: 'utf8', maxBuffer: 1024 * 1024, timeout: 5000 }, (error, stdout, stderr) => {
+      const code = (error as { code?: unknown } | null)?.code;
+      resolve({
+        status: typeof code === 'number' ? code : error ? null : 0,
+        stdout: typeof stdout === 'string' ? stdout : '',
+        stderr: typeof stderr === 'string' ? stderr : '',
+      });
+    });
+  });
+}
+
+function consentFromStatusReport(
+  report: CliStatusReport,
+): Extract<ConsentState, 'installed' | 'idle' | 'capturing'> {
+  if (report.status?.state === 'running') return 'capturing';
+  if (report.status?.state === 'idle') return 'idle';
+  return 'installed';
+}
+
+function appendCliStatus(result: CallToolResult, report: CliStatusReport): CallToolResult {
+  return appendText(
+    result,
+    [
+      '',
+      `CLI daemon reports: ${String(report.health ?? 'unknown')}`,
+      `Enabled: ${String(report.enabled ?? 'unknown')}`,
+      `Running: ${String(report.running ?? 'unknown')}`,
+      `Healthy: ${String(report.healthy ?? 'unknown')}`,
+    ].join('\n'),
+  );
+}
+
+function appendCliStatusWarning(result: CallToolResult, message: string): CallToolResult {
+  return appendText(result, `\nCould not refresh CLI daemon status: ${message}`);
+}
+
+function appendText(result: CallToolResult, suffix: string): CallToolResult {
+  const content = result.content.map((block) => {
+    if (block.type !== 'text') return block;
+    return { ...block, text: `${block.text}${suffix}` };
+  });
+  return { ...result, content };
+}
+
+function commandError(result: { status: number | null; stdout: string; stderr: string }): string {
+  return (result.stderr || result.stdout || `exit status ${result.status ?? 'unknown'}`).trim();
+}

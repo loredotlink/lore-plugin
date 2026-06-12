@@ -2,8 +2,8 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { runLoreSetup, loreSetupTool } from './lore_setup';
-import { writePluginState } from '../lib/pluginState';
+import { runLoreSetup, loreSetupTool, readBackgroundCaptureStatus } from './lore_setup';
+import { readPluginState, writePluginState } from '../lib/pluginState';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -28,6 +28,19 @@ function textOf(result: { content: unknown[] }): string {
     .filter((b) => b.type === 'text')
     .map((b) => (b as { type: string; text: string }).text)
     .join('\n');
+}
+
+function cliStatus(consent: 'installed' | 'idle' | 'capturing') {
+  return async () => ({
+    ok: true as const,
+    consent,
+    report: {
+      health: consent === 'capturing' ? 'running' : consent,
+      healthy: consent === 'capturing',
+      enabled: true,
+      running: consent === 'capturing',
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -72,6 +85,91 @@ describe('runLoreSetup — consent surface (unconsented / declined)', () => {
     expect(result.structuredContent).toMatchObject({ consent: 'declined' });
     expect(textOf(result)).toBeTruthy();
   });
+
+  test('consent=unconsented → does not refresh CLI status', async () => {
+    const result = await runLoreSetup(
+      {},
+      {
+        home,
+        readBackgroundCaptureStatus: async () => {
+          throw new Error('should not shell out before consent');
+        },
+      },
+    );
+
+    expect(textOf(result)).toContain('Lore Background Capture');
+  });
+
+  test('consent=declined → does not refresh CLI status', async () => {
+    await writePluginState(
+      { share_count: 0, watcher_prompt_dismissed: false, consent: 'declined' },
+      home,
+    );
+
+    const result = await runLoreSetup(
+      {},
+      {
+        home,
+        readBackgroundCaptureStatus: async () => {
+          throw new Error('should not shell out after decline');
+        },
+      },
+    );
+
+    expect(result.structuredContent).toMatchObject({ consent: 'declined' });
+    expect(textOf(result)).toContain('Lore Background Capture');
+  });
+});
+
+describe('readBackgroundCaptureStatus', () => {
+  test('maps a healthy running CLI status report to capturing', async () => {
+    const result = await readBackgroundCaptureStatus({
+      runCommand: async () => ({
+        status: 0,
+        stdout: JSON.stringify({ health: 'running', healthy: true, status: { state: 'running' } }),
+        stderr: '',
+      }),
+    });
+
+    expect(result).toMatchObject({ ok: true, consent: 'capturing' });
+  });
+
+  test('maps an idle CLI status report to idle', async () => {
+    const result = await readBackgroundCaptureStatus({
+      runCommand: async () => ({
+        status: 0,
+        stdout: JSON.stringify({ health: 'idle', healthy: true, status: { state: 'idle' } }),
+        stderr: '',
+      }),
+    });
+
+    expect(result).toMatchObject({ ok: true, consent: 'idle' });
+  });
+
+  test('uses valid JSON status even when lore status exits non-zero because unhealthy', async () => {
+    const result = await readBackgroundCaptureStatus({
+      runCommand: async () => ({
+        status: 1,
+        stdout: JSON.stringify({ health: 'disabled', healthy: false, enabled: false, running: false }),
+        stderr: 'Lore background uploads are not healthy: disabled',
+      }),
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      consent: 'installed',
+      report: { health: 'disabled', healthy: false, enabled: false, running: false },
+      warning: 'Lore background uploads are not healthy: disabled',
+    });
+  });
+
+  test('returns a status failure when stdout is not JSON', async () => {
+    const result = await readBackgroundCaptureStatus({
+      runCommand: async () => ({ status: 1, stdout: 'not-json', stderr: 'command failed' }),
+    });
+
+    expect(result).toEqual({ ok: false, message: 'command failed' });
+  });
 });
 
 describe('runLoreSetup — status result (consented / installed / idle / capturing)', () => {
@@ -100,8 +198,62 @@ describe('runLoreSetup — status result (consented / installed / idle / capturi
       { share_count: 0, watcher_prompt_dismissed: false, consent: 'installed' },
       home,
     );
-    const result = await runLoreSetup({}, { home });
+    const result = await runLoreSetup(
+      {},
+      { home, readBackgroundCaptureStatus: cliStatus('installed') },
+    );
     expect(resourceBlocks(result)).toHaveLength(0);
+  });
+
+  test('consent=installed → delegates status to the CLI and persists reported capturing state', async () => {
+    await writePluginState(
+      { share_count: 0, watcher_prompt_dismissed: false, consent: 'installed' },
+      home,
+    );
+
+    const result = await runLoreSetup(
+      {},
+      {
+        home,
+        readBackgroundCaptureStatus: async () => ({
+          ok: true,
+          consent: 'capturing',
+          report: {
+            health: 'running',
+            healthy: true,
+            enabled: true,
+            running: true,
+          },
+        }),
+      },
+    );
+
+    expect(textOf(result)).toContain('CLI daemon reports: running');
+    expect(textOf(result)).toContain('Healthy: true');
+    expect((await readPluginState(home)).consent).toBe('capturing');
+  });
+
+  test('consent=idle → preserves plugin status when CLI status fails', async () => {
+    await writePluginState(
+      { share_count: 0, watcher_prompt_dismissed: false, consent: 'idle' },
+      home,
+    );
+
+    const result = await runLoreSetup(
+      {},
+      {
+        home,
+        readBackgroundCaptureStatus: async () => ({
+          ok: false,
+          message: 'lore status --json failed: command not found',
+        }),
+      },
+    );
+
+    const text = textOf(result);
+    expect(text).toContain('Lore background capture: idle / paused.');
+    expect(text).toContain('Could not refresh CLI daemon status');
+    expect((await readPluginState(home)).consent).toBe('idle');
   });
 
   test('consent=idle → status result with NO resource block', async () => {
@@ -109,7 +261,10 @@ describe('runLoreSetup — status result (consented / installed / idle / capturi
       { share_count: 0, watcher_prompt_dismissed: false, consent: 'idle' },
       home,
     );
-    const result = await runLoreSetup({}, { home });
+    const result = await runLoreSetup(
+      {},
+      { home, readBackgroundCaptureStatus: cliStatus('idle') },
+    );
     expect(resourceBlocks(result)).toHaveLength(0);
   });
 
@@ -118,7 +273,10 @@ describe('runLoreSetup — status result (consented / installed / idle / capturi
       { share_count: 0, watcher_prompt_dismissed: false, consent: 'capturing' },
       home,
     );
-    const result = await runLoreSetup({}, { home });
+    const result = await runLoreSetup(
+      {},
+      { home, readBackgroundCaptureStatus: cliStatus('capturing') },
+    );
     expect(resourceBlocks(result)).toHaveLength(0);
   });
 
@@ -127,7 +285,10 @@ describe('runLoreSetup — status result (consented / installed / idle / capturi
       { share_count: 0, watcher_prompt_dismissed: false, consent: 'capturing' },
       home,
     );
-    const result = await runLoreSetup({}, { home });
+    const result = await runLoreSetup(
+      {},
+      { home, readBackgroundCaptureStatus: cliStatus('capturing') },
+    );
     expect(textOf(result).toLowerCase()).toMatch(/active|captur/);
   });
 });
