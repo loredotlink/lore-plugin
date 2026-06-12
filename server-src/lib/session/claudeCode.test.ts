@@ -83,7 +83,35 @@ test('findById: throws when no matching .jsonl exists', () => {
   expect(() => source.findById('sess-ghost')).toThrow(/sess-ghost/);
 });
 
-test('resolveActive: returns the session named by CLAUDE_SESSION_ID', () => {
+test('resolveActive: returns the session named by CLAUDE_CODE_SESSION_ID', () => {
+  // Claude Code (as of June 2026) injects CLAUDE_CODE_SESSION_ID
+  // (note the `CODE` in the middle). This is the primary path; the
+  // bare CLAUDE_SESSION_ID alias is back-compat only.
+  const root = makeTmpRoot();
+  const cwd = '/Users/q/repos/foo';
+  const projectDir = stageProject(root, cwd);
+  stageSessionFile(projectDir, 'sess-target', 1_000);
+  stageSessionFile(projectDir, 'sess-other', 9_000);
+
+  const source = new ClaudeCodeSource({ projectsRoot: root, cwd });
+  expect(
+    source.resolveActive({ CLAUDE_CODE_SESSION_ID: 'sess-target' }).sessionId,
+  ).toBe('sess-target');
+});
+
+test('resolveActive: trims whitespace from CLAUDE_CODE_SESSION_ID', () => {
+  const root = makeTmpRoot();
+  const cwd = '/Users/q/repos/foo';
+  const projectDir = stageProject(root, cwd);
+  stageSessionFile(projectDir, 'sess-target', 1_000);
+
+  const source = new ClaudeCodeSource({ projectsRoot: root, cwd });
+  expect(
+    source.resolveActive({ CLAUDE_CODE_SESSION_ID: '  sess-target  ' }).sessionId,
+  ).toBe('sess-target');
+});
+
+test('resolveActive: returns the session named by CLAUDE_SESSION_ID (back-compat alias)', () => {
   const root = makeTmpRoot();
   const cwd = '/Users/q/repos/foo';
   const projectDir = stageProject(root, cwd);
@@ -96,23 +124,45 @@ test('resolveActive: returns the session named by CLAUDE_SESSION_ID', () => {
   ).toBe('sess-target');
 });
 
-test('resolveActive: trims whitespace from CLAUDE_SESSION_ID', () => {
+test('resolveActive: CLAUDE_CODE_SESSION_ID takes precedence over CLAUDE_SESSION_ID', () => {
+  // If both are set, the newer canonical var wins. This protects
+  // against a stale CLAUDE_SESSION_ID lingering in a user's shell
+  // while the parent Claude Code process injects the real one.
+  const root = makeTmpRoot();
+  const cwd = '/Users/q/repos/foo';
+  const projectDir = stageProject(root, cwd);
+  stageSessionFile(projectDir, 'sess-correct', 1_000);
+  stageSessionFile(projectDir, 'sess-stale', 9_000);
+
+  const source = new ClaudeCodeSource({ projectsRoot: root, cwd });
+  expect(
+    source.resolveActive({
+      CLAUDE_CODE_SESSION_ID: 'sess-correct',
+      CLAUDE_SESSION_ID: 'sess-stale',
+    }).sessionId,
+  ).toBe('sess-correct');
+});
+
+test('resolveActive: falls back to CLAUDE_SESSION_ID when CLAUDE_CODE_SESSION_ID is blank', () => {
   const root = makeTmpRoot();
   const cwd = '/Users/q/repos/foo';
   const projectDir = stageProject(root, cwd);
   stageSessionFile(projectDir, 'sess-target', 1_000);
+  stageSessionFile(projectDir, 'sess-other', 9_000);
 
   const source = new ClaudeCodeSource({ projectsRoot: root, cwd });
   expect(
-    source.resolveActive({ CLAUDE_SESSION_ID: '  sess-target  ' }).sessionId,
+    source.resolveActive({
+      CLAUDE_CODE_SESSION_ID: '   ',
+      CLAUDE_SESSION_ID: 'sess-target',
+    }).sessionId,
   ).toBe('sess-target');
 });
 
-// Claude Code does NOT inject CLAUDE_SESSION_ID into MCP stdio
-// children as of May 2026. The fallback to newest-by-mtime is the
-// common path in practice, so these tests pin both halves of the
-// behavior: env id wins when set, newest jsonl wins otherwise.
-test('resolveActive: falls back to newest-mtime jsonl when CLAUDE_SESSION_ID is missing', () => {
+// Mtime fallback only fires when neither env var is set. With Claude
+// Code injecting CLAUDE_CODE_SESSION_ID in practice, the fallback is
+// the cold-path safety net for direct binary invocations.
+test('resolveActive: falls back to newest-mtime jsonl when both env vars are missing', () => {
   const root = makeTmpRoot();
   const cwd = '/Users/q/repos/foo';
   const projectDir = stageProject(root, cwd);
@@ -124,14 +174,19 @@ test('resolveActive: falls back to newest-mtime jsonl when CLAUDE_SESSION_ID is 
   expect(source.resolveActive({}).sessionId).toBe('sess-new');
 });
 
-test('resolveActive: falls back to newest-mtime jsonl when CLAUDE_SESSION_ID is blank', () => {
+test('resolveActive: falls back to newest-mtime jsonl when both env vars are blank', () => {
   const root = makeTmpRoot();
   const cwd = '/Users/q/repos/foo';
   const projectDir = stageProject(root, cwd);
   stageSessionFile(projectDir, 'sess-only', 1_000);
 
   const source = new ClaudeCodeSource({ projectsRoot: root, cwd });
-  expect(source.resolveActive({ CLAUDE_SESSION_ID: '   ' }).sessionId).toBe('sess-only');
+  expect(
+    source.resolveActive({
+      CLAUDE_CODE_SESSION_ID: '   ',
+      CLAUDE_SESSION_ID: '   ',
+    }).sessionId,
+  ).toBe('sess-only');
 });
 
 test('resolveActive: throws with project-dir-mentioning error when no jsonls exist', () => {
@@ -145,7 +200,22 @@ test('resolveActive: throws with project-dir-mentioning error when no jsonls exi
   expect(() => source.resolveActive({})).toThrow(/-Users-q-repos-foo/);
 });
 
-test('resolveActive: throws when CLAUDE_SESSION_ID names a missing session', () => {
+test('resolveActive: throws when CLAUDE_CODE_SESSION_ID names a missing session', () => {
+  // Surface the bad id rather than silently falling through to mtime —
+  // a wrong-but-set env id is almost always a misconfiguration the
+  // user needs to see, not paper over with a guess.
+  const root = makeTmpRoot();
+  const cwd = '/Users/q/repos/foo';
+  const projectDir = stageProject(root, cwd);
+  stageSessionFile(projectDir, 'sess-real', 1_000);
+
+  const source = new ClaudeCodeSource({ projectsRoot: root, cwd });
+  expect(() =>
+    source.resolveActive({ CLAUDE_CODE_SESSION_ID: 'sess-ghost' }),
+  ).toThrow(/sess-ghost/);
+});
+
+test('resolveActive: throws when CLAUDE_SESSION_ID alias names a missing session', () => {
   const root = makeTmpRoot();
   const cwd = '/Users/q/repos/foo';
   const projectDir = stageProject(root, cwd);
@@ -158,9 +228,10 @@ test('resolveActive: throws when CLAUDE_SESSION_ID names a missing session', () 
 });
 
 test('constructor: uses CLAUDE_PROJECT_DIR env var when opts.cwd is not provided', () => {
-  // Claude Code injects CLAUDE_PROJECT_DIR but not CLAUDE_SESSION_ID,
-  // so the source must use that env var to find the right project
-  // directory rather than process.cwd() (which may be different).
+  // Claude Code injects CLAUDE_PROJECT_DIR alongside
+  // CLAUDE_CODE_SESSION_ID, so the source must use that env var to
+  // find the right project directory rather than process.cwd()
+  // (which may be different).
   const root = makeTmpRoot();
   const cwd = '/Users/q/repos/from-env-var';
   const projectDir = stageProject(root, cwd);

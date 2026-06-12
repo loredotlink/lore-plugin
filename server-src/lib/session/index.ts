@@ -3,14 +3,20 @@
  * artifacts so tool handlers don't branch on runtime. The concrete
  * implementation is chosen once at startup by `detectSource()`:
  *
- *   1. `CLAUDE_SESSION_ID` env set → `ClaudeCodeSource`.
+ *   1. `CLAUDE_CODE_SESSION_ID` / `CLAUDE_SESSION_ID` env set →
+ *      `ClaudeCodeSource`. The canonical var is `CLAUDE_CODE_SESSION_ID`
+ *      (Claude Code injects this alongside `CLAUDECODE=1` and
+ *      `CLAUDE_PROJECT_DIR`); the bare `CLAUDE_SESSION_ID` is honored
+ *      as a back-compat alias.
  *   2. `COWORK_SESSION_ID` env set → `CoworkSource`.
  *   3. `CODEX_THREAD_ID` / `CODEX_SESSION_ID` env set → `CodexSource`.
  *   4. None set → pick the source whose newest on-disk session has
- *      the most recent mtime. This handles the common Claude Code case
- *      where the runtime injects `CLAUDE_PROJECT_DIR` but NOT
- *      `CLAUDE_SESSION_ID` into MCP stdio children: we infer the
- *      runtime from the presence of session files instead.
+ *      the most recent mtime. This is a defensive fallback for hosts
+ *      that don't inject any of the above env vars (rare). The mtime
+ *      heuristic is racy when multiple runtimes have recent files —
+ *      Claude Code users especially can see the wrong source picked
+ *      if a Cowork session was touched more recently — so step 1 is
+ *      strongly preferred and step 4 is a last resort.
  *   5. None of the sources has any on-disk sessions → default to
  *      `ClaudeCodeSource` so the resulting error message references
  *      the Claude Code project dir (the more diagnostic path when the
@@ -60,7 +66,8 @@ export interface SessionSource {
   /**
    * Resolve the active session per the runtime's rules:
    *   - Cowork: `COWORK_SESSION_ID` env, else newest-by-mtime.
-   *   - Claude Code: `CLAUDE_SESSION_ID` env, else newest-by-mtime.
+   *   - Claude Code: `CLAUDE_CODE_SESSION_ID` (canonical) or
+   *     `CLAUDE_SESSION_ID` (back-compat alias), else newest-by-mtime.
    *   - Codex: `CODEX_THREAD_ID` / `CODEX_SESSION_ID` env, else
    *     newest-by-mtime.
    * Returns the resolved `SessionSummary`. Throws a plain `Error` with
@@ -130,7 +137,11 @@ export function detectSource(
   const cowork = opts.coworkSource ?? new CoworkSource();
   const codex = opts.codexSource ?? new CodexSource();
 
-  // 1. Explicit env vars win — same as before.
+  // 1. Explicit env vars win — same as before. Both Claude Code
+  //    session var names are honored; `CLAUDE_CODE_SESSION_ID` is
+  //    the canonical one (matches the `CLAUDECODE=1` namespace),
+  //    `CLAUDE_SESSION_ID` is a back-compat alias.
+  if (nonBlank(env.CLAUDE_CODE_SESSION_ID) !== null) return claudeCode;
   if (nonBlank(env.CLAUDE_SESSION_ID) !== null) return claudeCode;
   if (nonBlank(env.COWORK_SESSION_ID) !== null) return cowork;
   if (nonBlank(env.CODEX_THREAD_ID) !== null) return codex;

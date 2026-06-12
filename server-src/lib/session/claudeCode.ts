@@ -34,21 +34,29 @@ export class ClaudeCodeSource implements SessionSource {
   }
 
   resolveActive(env: NodeJS.ProcessEnv): SessionSummary {
-    const envId = nonBlank(env.CLAUDE_SESSION_ID);
+    // Resolution order:
+    //   1. `CLAUDE_CODE_SESSION_ID` — the env var Claude Code actually
+    //      injects into MCP stdio children (note the `CODE` in the
+    //      middle; the matching `CLAUDECODE=1` flag confirms the
+    //      namespace).
+    //   2. `CLAUDE_SESSION_ID` — back-compat alias for callers or
+    //      future Claude Code versions that adopt the shorter name.
+    //   3. Newest-by-mtime jsonl in the project directory.
+    //
+    // Why both env vars are read: the mtime fallback is racy when
+    // multiple sessions exist in the same project (background tasks,
+    // other tabs, hooks all touch jsonl files), so the explicit env
+    // id is strongly preferred. Claude Code's own var name is
+    // `CLAUDE_CODE_SESSION_ID`, but older docs and sibling runtimes
+    // sometimes reference `CLAUDE_SESSION_ID`; honor both.
+    const envId =
+      nonBlank(env.CLAUDE_CODE_SESSION_ID) ?? nonBlank(env.CLAUDE_SESSION_ID);
     if (envId !== null) return this.findById(envId);
 
-    // Fallback: newest-by-mtime jsonl in the project directory. Mirrors
+    // Last-resort fallback: newest-by-mtime jsonl. Mirrors
     // CoworkSource's behavior when COWORK_SESSION_ID is absent.
-    //
-    // Why this fallback exists: Claude Code (as of May 2026) does NOT
-    // inject `CLAUDE_SESSION_ID` into MCP stdio children, even though
-    // `CLAUDE_PROJECT_DIR` IS set. Without this fallback, every Claude
-    // Code invocation of the plugin would fail to resolve a session
-    // and silently fall through to Cowork via `detectSource()`,
-    // sharing whatever Cowork session happened to be most recent —
-    // not the user's current Claude Code conversation. The newest
-    // jsonl in the project dir is the best heuristic for "current
-    // session" when no explicit id is provided.
+    // Kept for environments where neither env var is set (e.g. the
+    // plugin binary invoked directly outside Claude Code).
     const all = this.listSessions();
     const latest = all[0];
     if (!latest) {

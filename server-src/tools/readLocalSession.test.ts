@@ -438,8 +438,19 @@ describe('runReadLocalSession — return shape', () => {
 });
 
 describe('readLocalSessionTool.handler — env is read lazily', () => {
+  // Both Claude Code session env vars must be controlled here. When
+  // this suite runs INSIDE a Claude Code session, the real
+  // CLAUDE_CODE_SESSION_ID would otherwise win over the marker we
+  // set via CLAUDE_SESSION_ID, since CLAUDE_CODE_SESSION_ID takes
+  // precedence in the resolver.
+  const ORIGINAL_CLAUDE_CODE_SESSION_ID = process.env.CLAUDE_CODE_SESSION_ID;
   const ORIGINAL_CLAUDE_SESSION_ID = process.env.CLAUDE_SESSION_ID;
   afterEach(() => {
+    if (ORIGINAL_CLAUDE_CODE_SESSION_ID === undefined) {
+      delete process.env.CLAUDE_CODE_SESSION_ID;
+    } else {
+      process.env.CLAUDE_CODE_SESSION_ID = ORIGINAL_CLAUDE_CODE_SESSION_ID;
+    }
     if (ORIGINAL_CLAUDE_SESSION_ID === undefined) {
       delete process.env.CLAUDE_SESSION_ID;
     } else {
@@ -448,6 +459,7 @@ describe('readLocalSessionTool.handler — env is read lazily', () => {
   });
 
   test('handler reads process.env lazily', async () => {
+    delete process.env.CLAUDE_CODE_SESSION_ID;
     process.env.CLAUDE_SESSION_ID = 'lazy-marker-id-12345';
 
     let thrown: unknown;
@@ -458,5 +470,21 @@ describe('readLocalSessionTool.handler — env is read lazily', () => {
     }
     expect(thrown).toBeInstanceOf(McpError);
     expect((thrown as McpError).message).toContain('lazy-marker-id-12345');
+  });
+
+  test('handler reads CLAUDE_CODE_SESSION_ID lazily', async () => {
+    // Mirror the lazy-read test but for the canonical env var. This
+    // is the path Claude Code actually triggers in production.
+    delete process.env.CLAUDE_SESSION_ID;
+    process.env.CLAUDE_CODE_SESSION_ID = 'lazy-marker-code-67890';
+
+    let thrown: unknown;
+    try {
+      await readLocalSessionTool.handler({});
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(McpError);
+    expect((thrown as McpError).message).toContain('lazy-marker-code-67890');
   });
 });

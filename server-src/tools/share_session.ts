@@ -13,7 +13,8 @@
  *   tool-result limits on long sessions and triggered subagent
  *   fallback. The handler now resolves the session locally (same
  *   priority order as `read_local_session`: explicit `session_id` →
- *   `CLAUDE_SESSION_ID` / `COWORK_SESSION_ID` → newest-by-mtime),
+ *   `CLAUDE_CODE_SESSION_ID` / `CLAUDE_SESSION_ID` / `COWORK_SESSION_ID`
+ *   → newest-by-mtime),
  *   reads the transcript from disk, and pipes it straight to the cloud.
  *   The agent only sees `{thread_id, thread_url}` come back.
  *

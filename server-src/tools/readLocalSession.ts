@@ -8,9 +8,10 @@
  * Session resolution priority (handler logic):
  *   1. Explicit `session_id` argument (if a non-empty / non-whitespace
  *      string) → look up that specific session in `listSessions(root)`.
- *   2. Runtime-specific env var (`CLAUDE_SESSION_ID`,
- *      `COWORK_SESSION_ID`, `CODEX_THREAD_ID`) when present and
- *      non-empty → same lookup via the detected source.
+ *   2. Runtime-specific env var (`CLAUDE_CODE_SESSION_ID` or
+ *      `CLAUDE_SESSION_ID`, `COWORK_SESSION_ID`, `CODEX_THREAD_ID`)
+ *      when present and non-empty → same lookup via the detected
+ *      source.
  *   3. Newest by mtime under the detected source.
  *
  * The env var is read lazily from `process.env` on each call, NOT
@@ -154,7 +155,7 @@ export const readLocalSessionTool: ToolDefinition = {
     'the basenames of any uploaded inputs and generated outputs. ' +
     'Auto-detects Claude Code, Cowork, or Codex. With no arguments, ' +
     'resolves to the active session using the runtime env vars ' +
-    '(CLAUDE_SESSION_ID, COWORK_SESSION_ID, CODEX_THREAD_ID) or ' +
+    '(CLAUDE_CODE_SESSION_ID, COWORK_SESSION_ID, CODEX_THREAD_ID) or ' +
     'newest-by-mtime fallback. Pass `session_id` explicitly to pick ' +
     'a specific session — typically one surfaced by `list_local_sessions`.',
   inputSchema: {

@@ -34,12 +34,43 @@ function makeFakeSource(
 
 // --- Env-var-based selection (precedence #1 and #2 in detectSource) ---
 
-test('detectSource: returns ClaudeCodeSource when CLAUDE_SESSION_ID is set', () => {
+test('detectSource: returns ClaudeCodeSource when CLAUDE_CODE_SESSION_ID is set', () => {
+  // CLAUDE_CODE_SESSION_ID is the canonical var Claude Code injects
+  // into MCP stdio children. Without this branch, detectSource would
+  // fall through to the racy mtime heuristic and could pick Cowork
+  // when a Cowork transcript was touched more recently.
+  expect(
+    detectSource({
+      env: { CLAUDE_CODE_SESSION_ID: 'sess-abc' },
+      claudeCodeSource: makeFakeSource('claude-code', null),
+      coworkSource: makeFakeSource('cowork', null),
+      codexSource: makeFakeSource('codex', null),
+    }).runtime,
+  ).toBe('claude-code');
+});
+
+test('detectSource: returns ClaudeCodeSource when CLAUDE_SESSION_ID (back-compat alias) is set', () => {
   expect(
     detectSource({
       env: { CLAUDE_SESSION_ID: 'sess-abc' },
       claudeCodeSource: makeFakeSource('claude-code', null),
       coworkSource: makeFakeSource('cowork', null),
+      codexSource: makeFakeSource('codex', null),
+    }).runtime,
+  ).toBe('claude-code');
+});
+
+test('detectSource: CLAUDE_CODE_SESSION_ID wins over a fresher Cowork mtime', () => {
+  // The bug this guards against: previously CLAUDE_SESSION_ID was the
+  // only env-var trigger, and Claude Code doesn't set it. Cowork
+  // sessions touched by background tasks could outrank the user's
+  // active Claude Code session via the mtime fallback. With the
+  // canonical var honored at step 1, env presence beats disk mtime.
+  expect(
+    detectSource({
+      env: { CLAUDE_CODE_SESSION_ID: 'sess-abc' },
+      claudeCodeSource: makeFakeSource('claude-code', 1_000),
+      coworkSource: makeFakeSource('cowork', 9_000),
       codexSource: makeFakeSource('codex', null),
     }).runtime,
   ).toBe('claude-code');
@@ -67,7 +98,18 @@ test('detectSource: returns CodexSource when CODEX_THREAD_ID is set and CLAUDE/C
   ).toBe('codex');
 });
 
-test('detectSource: CLAUDE_SESSION_ID wins over COWORK_SESSION_ID', () => {
+test('detectSource: CLAUDE_CODE_SESSION_ID wins over COWORK_SESSION_ID', () => {
+  expect(
+    detectSource({
+      env: { CLAUDE_CODE_SESSION_ID: 'sess-abc', COWORK_SESSION_ID: 'sess-xyz' },
+      claudeCodeSource: makeFakeSource('claude-code', null),
+      coworkSource: makeFakeSource('cowork', null),
+      codexSource: makeFakeSource('codex', null),
+    }).runtime,
+  ).toBe('claude-code');
+});
+
+test('detectSource: CLAUDE_SESSION_ID (alias) wins over COWORK_SESSION_ID', () => {
   expect(
     detectSource({
       env: { CLAUDE_SESSION_ID: 'sess-abc', COWORK_SESSION_ID: 'sess-xyz' },
@@ -89,13 +131,13 @@ test('detectSource: COWORK_SESSION_ID wins over CODEX_THREAD_ID', () => {
   ).toBe('cowork');
 });
 
-test('detectSource: ignores blank CLAUDE_SESSION_ID and falls through to disk heuristic', () => {
-  // Empty/whitespace-only env value must NOT be treated as set.
+test('detectSource: ignores blank CLAUDE_CODE_SESSION_ID/CLAUDE_SESSION_ID and falls through to disk heuristic', () => {
+  // Empty/whitespace-only env values must NOT be treated as set.
   // With no on-disk sessions for either source, the empty-disk default
   // (ClaudeCodeSource) wins — see the comment in detectSource.
   expect(
     detectSource({
-      env: { CLAUDE_SESSION_ID: '' },
+      env: { CLAUDE_CODE_SESSION_ID: '' },
       claudeCodeSource: makeFakeSource('claude-code', null),
       coworkSource: makeFakeSource('cowork', null),
       codexSource: makeFakeSource('codex', null),
@@ -103,7 +145,7 @@ test('detectSource: ignores blank CLAUDE_SESSION_ID and falls through to disk he
   ).toBe('claude-code');
   expect(
     detectSource({
-      env: { CLAUDE_SESSION_ID: '   ' },
+      env: { CLAUDE_CODE_SESSION_ID: '   ', CLAUDE_SESSION_ID: '   ' },
       claudeCodeSource: makeFakeSource('claude-code', null),
       coworkSource: makeFakeSource('cowork', null),
       codexSource: makeFakeSource('codex', null),

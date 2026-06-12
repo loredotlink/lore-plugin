@@ -81,7 +81,7 @@ From Claude Code/Cowork/Codex, there is just one MCP server. The local process d
 
 Detection order:
 
-1. `CLAUDE_SESSION_ID` present: use Claude Code
+1. `CLAUDE_CODE_SESSION_ID` (or back-compat alias `CLAUDE_SESSION_ID`) present: use Claude Code
 2. `COWORK_SESSION_ID` present: use Cowork
 3. `CODEX_THREAD_ID` or `CODEX_SESSION_ID` present: use Codex
 4. Otherwise, compare the newest on-disk session from each runtime and pick the freshest one
