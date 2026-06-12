@@ -38,12 +38,47 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import type { ToolInputSchema } from './lib/tool.js';
+import { buildConsentSurface } from './lib/consentSurface.js';
+import { readPluginState, type ConsentState } from './lib/pluginState.js';
 import { tools } from './tools/index.js';
+
+/** Module-level name→tool lookup. Constructed once; shared by `dispatchToolCall` and `main`. */
+const byName = new Map(tools.map((t) => [t.name, t]));
 
 const SERVER_INFO = {
   name: 'lore-mcp',
   version: '1.0.0',
 } as const;
+
+/**
+ * Tools that are always allowed to execute regardless of consent state.
+ * Auth and consent-management tools must not be blocked, otherwise the
+ * user can never reach a state where they can consent or log in.
+ */
+export const CONSENT_GATE_EXEMPT = new Set([
+  'lore_login',
+  'lore_login_resume',
+  'lore_setup',
+  'lore_consent',
+]);
+
+/**
+ * Returns `true` when a tool call should be intercepted and the consent
+ * surface returned instead of executing the tool.
+ *
+ * Gate fires only when:
+ *   1. The plugin state has `consent === 'unconsented'`
+ *   2. The tool name is NOT in `CONSENT_GATE_EXEMPT`
+ *
+ * All other consent states (consented, declined, installed, idle,
+ * capturing) are transparent — the gate does not re-nag.
+ */
+export function isConsentGated(
+  toolName: string,
+  consent: ConsentState,
+): boolean {
+  return consent === 'unconsented' && !CONSENT_GATE_EXEMPT.has(toolName);
+}
 
 /**
  * Validate `args` against a `ToolInputSchema`. Returns `null` when
@@ -166,6 +201,53 @@ export function toCallToolResult(value: unknown): CallToolResult {
   };
 }
 
+/**
+ * Dispatch a single tool call end-to-end:
+ *   1. Resolve the tool by name (throws `McpError(MethodNotFound)` if unknown).
+ *   2. Read plugin state from `opts.home` (defaults to `os.homedir()`).
+ *   3. If the consent gate fires, return the consent surface instead of
+ *      executing the tool.
+ *   4. Validate `params.arguments` against the tool's `inputSchema`
+ *      (throws `McpError(InvalidParams)` on failure).
+ *   5. Invoke the handler and wrap its return in a `CallToolResult`.
+ *
+ * Extracted from `main()` so integration tests can call it directly with
+ * a temp `home`, exercising the gate wiring without booting the stdio
+ * transport.
+ *
+ * `main()`'s `CallToolRequest` handler calls this with no `opts`
+ * (production default — `home` is `os.homedir()`).
+ */
+export async function dispatchToolCall(
+  params: { name: string; arguments?: Record<string, unknown> },
+  opts?: { home?: string; platform?: NodeJS.Platform | string },
+): Promise<CallToolResult> {
+  const { name, arguments: args } = params;
+  const tool = byName.get(name);
+  if (!tool) {
+    throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+  }
+  const state = await readPluginState(opts?.home);
+  if (isConsentGated(name, state.consent)) {
+    return toCallToolResult(
+      buildConsentSurface({
+        macSupported: process.platform === 'darwin',
+        consent: state.consent,
+      }),
+    );
+  }
+  const argsObj = args ?? {};
+  const error = validateAgainstSchema(tool.inputSchema, argsObj);
+  if (error) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Invalid arguments for tool '${name}': ${error}`,
+    );
+  }
+  const value = await tool.handler(argsObj, opts);
+  return toCallToolResult(value);
+}
+
 export async function main(): Promise<void> {
   const server = new Server(SERVER_INFO, {
     capabilities: {
@@ -174,8 +256,6 @@ export async function main(): Promise<void> {
       tools: {},
     },
   });
-
-  const byName = new Map(tools.map((t) => [t.name, t]));
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: tools.map((tool) => ({
@@ -186,21 +266,7 @@ export async function main(): Promise<void> {
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
-    const tool = byName.get(name);
-    if (!tool) {
-      throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
-    }
-    const argsObj = args ?? {};
-    const error = validateAgainstSchema(tool.inputSchema, argsObj);
-    if (error) {
-      throw new McpError(
-        ErrorCode.InvalidParams,
-        `Invalid arguments for tool '${name}': ${error}`,
-      );
-    }
-    const value = await tool.handler(argsObj);
-    return toCallToolResult(value);
+    return dispatchToolCall(request.params);
   });
 
   const transport = new StdioServerTransport();

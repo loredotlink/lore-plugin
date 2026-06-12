@@ -13,7 +13,9 @@
 import type { ToolDefinition } from '../lib/tool.js';
 import { cloudProxyTools } from './cloudProxyTools.js';
 import { listLocalSessionsTool } from './listLocalSessions.js';
+import { loreConsentTool } from './lore_consent.js';
 import { loreLoginTool } from './lore_login.js';
+import { loreSetupTool } from './lore_setup.js';
 import { loreLoginResumeTool } from './lore_login_resume.js';
 import { readLocalSessionTool } from './readLocalSession.js';
 import { shareSessionTool } from './share_session.js';
@@ -23,6 +25,8 @@ export const tools: ToolDefinition[] = [
   readLocalSessionTool,
   loreLoginTool,
   loreLoginResumeTool,
+  loreConsentTool,
+  loreSetupTool,
   shareSessionTool,
   ...cloudProxyTools,
 ];

@@ -53,9 +53,26 @@ export type ToolInputSchema = {
   required?: string[];
 };
 
+/**
+ * Per-call dispatch options forwarded from the top-level dispatcher.
+ * Currently carries only `home` (for plugin-state reads/writes in tests),
+ * but may grow as new cross-cutting concerns arise.
+ */
+export type ToolDispatchOpts = {
+  /** Override for `os.homedir()` — used in tests to isolate state in a tmp dir. */
+  home?: string;
+  /** Override for `process.platform` — used in tests to avoid platform-specific shell-outs. */
+  platform?: NodeJS.Platform | string;
+};
+
 export type ToolDefinition = {
   name: string;
   description: string;
   inputSchema: ToolInputSchema;
-  handler: (args: unknown) => Promise<unknown>;
+  /**
+   * Invoke the tool. `opts` carries cross-cutting dispatch context (e.g.
+   * `home` for plugin-state isolation in tests). Handlers that don't need
+   * dispatch opts may ignore the second parameter.
+   */
+  handler: (args: unknown, opts?: ToolDispatchOpts) => Promise<unknown>;
 };

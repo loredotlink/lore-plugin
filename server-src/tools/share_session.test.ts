@@ -606,7 +606,7 @@ describe('shareSessionFromDisk', () => {
 
   test('watcher tip is appended on the second share (share_count=1)', async () => {
     await writeTokens(validTokens(), home);
-    await writePluginState({ share_count: 1, watcher_prompt_dismissed: false }, home);
+    await writePluginState({ share_count: 1, watcher_prompt_dismissed: false, consent: 'unconsented' }, home);
     stageSession('transcript-b');
     const { fetchImpl } = makeSuccessFetch();
     const result = await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
@@ -615,7 +615,7 @@ describe('shareSessionFromDisk', () => {
 
   test('watcher tip is appended on the third share (share_count=2)', async () => {
     await writeTokens(validTokens(), home);
-    await writePluginState({ share_count: 2, watcher_prompt_dismissed: false }, home);
+    await writePluginState({ share_count: 2, watcher_prompt_dismissed: false, consent: 'unconsented' }, home);
     stageSession('transcript-c');
     const { fetchImpl } = makeSuccessFetch();
     const result = await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
@@ -624,7 +624,7 @@ describe('shareSessionFromDisk', () => {
 
   test('watcher tip is suppressed on the fourth share (share_count=3)', async () => {
     await writeTokens(validTokens(), home);
-    await writePluginState({ share_count: 3, watcher_prompt_dismissed: false }, home);
+    await writePluginState({ share_count: 3, watcher_prompt_dismissed: false, consent: 'unconsented' }, home);
     stageSession('transcript-d');
     const { fetchImpl } = makeSuccessFetch();
     const result = await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
@@ -633,7 +633,7 @@ describe('shareSessionFromDisk', () => {
 
   test('watcher tip is suppressed when watcher_prompt_dismissed=true', async () => {
     await writeTokens(validTokens(), home);
-    await writePluginState({ share_count: 0, watcher_prompt_dismissed: true }, home);
+    await writePluginState({ share_count: 0, watcher_prompt_dismissed: true, consent: 'unconsented' }, home);
     stageSession('transcript-e');
     const { fetchImpl } = makeSuccessFetch();
     const result = await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
@@ -642,7 +642,7 @@ describe('shareSessionFromDisk', () => {
 
   test('share_count increments on every successful share, including when tip is suppressed', async () => {
     await writeTokens(validTokens(), home);
-    await writePluginState({ share_count: 3, watcher_prompt_dismissed: false }, home);
+    await writePluginState({ share_count: 3, watcher_prompt_dismissed: false, consent: 'unconsented' }, home);
     stageSession('transcript-f');
     const { fetchImpl } = makeSuccessFetch();
     await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });

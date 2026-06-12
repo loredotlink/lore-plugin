@@ -23,13 +23,18 @@ import { z } from 'zod';
 export const PluginStateSchema = z.object({
   share_count: z.number().int().nonnegative(),
   watcher_prompt_dismissed: z.boolean(),
+  consent: z
+    .enum(['unconsented', 'consented', 'declined', 'installed', 'idle', 'capturing'])
+    .default('unconsented'),
 });
 
 export type PluginState = z.infer<typeof PluginStateSchema>;
+export type ConsentState = PluginState['consent'];
 
 const DEFAULT_STATE: PluginState = {
   share_count: 0,
   watcher_prompt_dismissed: false,
+  consent: 'unconsented',
 };
 
 /**
