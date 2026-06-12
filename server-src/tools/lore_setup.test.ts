@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { runLoreSetup, loreSetupTool, readBackgroundCaptureStatus } from './lore_setup';
 import { readPluginState, writePluginState } from '../lib/pluginState';
+import type { AllowlistDocument, AllowlistResult } from '../lib/uploadAllowlist';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -41,6 +42,21 @@ function cliStatus(consent: 'installed' | 'idle' | 'capturing') {
       running: consent === 'capturing',
     },
   });
+}
+
+function allowlistDoc(hasRules: boolean): AllowlistDocument {
+  return {
+    version: 1,
+    uploadFilters: {
+      include: { cwd: [], repo: hasRules ? ['owner/repo'] : [], skills: [] },
+      exclude: { cwd: [], repo: [], skills: [] },
+    },
+  };
+}
+
+/** Injectable allowlist reader returning a doc with (or without) include rules. */
+function allowlist(hasRules: boolean): () => Promise<AllowlistResult> {
+  return async () => ({ ok: true, document: allowlistDoc(hasRules) });
 }
 
 // ---------------------------------------------------------------------------
@@ -225,12 +241,78 @@ describe('runLoreSetup — status result (consented / installed / idle / capturi
             running: true,
           },
         }),
+        readAllowlist: allowlist(true),
       },
     );
 
     expect(textOf(result)).toContain('CLI daemon reports: running');
     expect(textOf(result)).toContain('Healthy: true');
     expect((await readPluginState(home)).consent).toBe('capturing');
+  });
+
+  test('consent=capturing → a between-cycles idle daemon report does NOT revert capturing when the allowlist has rules', async () => {
+    await writePluginState(
+      { share_count: 0, watcher_prompt_dismissed: false, consent: 'capturing' },
+      home,
+    );
+
+    // The daemon is up but between sync cycles, so it reports idle. The
+    // allowlist still has include rules — capture is armed — so the plugin
+    // must stay "capturing" and must not claim the allowlist is empty.
+    const result = await runLoreSetup(
+      {},
+      {
+        home,
+        readBackgroundCaptureStatus: async () => ({
+          ok: true,
+          consent: 'idle',
+          report: { health: 'idle', healthy: true, enabled: true, running: false },
+        }),
+        readAllowlist: allowlist(true),
+      },
+    );
+
+    expect((await readPluginState(home)).consent).toBe('capturing');
+    expect(textOf(result).toLowerCase()).toMatch(/active|watching/);
+    expect(textOf(result)).not.toMatch(/allowlist is empty/i);
+  });
+
+  test('consent=capturing → reverts to idle when the daemon is up but the allowlist is empty', async () => {
+    await writePluginState(
+      { share_count: 0, watcher_prompt_dismissed: false, consent: 'capturing' },
+      home,
+    );
+
+    const result = await runLoreSetup(
+      {},
+      {
+        home,
+        readBackgroundCaptureStatus: cliStatus('capturing'),
+        readAllowlist: allowlist(false),
+      },
+    );
+
+    expect((await readPluginState(home)).consent).toBe('idle');
+    expect(textOf(result).toLowerCase()).toMatch(/idle|empty/);
+  });
+
+  test('consent=idle → an allowlist read failure keeps the daemon-derived state', async () => {
+    await writePluginState(
+      { share_count: 0, watcher_prompt_dismissed: false, consent: 'idle' },
+      home,
+    );
+
+    const result = await runLoreSetup(
+      {},
+      {
+        home,
+        readBackgroundCaptureStatus: cliStatus('idle'),
+        readAllowlist: async () => ({ ok: false, message: 'lore configure --json failed' }),
+      },
+    );
+
+    expect((await readPluginState(home)).consent).toBe('idle');
+    expect(resourceBlocks(result)).toHaveLength(0);
   });
 
   test('consent=idle → preserves plugin status when CLI status fails', async () => {
@@ -251,7 +333,7 @@ describe('runLoreSetup — status result (consented / installed / idle / capturi
     );
 
     const text = textOf(result);
-    expect(text).toContain('Lore background capture: idle / paused.');
+    expect(text).toContain('Lore background capture: idle');
     expect(text).toContain('Could not refresh CLI daemon status');
     expect((await readPluginState(home)).consent).toBe('idle');
   });
@@ -263,7 +345,7 @@ describe('runLoreSetup — status result (consented / installed / idle / capturi
     );
     const result = await runLoreSetup(
       {},
-      { home, readBackgroundCaptureStatus: cliStatus('idle') },
+      { home, readBackgroundCaptureStatus: cliStatus('idle'), readAllowlist: allowlist(false) },
     );
     expect(resourceBlocks(result)).toHaveLength(0);
   });
@@ -275,7 +357,7 @@ describe('runLoreSetup — status result (consented / installed / idle / capturi
     );
     const result = await runLoreSetup(
       {},
-      { home, readBackgroundCaptureStatus: cliStatus('capturing') },
+      { home, readBackgroundCaptureStatus: cliStatus('capturing'), readAllowlist: allowlist(true) },
     );
     expect(resourceBlocks(result)).toHaveLength(0);
   });
@@ -287,7 +369,7 @@ describe('runLoreSetup — status result (consented / installed / idle / capturi
     );
     const result = await runLoreSetup(
       {},
-      { home, readBackgroundCaptureStatus: cliStatus('capturing') },
+      { home, readBackgroundCaptureStatus: cliStatus('capturing'), readAllowlist: allowlist(true) },
     );
     expect(textOf(result).toLowerCase()).toMatch(/active|captur/);
   });

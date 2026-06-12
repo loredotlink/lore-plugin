@@ -66,10 +66,14 @@ describe('buildConsentSurface — macSupported: true, unconsented', () => {
     expect(text).toContain('approve: false');
   });
 
-  test('text includes the disclosure about the background helper and local scrubbing', () => {
+  test('text discloses the background helper and the multi-dimensional allowlist', () => {
     const text = textOf(result);
     expect(text).toMatch(/background/i);
-    expect(text).toMatch(/secret/i);
+    // Interim-trust copy: allowlist is multi-dimensional and the default
+    // is never-public. It must NOT claim local secret scrubbing (Phase 2).
+    expect(text).toMatch(/repos, directories, or skills/i);
+    expect(text).toMatch(/never public/i);
+    expect(text).not.toMatch(/scrub/i);
   });
 
   test('text includes a status line', () => {

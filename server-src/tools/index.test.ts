@@ -11,6 +11,7 @@ describe('tools barrel', () => {
       'lore_login_resume',
       'lore_consent',
       'lore_setup',
+      'lore_configure',
       'share_session',
       'list_threads',
       'get_thread',

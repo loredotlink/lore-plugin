@@ -29,6 +29,11 @@ import {
 } from '../lib/consentSurface.js';
 import { readPluginState, writePluginState, type ConsentState } from '../lib/pluginState.js';
 import type { ToolDefinition, ToolDispatchOpts } from '../lib/tool.js';
+import {
+  allowlistHasIncludeRules,
+  readCaptureAllowlist,
+  type AllowlistResult,
+} from '../lib/uploadAllowlist.js';
 
 type CliStatusReport = {
   health?: unknown;
@@ -52,6 +57,7 @@ type BackgroundCaptureStatusResult =
 type LoreSetupOpts = {
   home?: string;
   readBackgroundCaptureStatus?: () => Promise<BackgroundCaptureStatusResult>;
+  readAllowlist?: () => Promise<AllowlistResult>;
 };
 
 /**
@@ -75,10 +81,22 @@ export async function runLoreSetup(
   if (state.consent === 'installed' || state.consent === 'idle' || state.consent === 'capturing') {
     const status = await (opts.readBackgroundCaptureStatus ?? readBackgroundCaptureStatus)();
     if (status.ok) {
-      if (status.consent !== state.consent) {
-        await writePluginState({ ...state, consent: status.consent }, opts.home);
+      // The daemon's `status.state` distinguishes "running" (mid-upload) from
+      // "idle" (up, but between sync cycles). That runtime cycle is NOT the
+      // idle/capturing distinction we surface — what matters is whether
+      // capture is *armed*: an allowlist with include rules. When the daemon
+      // is up, derive idle vs capturing from the allowlist so a between-cycles
+      // "idle" report never reverts a configured "capturing" state (and the
+      // idle copy never claims the allowlist is empty when it isn't). The
+      // daemon's true runtime stays visible in the appended status lines.
+      const consent = await reconcileConsentWithAllowlist(
+        status.consent,
+        opts.readAllowlist ?? readCaptureAllowlist,
+      );
+      if (consent !== state.consent) {
+        await writePluginState({ ...state, consent }, opts.home);
       }
-      const result = appendCliStatus(buildSetupStatus(status.consent), status.report);
+      const result = appendCliStatus(buildSetupStatus(consent), status.report);
       return status.warning ? appendCliStatusWarning(result, status.warning) : result;
     }
     return appendCliStatusWarning(buildSetupStatus(state.consent), status.message);
@@ -145,6 +163,29 @@ function consentFromStatusReport(
   if (report.status?.state === 'running') return 'capturing';
   if (report.status?.state === 'idle') return 'idle';
   return 'installed';
+}
+
+/**
+ * Resolve the displayed consent state from the daemon-derived state and the
+ * configured allowlist.
+ *
+ * `installed` means the daemon is not actively up (state was neither
+ * `running` nor `idle`) — capture is not running regardless of the
+ * allowlist, so it is left as-is. When the daemon IS up (daemon-derived
+ * state is `idle` or `capturing`), the meaningful distinction is whether
+ * capture is armed: a non-empty include allowlist → `capturing`, an empty
+ * one → `idle`. This keeps `lore_setup` and `lore_configure` agreeing on
+ * what idle vs capturing means. The allowlist read is best-effort: if it
+ * fails, the daemon-derived state is kept.
+ */
+async function reconcileConsentWithAllowlist(
+  daemonConsent: Extract<ConsentState, 'installed' | 'idle' | 'capturing'>,
+  readAllowlist: () => Promise<AllowlistResult>,
+): Promise<Extract<ConsentState, 'installed' | 'idle' | 'capturing'>> {
+  if (daemonConsent === 'installed') return daemonConsent;
+  const allowlist = await readAllowlist();
+  if (!allowlist.ok) return daemonConsent;
+  return allowlistHasIncludeRules(allowlist.document) ? 'capturing' : 'idle';
 }
 
 function appendCliStatus(result: CallToolResult, report: CliStatusReport): CallToolResult {

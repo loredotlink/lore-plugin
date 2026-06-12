@@ -17,15 +17,23 @@
 
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { ConsentState } from './pluginState.js';
+import type { AllowlistDocument } from './uploadAllowlist.js';
 
 /**
  * One-line disclosure naming the persistent background helper and the
- * local secret-scrubbing guarantee. Shared across the supported/declined
- * variants of the consent text.
+ * interim trust controls. Shared across the supported/declined variants
+ * of the consent text.
+ *
+ * Interim-trust honesty (plan Task 7): the controls today are the
+ * multi-dimensional allowlist ("the repos, directories, or skills you
+ * choose") plus the never-public default. Local secret scrubbing is NOT
+ * yet shipped (Phase 2), so this copy must not claim it.
  */
 const DISCLOSURE =
-  'Lore can run a persistent background helper that watches directories you ' +
-  'choose and uploads new sessions; secrets are scrubbed locally before upload.';
+  'Lore can run a persistent background helper that watches the repos, ' +
+  'directories, or skills you choose and uploads new matching sessions. ' +
+  'Captured sessions are never public by default — they stay visible only ' +
+  'to you (or your workspace).';
 
 /** The literal enable/skip instruction block (only on supported platforms). */
 const ENABLE_SKIP_INSTRUCTIONS =
@@ -122,23 +130,31 @@ export function buildSetupStatus(consent: ConsentState): CallToolResult {
 
     case 'installed':
       text =
-        `Lore background capture: agent installed.\n\n` +
-        `The watcher is installed but not yet active for a watched directory.\n` +
+        `Lore background capture: agent installed but not running.\n\n` +
+        `The background agent is installed but is not currently active, so ` +
+        `nothing is being captured right now. Run \`/lore:setup\` to check ` +
+        `its health, or call \`lore_configure\` to review or change what is ` +
+        `watched (the repos, directories, or skills you choose).\n` +
         `To disable, call \`lore_consent({ approve: false })\`.`;
       break;
 
     case 'idle':
       text =
-        `Lore background capture: idle / paused.\n\n` +
-        `The watcher is installed but is not currently active.\n` +
+        `Lore background capture: idle — allowlist is empty.\n\n` +
+        `The agent is installed but no repos, directories, or skills are ` +
+        `selected, so nothing is being captured. Call \`lore_configure\` to ` +
+        `choose what to watch.\n` +
         `To disable, call \`lore_consent({ approve: false })\`.`;
       break;
 
     case 'capturing':
       text =
-        `Lore background capture: active — currently capturing sessions.\n\n` +
-        `Sessions are being watched and uploaded automatically.\n` +
-        `To disable, call \`lore_consent({ approve: false })\`.`;
+        `Lore background capture: active — watching your allowlist.\n\n` +
+        `New sessions matching the repos, directories, or skills you chose ` +
+        `are captured and uploaded automatically. They are never public by ` +
+        `default.\n` +
+        `To change what's captured, call \`lore_configure\`. To stop, call ` +
+        `\`lore_consent({ approve: false })\`.`;
       break;
 
     default: {
@@ -150,4 +166,70 @@ export function buildSetupStatus(consent: ConsentState): CallToolResult {
   }
 
   return { content: [{ type: 'text', text }] };
+}
+
+/**
+ * Build the result shown after `lore_configure` writes the allowlist.
+ *
+ * `consent` is the resulting plugin state: `capturing` when the allowlist
+ * now has include rules, `idle` when it is empty. The copy is honest
+ * about the interim trust controls (multi-dimensional allowlist +
+ * never-public default) and does NOT claim local secret scrubbing, which
+ * has not shipped yet (plan Task 7).
+ *
+ * Text-only (ADR-0007); `structuredContent` carries the resulting state
+ * and the watched dimensions for a future iframe surface.
+ */
+export function buildAllowlistResult(opts: {
+  consent: Extract<ConsentState, 'idle' | 'capturing'>;
+  document: AllowlistDocument;
+}): CallToolResult {
+  const { consent, document } = opts;
+  const include = document.uploadFilters.include;
+
+  let text: string;
+  if (consent === 'capturing') {
+    text = [
+      'Lore background capture: now watching your allowlist.',
+      '',
+      'Lore will automatically capture and upload new sessions that match ' +
+        'the repos, directories, or skills you chose. Captured sessions are ' +
+        'never public by default — they stay visible only to you (or your ' +
+        'workspace).',
+      '',
+      ...describeWatched(include),
+      '',
+      "To change what's captured, call `lore_configure` again. To stop " +
+        'entirely, call `lore_consent({ approve: false })`.',
+    ].join('\n');
+  } else {
+    text = [
+      'Lore background capture: idle — nothing selected.',
+      '',
+      'Your allowlist is now empty, so no sessions are being captured. ' +
+        'Choose the repos, directories, or skills you want watched by ' +
+        'calling `lore_configure` with at least one entry.',
+    ].join('\n');
+  }
+
+  return {
+    content: [{ type: 'text', text }],
+    structuredContent: {
+      consent,
+      include: {
+        cwd: include.cwd,
+        repo: include.repo,
+        skills: include.skills,
+      },
+    },
+  };
+}
+
+/** Render the non-empty include dimensions as a short "Watching:" list. */
+function describeWatched(include: AllowlistDocument['uploadFilters']['include']): string[] {
+  const lines: string[] = ['Watching:'];
+  if (include.repo.length > 0) lines.push(`- Repos: ${include.repo.join(', ')}`);
+  if (include.cwd.length > 0) lines.push(`- Directories: ${include.cwd.join(', ')}`);
+  if (include.skills.length > 0) lines.push(`- Skills: ${include.skills.join(', ')}`);
+  return lines;
 }
