@@ -45,12 +45,13 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { refreshLockDirPath } from '@lore/identity-store';
 import { AuthRequiredError } from '../errors';
 import {
   getValidAccessToken,
   __resetInFlightForTests,
 } from './refresh';
-import { readTokens, writeTokens, tokensFilePath, type Tokens } from './store';
+import { readTokens, writeTokens, tokensFilePath, stateDir, type Tokens } from './store';
 import { discoverEndpoints, discoveryCacheFilePath, __resetInFlightForTests as __resetDiscoveryInFlightForTests } from './discovery';
 import { __resetCloudBaseUrlForTests } from '../cloudBaseUrl';
 import { AUTHKIT_CLIENT_ID } from './constants';
@@ -65,6 +66,16 @@ function makeTmpHome(): string {
 
 function rmrf(dir: string): void {
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+async function waitForFile(pathname: string): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (!fs.existsSync(pathname)) {
+    if (Date.now() > deadline) {
+      throw new Error(`Timed out waiting for ${pathname}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
 }
 
 const FIXED_NOW = 1_700_000_000_000; // arbitrary epoch ms
@@ -645,8 +656,7 @@ describe('getValidAccessToken', () => {
     });
     // Kick off, but do not await.
     const leaked = getValidAccessToken({ now, fetchImpl: hungFetch, home });
-    // Tick.
-    await new Promise((r) => setTimeout(r, 5));
+    await waitForFile(refreshLockDirPath(stateDir(home)));
 
     // Clear the slot.
     __resetInFlightForTests();
