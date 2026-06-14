@@ -656,6 +656,7 @@ describe('getValidAccessToken', () => {
     });
     // Kick off, but do not await.
     const leaked = getValidAccessToken({ now, fetchImpl: hungFetch, home });
+    void leaked.catch(() => undefined);
     await waitForFile(refreshLockDirPath(stateDir(home)));
 
     // Clear the slot.
@@ -667,8 +668,5 @@ describe('getValidAccessToken', () => {
     });
     const got = await getValidAccessToken({ now, fetchImpl: workingFetch, home });
     expect(got).toBe('access-NEW');
-
-    // Silence the leaked promise.
-    void leaked;
   });
 });
