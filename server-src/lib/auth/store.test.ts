@@ -97,21 +97,18 @@ describe('read/write/delete (adapter over the canonical store)', () => {
     expect(fs.existsSync(legacy)).toBe(false);
   });
 
-  test('migrates the legacy CLI two-file layout so the plugin recognizes it', async () => {
-    // A user logged in only through the CLI before consolidation: the plugin
-    // must migrate that layout too, not just its own Application Support file.
+  test('does NOT adopt the legacy CLI two-file layout (separate identities, TAN-4329)', async () => {
+    // Pre-consolidation the plugin and CLI shared one identity, so the plugin
+    // migrated the CLI's two-file layout too. Under TAN-4329 they authenticate
+    // separately: that layout holds the CLI's WorkOS User Management token,
+    // which must not become the plugin's AuthKit token. The plugin stays
+    // logged out; the CLI owns and re-authenticates its own slot.
     const stateDir = path.join(home, '.lore');
     fs.mkdirSync(stateDir, { recursive: true });
     fs.writeFileSync(path.join(stateDir, 'token'), 'cli-access', 'utf8');
     fs.writeFileSync(path.join(stateDir, 'refresh_token'), 'cli-refresh', 'utf8');
 
-    const tokens = await readTokens(home);
-    expect(tokens?.access_token).toBe('cli-access');
-    expect(tokens?.refresh_token).toBe('cli-refresh');
-    // Migration writes canonical and clears the legacy CLI files.
-    expect(fs.existsSync(tokensFilePath(home))).toBe(true);
-    expect(fs.existsSync(path.join(stateDir, 'token'))).toBe(false);
-    expect(fs.existsSync(path.join(stateDir, 'refresh_token'))).toBe(false);
+    expect(await readTokens(home)).toBeNull();
   });
 
   test('writeTokens clears leftover legacy CLI files (canonical is source of truth)', async () => {
