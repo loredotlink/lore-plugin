@@ -44,7 +44,7 @@ import { initiateDeviceCode, pollDeviceToken } from './deviceFlow';
 import { readTokens } from './store';
 import { discoverEndpoints, __resetInFlightForTests as __resetDiscoveryInFlightForTests } from './discovery';
 import { __resetCloudBaseUrlForTests } from '../cloudBaseUrl';
-import { AUTHKIT_CLIENT_ID, AUTHKIT_SCOPES } from './constants';
+import { PLUGIN_AUTHKIT_CLIENT_ID, AUTHKIT_SCOPES } from './constants';
 
 // ---------------------------------------------------------------------------
 // Fixture constants
@@ -252,7 +252,7 @@ describe('initiateDeviceCode', () => {
     await initiateDeviceCode({ fetchImpl, home });
     const params = new URLSearchParams(capturedBody);
     expect(params.get('client_id')).toBe('client_01KRSDB9SR20N7MB0D9MPS05Q6');
-    expect(params.get('client_id')).toBe(AUTHKIT_CLIENT_ID);
+    expect(params.get('client_id')).toBe(PLUGIN_AUTHKIT_CLIENT_ID);
     // WorkOS CLI Auth device flow is configured for this public client id;
     // it is intentionally public and safe to commit per RFC 8252 §8.4.
     // See constants.ts for why we're not using the CIMD URL form here.
@@ -446,7 +446,7 @@ describe('pollDeviceToken', () => {
     const params = new URLSearchParams(capturedBody);
     expect(params.get('grant_type')).toBe('urn:ietf:params:oauth:grant-type:device_code');
     expect(params.get('device_code')).toBe('dev-CODE-ABCDEF');
-    expect(params.get('client_id')).toBe(AUTHKIT_CLIENT_ID);
+    expect(params.get('client_id')).toBe(PLUGIN_AUTHKIT_CLIENT_ID);
   });
 
   test('token scope stored as AUTHKIT_SCOPES even if server echoes different scope', async () => {

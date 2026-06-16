@@ -55,7 +55,7 @@
  */
 
 import { z } from 'zod';
-import { AUTHKIT_CLIENT_ID, AUTHKIT_SCOPES } from './constants';
+import { PLUGIN_AUTHKIT_CLIENT_ID, AUTHKIT_SCOPES } from './constants';
 import { discoverEndpoints } from './discovery';
 import { writeTokens } from './store';
 
@@ -149,7 +149,7 @@ function defaultSleep(ms: number): Promise<void> {
  * URLs.
  *
  * Posts to `deviceAuthorizationEndpoint` with:
- *   - `client_id`  = AUTHKIT_CLIENT_ID
+ *   - `client_id`  = PLUGIN_AUTHKIT_CLIENT_ID
  *   - `scope`      = AUTHKIT_SCOPES ("openid email profile offline_access")
  *   - `resource`   = discovered audience from PRM (the resource server's identifier)
  *
@@ -177,7 +177,7 @@ export async function initiateDeviceCode(opts?: {
   });
 
   const body = new URLSearchParams({
-    client_id: AUTHKIT_CLIENT_ID,
+    client_id: PLUGIN_AUTHKIT_CLIENT_ID,
     scope: AUTHKIT_SCOPES,
     resource,
   }).toString();
@@ -311,7 +311,7 @@ export async function pollDeviceToken(opts: {
     const body = new URLSearchParams({
       grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
       device_code,
-      client_id: AUTHKIT_CLIENT_ID,
+      client_id: PLUGIN_AUTHKIT_CLIENT_ID,
     }).toString();
 
     const pollRes = await fetchFn(tokenEndpoint, {

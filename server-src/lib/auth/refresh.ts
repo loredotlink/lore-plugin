@@ -66,7 +66,7 @@ import {
 import { AuthRequiredError } from '../errors';
 import { readTokens, writeTokens, deleteTokens, stateDir, type Tokens } from './store';
 import { discoverEndpoints } from './discovery';
-import { AUTHKIT_CLIENT_ID } from './constants';
+import { PLUGIN_AUTHKIT_CLIENT_ID } from './constants';
 
 /**
  * Refresh window: refresh if the access token expires within 30s.
@@ -178,7 +178,7 @@ async function refreshAndPersist(
     const updated = await refreshOAuthTokens({
       current,
       tokenEndpoint,
-      clientId: AUTHKIT_CLIENT_ID,
+      clientId: PLUGIN_AUTHKIT_CLIENT_ID,
       fetchImpl: fetchFn,
       now: nowFn,
     });

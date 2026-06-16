@@ -9,7 +9,7 @@ import {
   discoverEndpoints,
   __resetInFlightForTests as __resetDiscoveryInFlightForTests,
 } from '../lib/auth/discovery';
-import { AUTHKIT_CLIENT_ID, AUTHKIT_SCOPES } from '../lib/auth/constants';
+import { PLUGIN_AUTHKIT_CLIENT_ID, AUTHKIT_SCOPES } from '../lib/auth/constants';
 
 // ---------------------------------------------------------------------------
 // Test constants
@@ -196,7 +196,7 @@ describe('runLoreLogin', () => {
     const deviceCall = calls.find((c) => c.url === TEST_DEVICE_ENDPOINT);
     expect(deviceCall).toBeDefined();
     const deviceParams = new URLSearchParams(deviceCall?.body ?? '');
-    expect(deviceParams.get('client_id')).toBe(AUTHKIT_CLIENT_ID);
+    expect(deviceParams.get('client_id')).toBe(PLUGIN_AUTHKIT_CLIENT_ID);
     expect(deviceParams.get('scope')).toBe(AUTHKIT_SCOPES);
     expect(deviceParams.get('resource')).toBe(TEST_RESOURCE);
     expect(deviceParams.has('audience')).toBe(false);
@@ -208,7 +208,7 @@ describe('runLoreLogin', () => {
       'urn:ietf:params:oauth:grant-type:device_code',
     );
     expect(pollParams.get('device_code')).toBe('dev-CODE');
-    expect(pollParams.get('client_id')).toBe(AUTHKIT_CLIENT_ID);
+    expect(pollParams.get('client_id')).toBe(PLUGIN_AUTHKIT_CLIENT_ID);
     // Tokens persisted with locally-computed expires_at and the AuthKit scope.
     const persisted = await readTokens(home);
     expect(persisted).not.toBeNull();

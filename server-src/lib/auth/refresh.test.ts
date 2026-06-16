@@ -24,7 +24,7 @@
  *   ✓ Boundary: expires_at - now == 30_000 → refreshes
  *   ✓ Clearly expired → refreshes
  *   ✓ Refresh POSTs to discovered tokenEndpoint with correct body/headers
- *   ✓ client_id == AUTHKIT_CLIENT_ID (new value)
+ *   ✓ client_id == PLUGIN_AUTHKIT_CLIENT_ID (new value)
  *   ✓ Persists new tokens; expires_at computed locally (now() + expires_in * 1000)
  *   ✓ Server-supplied expires_at is ignored
  *   ✓ invalid_grant → deletes tokens, throws AuthRequiredError
@@ -54,7 +54,7 @@ import {
 import { readTokens, writeTokens, tokensFilePath, stateDir, type Tokens } from './store';
 import { discoverEndpoints, discoveryCacheFilePath, __resetInFlightForTests as __resetDiscoveryInFlightForTests } from './discovery';
 import { __resetCloudBaseUrlForTests } from '../cloudBaseUrl';
-import { AUTHKIT_CLIENT_ID } from './constants';
+import { PLUGIN_AUTHKIT_CLIENT_ID } from './constants';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -297,7 +297,7 @@ describe('getValidAccessToken', () => {
     const params = new URLSearchParams(body as string);
     expect(params.get('grant_type')).toBe('refresh_token');
     expect(params.get('refresh_token')).toBe('refresh-OLD');
-    expect(params.get('client_id')).toBe(AUTHKIT_CLIENT_ID);
+    expect(params.get('client_id')).toBe(PLUGIN_AUTHKIT_CLIENT_ID);
   });
 
   test('client_id in the POST body is the registered WorkOS public CLI client', async () => {
@@ -312,7 +312,7 @@ describe('getValidAccessToken', () => {
     await getValidAccessToken({ now, fetchImpl, home });
     const params = new URLSearchParams(capturedBody);
     expect(params.get('client_id')).toBe('client_01KRSDB9SR20N7MB0D9MPS05Q6');
-    expect(params.get('client_id')).toBe(AUTHKIT_CLIENT_ID);
+    expect(params.get('client_id')).toBe(PLUGIN_AUTHKIT_CLIENT_ID);
     // WorkOS CLI Auth device flow is configured for this public client id;
     // it is intentionally public and safe to commit per RFC 8252 §8.4.
     expect(params.get('client_id')).toMatch(/^client_/);

@@ -1,5 +1,5 @@
 import {
-  AUTHKIT_CLIENT_ID as SHARED_AUTHKIT_CLIENT_ID,
+  PLUGIN_AUTHKIT_CLIENT_ID as SHARED_AUTHKIT_CLIENT_ID,
   AUTHKIT_SCOPES as SHARED_AUTHKIT_SCOPES,
 } from '@lore/identity-store';
 
@@ -47,7 +47,7 @@ import {
  *   this constant can switch to the CIMD URL and the audience-fallback
  *   in workosMcp.ts can be removed.
  */
-export const AUTHKIT_CLIENT_ID = SHARED_AUTHKIT_CLIENT_ID;
+export const PLUGIN_AUTHKIT_CLIENT_ID = SHARED_AUTHKIT_CLIENT_ID;
 
 /**
  * OAuth scopes requested by the device-code and refresh flows.

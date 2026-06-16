@@ -9,7 +9,7 @@ import {
   discoverEndpoints,
   __resetInFlightForTests as __resetDiscoveryInFlightForTests,
 } from '../lib/auth/discovery';
-import { AUTHKIT_CLIENT_ID, AUTHKIT_SCOPES } from '../lib/auth/constants';
+import { PLUGIN_AUTHKIT_CLIENT_ID, AUTHKIT_SCOPES } from '../lib/auth/constants';
 
 // ---------------------------------------------------------------------------
 // Test constants
@@ -175,7 +175,7 @@ describe('runLoreLoginResume', () => {
       'urn:ietf:params:oauth:grant-type:device_code',
     );
     expect(pollParams.get('device_code')).toBe('dev-RESUME');
-    expect(pollParams.get('client_id')).toBe(AUTHKIT_CLIENT_ID);
+    expect(pollParams.get('client_id')).toBe(PLUGIN_AUTHKIT_CLIENT_ID);
     // Tokens persisted with locally-computed expires_at.
     const persisted = await readTokens(home);
     expect(persisted).not.toBeNull();
