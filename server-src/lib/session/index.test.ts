@@ -109,6 +109,42 @@ test('detectSource: CLAUDE_CODE_SESSION_ID wins over COWORK_SESSION_ID', () => {
   ).toBe('claude-code');
 });
 
+test('detectSource: Cowork cwd beats CLAUDE_CODE_SESSION_ID (Cowork runs the Claude Code harness)', () => {
+  // Regression guard (#995 follow-up): Cowork injects CLAUDE_CODE_SESSION_ID
+  // because it *is* the Claude Code harness running in local-agent-mode, but
+  // its transcript lives under `local-agent-mode-sessions/`, not
+  // `~/.claude/projects`. Detect Cowork by its working directory and route
+  // there BEFORE the CLAUDE_CODE_SESSION_ID short-circuit — otherwise the
+  // share resolves to ClaudeCodeSource pointed at the wrong root and fails
+  // with "session not found" + an empty list_local_sessions.
+  expect(
+    detectSource({
+      env: {
+        CLAUDE_CODE_SESSION_ID: 'inner-cc-id',
+        CLAUDE_PROJECT_DIR:
+          '/Users/q/Library/Application Support/Claude/local-agent-mode-sessions/acct/org/local_abc/wd',
+      },
+      claudeCodeSource: makeFakeSource('claude-code', null),
+      coworkSource: makeFakeSource('cowork', null),
+      codexSource: makeFakeSource('codex', null),
+    }).runtime,
+  ).toBe('cowork');
+});
+
+test('detectSource: a normal Claude Code project dir keeps ClaudeCodeSource even though it contains "claude"', () => {
+  // The Cowork signal keys off the `local-agent-mode-sessions` path segment
+  // specifically, not a substring. A normal repo path must not be mistaken
+  // for Cowork.
+  expect(
+    detectSource({
+      env: { CLAUDE_CODE_SESSION_ID: 'sess-abc', CLAUDE_PROJECT_DIR: '/Users/q/repos/lore' },
+      claudeCodeSource: makeFakeSource('claude-code', null),
+      coworkSource: makeFakeSource('cowork', null),
+      codexSource: makeFakeSource('codex', null),
+    }).runtime,
+  ).toBe('claude-code');
+});
+
 test('detectSource: CLAUDE_SESSION_ID (alias) wins over COWORK_SESSION_ID', () => {
   expect(
     detectSource({

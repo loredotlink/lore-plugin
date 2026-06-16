@@ -3,6 +3,12 @@
  * artifacts so tool handlers don't branch on runtime. The concrete
  * implementation is chosen once at startup by `detectSource()`:
  *
+ *   0. Working directory has a `local-agent-mode-sessions` path
+ *      segment → `CoworkSource`. Checked first because Cowork runs the
+ *      Claude Code harness and therefore also injects
+ *      `CLAUDE_CODE_SESSION_ID`; without this the next step would route
+ *      a Cowork share to `ClaudeCodeSource`, which looks in
+ *      `~/.claude/projects` and can't find the Cowork transcript.
  *   1. `CLAUDE_CODE_SESSION_ID` / `CLAUDE_SESSION_ID` env set →
  *      `ClaudeCodeSource`. The canonical var is `CLAUDE_CODE_SESSION_ID`
  *      (Claude Code injects this alongside `CLAUDECODE=1` and
@@ -24,6 +30,8 @@
  *      conversation).
  */
 
+import path from 'node:path';
+import { COWORK_SESSIONS_DIR_NAME } from '@lore/transcript-locate';
 import { ClaudeCodeSource } from './claudeCode.js';
 import { CodexSource } from './codex.js';
 import { CoworkSource } from './cowork.js';
@@ -137,6 +145,20 @@ export function detectSource(
   const cowork = opts.coworkSource ?? new CoworkSource();
   const codex = opts.codexSource ?? new CodexSource();
 
+  // 0. Cowork runtime signal — checked BEFORE the Claude Code env vars.
+  //    Cowork *is* the Claude Code harness running in local-agent-mode, so
+  //    it injects `CLAUDE_CODE_SESSION_ID` too. But a Cowork transcript lives
+  //    under `local-agent-mode-sessions/<acct>/<org>/local_*/audit.jsonl`, not
+  //    in `~/.claude/projects`, so routing to ClaudeCodeSource (step 1) would
+  //    look in the wrong root and fail with "session not found" + an empty
+  //    list_local_sessions. Detect Cowork the same way the CLI's
+  //    `resolveSessionFromCwd` does: the working directory has a
+  //    `local-agent-mode-sessions` path segment. Prefer `CLAUDE_PROJECT_DIR`
+  //    (Claude Code injects it into MCP stdio children) over `process.cwd()`.
+  if (isCoworkCwd(nonBlank(env.CLAUDE_PROJECT_DIR) ?? safeCwd())) {
+    return cowork;
+  }
+
   // 1. Explicit env vars win — same as before. Both Claude Code
   //    session var names are honored; `CLAUDE_CODE_SESSION_ID` is
   //    the canonical one (matches the `CLAUDECODE=1` namespace),
@@ -166,6 +188,26 @@ export function detectSource(
     return claudeCode;
   }
   return coworkNewest >= codexNewest ? cowork : codex;
+}
+
+/**
+ * True when `cwd` lives under a Cowork sessions root — i.e. has a
+ * `local-agent-mode-sessions` path segment. Matches the segment exactly
+ * (not a substring) so a normal repo path that merely contains the words
+ * isn't misdetected. Returns false for null/blank input.
+ */
+function isCoworkCwd(cwd: string | null): boolean {
+  if (cwd === null) return false;
+  return path.resolve(cwd).split(path.sep).includes(COWORK_SESSIONS_DIR_NAME);
+}
+
+/** `process.cwd()` guarded against a deleted working directory. */
+function safeCwd(): string | null {
+  try {
+    return process.cwd();
+  } catch {
+    return null;
+  }
 }
 
 function isDetectSourceOptions(
