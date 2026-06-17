@@ -27,51 +27,6 @@ If the user asks to name the thread while sharing — for example "share and nam
 
 Strip framing words ("name it", "call it", "titled", surrounding quotes) and pass only the title itself.
 
-## Slack Integration
-
-If the user says "share to #channel", "post to #eng", or includes a Slack channel name (with or without the `#` prefix), do the following **after** the Lore export succeeds:
-
-1. Extract the `thread_id` from the export output.
-2. Strip the leading `#` from the channel name if present.
-3. Read the auth token from `~/.lore/token` (prod) or `~/.lore-dev/token` (dev). If neither exists, tell the user to run `lore login` first.
-4. Determine the API base URL: use `LORE_API_URL` env var if set, otherwise `https://lore-api.tanagram.ai` for prod or `http://localhost:4000` for dev (check which token file exists).
-5. Post to Slack via the API directly:
-
-```bash
-if [ -n "$LORE_API_URL" ]; then
-  API_BASE="$LORE_API_URL"
-elif [ -f ~/.lore-dev/token ]; then
-  API_BASE="http://localhost:4000"
-else
-  API_BASE="https://lore-api.tanagram.ai"
-fi
-TOKEN=$(cat ~/.lore/token 2>/dev/null || cat ~/.lore-dev/token 2>/dev/null)
-curl -s -X POST "$API_BASE/api/slack/post" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"channel_name\": \"CHANNEL\", \"thread_id\": \"THREAD_ID\"}"
-```
-
-Replace `CHANNEL` with the channel name (no `#` prefix) and `THREAD_ID` with the `thread_id` from the export output.
-
-If `lore slack post` is available (check with `lore slack --help 2>/dev/null`), you may use that instead:
-
-```bash
-lore slack post CHANNEL --thread-id THREAD_ID
-```
-
-6. If the response contains `"ok":true`, confirm to the user that the thread was posted to the channel.
-7. If it fails with "No Slack installation", tell the user to connect Slack from Account Settings first.
-8. If it fails with a channel error, tell the user the bot may not be in that channel and suggest `/invite @Lore` in Slack.
-
-When Slack posting is requested, the response should look like:
-
-> Shared: https://lore.tanagram.ai/session/th_abc123 (copied to clipboard).
-> Posted to #eng in Slack.
-
-If the user just says "share" without mentioning a channel, skip the Slack step entirely.
-
-
 ## Tool Flow
 
 1. Call the `lore-local` MCP tool `share_session` with no arguments.
