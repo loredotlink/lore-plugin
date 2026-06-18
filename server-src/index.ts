@@ -37,7 +37,7 @@ import {
   type CallToolResult,
 } from '@modelcontextprotocol/sdk/types.js';
 
-import type { ToolInputSchema } from './lib/tool.js';
+import type { ToolDispatchOpts, ToolInputSchema } from './lib/tool.js';
 import { buildConsentSurface } from './lib/consentSurface.js';
 import { readPluginState, type ConsentState } from './lib/pluginState.js';
 import { tools } from './tools/index.js';
@@ -220,7 +220,7 @@ export function toCallToolResult(value: unknown): CallToolResult {
  */
 export async function dispatchToolCall(
   params: { name: string; arguments?: Record<string, unknown> },
-  opts?: { home?: string; platform?: NodeJS.Platform | string },
+  opts?: ToolDispatchOpts,
 ): Promise<CallToolResult> {
   const { name, arguments: args } = params;
   const tool = byName.get(name);

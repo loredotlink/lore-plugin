@@ -63,6 +63,8 @@ export type ToolDispatchOpts = {
   home?: string;
   /** Override for `process.platform` — used in tests to avoid platform-specific shell-outs. */
   platform?: NodeJS.Platform | string;
+  /** Override for opening the device-flow browser URL in tests. */
+  openBrowser?: (url: string) => { status: number | null };
 };
 
 export type ToolDefinition = {

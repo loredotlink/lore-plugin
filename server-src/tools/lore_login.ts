@@ -160,12 +160,15 @@ export const loreLoginTool: ToolDefinition = {
     additionalProperties: false,
   },
   handler: async (_args: unknown, opts?: ToolDispatchOpts): Promise<LoreLoginResult> => {
+    const openBrowserOverride = opts?.openBrowser;
     return runLoreLogin({
       fetchImpl: globalThis.fetch,
-      spawnImpl: (cmd, args) => {
-        const r = spawnSync(cmd, args, { stdio: 'ignore' });
-        return { status: r.status };
-      },
+      spawnImpl: openBrowserOverride
+        ? (_cmd, args) => openBrowserOverride(args[0] ?? '')
+        : (cmd, args) => {
+            const r = spawnSync(cmd, args, { stdio: 'ignore' });
+            return { status: r.status };
+          },
       now: Date.now,
       sleep: defaultSleep,
       // Persist tokens under the dispatcher-provided home so the plugin's
