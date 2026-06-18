@@ -1,11 +1,11 @@
 {
   "name": "lore",
-  "version": "1.0.23",
+  "version": "1.0.24",
   "description": "Share Claude Code, Cowork, and Codex sessions to Lore and read threads back.",
   "author": {
     "name": "Tanagram",
-    "email": "contact@tanagram.ai",
-    "url": "https://tanagram.ai"
+    "email": "founders@lore.link",
+    "url": "https://lore.link"
   },
   "homepage": "https://lore.link",
   "repository": "https://github.com/tanagram/lore-plugin",
@@ -32,8 +32,8 @@
       "Write"
     ],
     "websiteURL": "https://lore.link",
-    "privacyPolicyURL": "https://tanagram.ai/privacy-policy",
-    "termsOfServiceURL": "https://tanagram.ai/terms-of-use",
+    "privacyPolicyURL": "https://lore.link/privacy",
+    "termsOfServiceURL": "https://lore.link/terms",
     "defaultPrompt": [
       "Share this session to Lore.",
       "Open Lore thread th_abc123.",
