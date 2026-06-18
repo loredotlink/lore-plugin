@@ -54,7 +54,7 @@
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import { initiateDeviceCode, pollDeviceToken } from '../lib/auth/deviceFlow.js';
-import type { ToolDefinition } from '../lib/tool.js';
+import type { ToolDefinition, ToolDispatchOpts } from '../lib/tool.js';
 
 /**
  * Outcomes of `runLoreLogin`. Modeled as a discriminated union so the
@@ -159,7 +159,7 @@ export const loreLoginTool: ToolDefinition = {
     properties: {},
     additionalProperties: false,
   },
-  handler: async (): Promise<LoreLoginResult> => {
+  handler: async (_args: unknown, opts?: ToolDispatchOpts): Promise<LoreLoginResult> => {
     return runLoreLogin({
       fetchImpl: globalThis.fetch,
       spawnImpl: (cmd, args) => {
@@ -168,7 +168,11 @@ export const loreLoginTool: ToolDefinition = {
       },
       now: Date.now,
       sleep: defaultSleep,
-      home: os.homedir(),
+      // Persist tokens under the dispatcher-provided home so the plugin's
+      // token slot lands at the same path its other tools read from. Falling
+      // back to os.homedir() only when no override is supplied keeps the
+      // CLI/process HOME from clobbering the dispatcher's state dir.
+      home: opts?.home ?? os.homedir(),
     });
   },
 };

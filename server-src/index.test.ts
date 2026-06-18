@@ -37,6 +37,9 @@ import {
   dispatchToolCall,
 } from './index';
 import { writePluginState, readPluginState } from './lib/pluginState';
+import { readTokens } from './lib/auth/store';
+import { __resetCloudBaseUrlForTests } from './lib/cloudBaseUrl';
+import { __resetInFlightForTests as __resetDiscoveryInFlightForTests } from './lib/auth/discovery';
 
 describe('validateAgainstSchema — additionalProperties: false', () => {
   const schema: ToolInputSchema = {
@@ -234,6 +237,9 @@ describe('dispatchToolCall — end-to-end gate + dispatch wiring', () => {
 
   afterEach(async () => {
     await fsp.rm(tmpHome, { recursive: true, force: true });
+    delete process.env.LORE_MCP_BASE_URL;
+    __resetCloudBaseUrlForTests();
+    __resetDiscoveryInFlightForTests();
   });
 
   test('unconsented + non-exempt tool (share_session) → returns consent surface, NOT tool output', async () => {
@@ -398,4 +404,167 @@ describe('dispatchToolCall — end-to-end gate + dispatch wiring', () => {
       ),
     ).rejects.toMatchObject({ code: ErrorCode.InvalidParams });
   });
+
+  // The headless device-flow path. `lore_login_resume` never spawns a browser
+  // (`open`), so it exercises the same opts.home → writeTokens routing as
+  // `lore_login` but stays deterministic on Linux CI. This is the primary
+  // regression guard for the dispatcher-home fix on both login tools.
+  test('lore_login_resume writes tokens under the dispatcher home, not process HOME', async () => {
+    const processHome = await fsp.mkdtemp(path.join(os.tmpdir(), 'lore-dispatch-process-home-'));
+    const originalHome = process.env.HOME;
+    const originalFetch = globalThis.fetch;
+    const testBase = 'https://mcp.example.test';
+    const authBase = 'https://signin.example.test';
+    const tokenEndpoint = `${authBase}/oauth2/token`;
+
+    process.env.HOME = processHome;
+    process.env.LORE_MCP_BASE_URL = testBase;
+    __resetCloudBaseUrlForTests();
+    __resetDiscoveryInFlightForTests();
+
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const urlString =
+        typeof url === 'string'
+          ? url
+          : url instanceof URL
+            ? url.toString()
+            : url.url;
+      if (urlString === `${testBase}/.well-known/oauth-protected-resource/mcp`) {
+        return Response.json({
+          resource: 'https://api.example.test',
+          authorization_servers: [authBase],
+        });
+      }
+      if (urlString === `${authBase}/.well-known/oauth-authorization-server`) {
+        return Response.json({
+          issuer: authBase,
+          token_endpoint: tokenEndpoint,
+        });
+      }
+      if (urlString === tokenEndpoint) {
+        expect(init?.body?.toString()).toContain('device_code=device-code');
+        return Response.json({
+          access_token: 'access-from-resume',
+          refresh_token: 'refresh-from-resume',
+          expires_in: 3600,
+          token_type: 'Bearer',
+        });
+      }
+      throw new Error(`unexpected fetch URL: ${urlString}`);
+    }) as typeof fetch;
+
+    try {
+      const result = await dispatchToolCall(
+        { name: 'lore_login_resume', arguments: { device_code: 'device-code' } },
+        { home: tmpHome },
+      );
+
+      const text = result.content
+        .filter((b) => b.type === 'text')
+        .map((b) => (b as { type: string; text: string }).text)
+        .join('');
+      expect(JSON.parse(text)).toEqual({ ok: true });
+      expect((await readTokens(tmpHome))?.access_token).toBe('access-from-resume');
+      expect(await readTokens(processHome)).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      await fsp.rm(processHome, { recursive: true, force: true });
+    }
+    // The device-flow poll sleeps DEFAULT_INTERVAL_SECONDS (5s) before its
+    // first token request, so allow comfortably more than bun's 5s default.
+  }, 15000);
+
+  // The full `lore_login` success path needs a working `open` on PATH so the
+  // browser-open step exits 0 and the flow proceeds to poll + persist. Stubbing
+  // an executable to *succeed* is only reliable on macOS here (see
+  // clipboard.test.ts), so this case is darwin-guarded; the cross-platform
+  // routing guarantee is covered by the lore_login_resume test above.
+  if (os.platform() === 'darwin') {
+    test('lore_login writes tokens under the dispatcher home, not process HOME', async () => {
+      const processHome = await fsp.mkdtemp(path.join(os.tmpdir(), 'lore-dispatch-process-home-'));
+      const fakeBin = await fsp.mkdtemp(path.join(os.tmpdir(), 'lore-dispatch-fake-open-'));
+      const originalHome = process.env.HOME;
+      const originalPath = process.env.PATH;
+      const originalFetch = globalThis.fetch;
+      const testBase = 'https://mcp.example.test';
+      const authBase = 'https://signin.example.test';
+      const deviceEndpoint = `${authBase}/oauth2/device_authorization`;
+      const tokenEndpoint = `${authBase}/oauth2/token`;
+
+      await fsp.writeFile(path.join(fakeBin, 'open'), '#!/bin/sh\nexit 0\n');
+      await fsp.chmod(path.join(fakeBin, 'open'), 0o755);
+
+      process.env.HOME = processHome;
+      process.env.PATH = `${fakeBin}${path.delimiter}${originalPath ?? ''}`;
+      process.env.LORE_MCP_BASE_URL = testBase;
+      __resetCloudBaseUrlForTests();
+      __resetDiscoveryInFlightForTests();
+
+      globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+        const urlString =
+          typeof url === 'string'
+            ? url
+            : url instanceof URL
+              ? url.toString()
+              : url.url;
+        if (urlString === `${testBase}/.well-known/oauth-protected-resource/mcp`) {
+          return Response.json({
+            resource: 'https://api.example.test',
+            authorization_servers: [authBase],
+          });
+        }
+        if (urlString === `${authBase}/.well-known/oauth-authorization-server`) {
+          return Response.json({
+            issuer: authBase,
+            token_endpoint: tokenEndpoint,
+          });
+        }
+        if (urlString === deviceEndpoint) {
+          return Response.json({
+            device_code: 'device-code',
+            user_code: 'USER-CODE',
+            verification_uri: 'https://signin.example.test/device',
+            verification_uri_complete: 'https://signin.example.test/device?user_code=USER-CODE',
+            expires_in: 600,
+            interval: 1,
+          });
+        }
+        if (urlString === tokenEndpoint) {
+          expect(init?.body?.toString()).toContain('device_code=device-code');
+          return Response.json({
+            access_token: 'access-from-login',
+            refresh_token: 'refresh-from-login',
+            expires_in: 3600,
+            token_type: 'Bearer',
+          });
+        }
+        throw new Error(`unexpected fetch URL: ${urlString}`);
+      }) as typeof fetch;
+
+      try {
+        const result = await dispatchToolCall(
+          { name: 'lore_login', arguments: {} },
+          { home: tmpHome },
+        );
+
+        const text = result.content
+          .filter((b) => b.type === 'text')
+          .map((b) => (b as { type: string; text: string }).text)
+          .join('');
+        expect(JSON.parse(text)).toEqual({ ok: true });
+        expect((await readTokens(tmpHome))?.access_token).toBe('access-from-login');
+        expect(await readTokens(processHome)).toBeNull();
+      } finally {
+        globalThis.fetch = originalFetch;
+        if (originalHome === undefined) delete process.env.HOME;
+        else process.env.HOME = originalHome;
+        if (originalPath === undefined) delete process.env.PATH;
+        else process.env.PATH = originalPath;
+        await fsp.rm(processHome, { recursive: true, force: true });
+        await fsp.rm(fakeBin, { recursive: true, force: true });
+      }
+    });
+  }
 });

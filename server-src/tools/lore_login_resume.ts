@@ -33,7 +33,7 @@
 
 import os from 'node:os';
 import { pollDeviceToken } from '../lib/auth/deviceFlow.js';
-import type { ToolDefinition } from '../lib/tool.js';
+import type { ToolDefinition, ToolDispatchOpts } from '../lib/tool.js';
 
 /**
  * Default polling window when the agent doesn't carry the original
@@ -96,14 +96,16 @@ export const loreLoginResumeTool: ToolDefinition = {
     required: ['device_code'],
     additionalProperties: false,
   },
-  handler: async (args) => {
+  handler: async (args: unknown, opts?: ToolDispatchOpts) => {
     const { device_code } = args as { device_code: string };
     return runLoreLoginResume({
       device_code,
       fetchImpl: globalThis.fetch,
       now: Date.now,
       sleep: defaultSleep,
-      home: os.homedir(),
+      // Resume must persist under the same dispatcher home as lore_login so
+      // the polled tokens land in the plugin's state dir, not the process HOME.
+      home: opts?.home ?? os.homedir(),
     });
   },
 };
