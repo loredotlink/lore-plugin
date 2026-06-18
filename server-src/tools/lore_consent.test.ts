@@ -294,7 +294,7 @@ describe('beginBackgroundAgentInstall', () => {
     expect(calls).toEqual([
       { cmd: 'lore', args: ['--version'] },
       { cmd: 'npm', args: ['--version'] },
-      { cmd: 'npm', args: ['install', '-g', '@tanagram/lore'] },
+      { cmd: 'npm', args: ['install', '-g', '@loredotlink/cli'] },
       { cmd: 'lore', args: ['enable'] },
       { cmd: 'lore', args: ['status', '--json'] },
     ]);

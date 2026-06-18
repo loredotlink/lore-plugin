@@ -5,7 +5,7 @@ The Lore plugin is the **discovery front door** and the consume/configure surfac
 ## Language
 
 **Front door**:
-The *discovery/distribution* entry point — how most users first meet Lore, installed cross-host via a host's plugin manager. "Front door" means the primary discovery path, **not** the only door: CLI-direct install (`npm i -g @tanagram/lore`) remains a first-class entrance that converges on the same engine and config.
+The *discovery/distribution* entry point — how most users first meet Lore, installed cross-host via a host's plugin manager. "Front door" means the primary discovery path, **not** the only door: CLI-direct install (`npm i -g @loredotlink/cli`) remains a first-class entrance that converges on the same engine and config.
 _Avoid_: "only door", "sole install path".
 
 **MCP App**:

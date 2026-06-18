@@ -64,7 +64,7 @@ type LoreConsentOpts = {
  * Install/enable the CLI-backed background agent.
  *
  * Uses an existing `lore` command when present; otherwise falls back to
- * `npm install -g @tanagram/lore`. We intentionally do not invent a binary
+ * `npm install -g @loredotlink/cli`. We intentionally do not invent a binary
  * download fallback here because no release artifact + checksum contract
  * exists yet. After enabling, `lore status --json` maps the CLI's runtime
  * state into the plugin consent state.
@@ -97,7 +97,7 @@ export async function beginBackgroundAgentInstall(
           'Could not install Lore automatically because npm was not found. Install Node.js/npm, then run `/lore:setup` again.',
       };
     }
-    const install = await runCommand('npm', ['install', '-g', '@tanagram/lore']);
+    const install = await runCommand('npm', ['install', '-g', '@loredotlink/cli']);
     if (install.status !== 0) {
       return {
         ok: false,

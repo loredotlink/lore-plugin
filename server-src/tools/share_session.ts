@@ -52,7 +52,7 @@ import {
 } from '../lib/pluginState.js';
 
 export const WATCHER_TIP =
-  'Tip: install `@tanagram/lore` (`npm i -g @tanagram/lore`) to auto-share new sessions in the background. Run `lore watch --help` to learn more.';
+  'Tip: install `@loredotlink/cli` (`npm i -g @loredotlink/cli`) to auto-share new sessions in the background. Run `lore watch --help` to learn more.';
 
 export type ShareSessionResult = {
   thread_id: string;
