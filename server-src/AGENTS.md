@@ -48,7 +48,7 @@ const GATE = new Set(['share_session', 'lore_login']); // wrong
 
 **Allowed exception:** none in result construction; test assertions verifying its absence are allowed.
 
-**Why:** ADR-0006 rejected inline mcp-ui in favor of MCP Apps; ADR-0007 dropped the iframe surface entirely on host-availability grounds, but the inline-mcp-ui rejection stands — a future iframe surface goes through a registered `ui://` resource, not an inline block. See `docs/adr/0006-consent-ui-mcp-apps-not-inline-mcp-ui.md` (origin) and `docs/adr/0007-consent-surface-text-only.md` (current).
+**Why:** ADR-0011 rejected inline mcp-ui in favor of MCP Apps; ADR-0012 dropped the iframe surface entirely on host-availability grounds, but the inline-mcp-ui rejection stands — a future iframe surface goes through a registered `ui://` resource, not an inline block. See `docs/adr/0011-consent-ui-mcp-apps-not-inline-mcp-ui.md` (origin) and `docs/adr/0012-consent-surface-text-only.md` (current).
 
 **Do:**
 ```ts
