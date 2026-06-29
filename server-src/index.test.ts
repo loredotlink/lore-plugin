@@ -163,10 +163,6 @@ describe('CONSENT_GATE_EXEMPT — set membership', () => {
     expect(CONSENT_GATE_EXEMPT.has('lore_login_resume')).toBe(true);
   });
 
-  test('contains lore_setup', () => {
-    expect(CONSENT_GATE_EXEMPT.has('lore_setup')).toBe(true);
-  });
-
   test('contains lore_consent', () => {
     expect(CONSENT_GATE_EXEMPT.has('lore_consent')).toBe(true);
   });
@@ -191,10 +187,6 @@ describe('isConsentGated — unconsented state', () => {
 
   test('does NOT gate lore_login_resume when unconsented', () => {
     expect(isConsentGated('lore_login_resume', 'unconsented')).toBe(false);
-  });
-
-  test('does NOT gate lore_setup when unconsented', () => {
-    expect(isConsentGated('lore_setup', 'unconsented')).toBe(false);
   });
 
   test('does NOT gate lore_consent when unconsented', () => {

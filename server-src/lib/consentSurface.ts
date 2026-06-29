@@ -1,7 +1,7 @@
 /**
  * Consent surface renderer for the Lore background-agent opt-in flow.
  *
- * Exports two pure functions — no filesystem, network, or state access:
+ * Exports pure functions — no filesystem, network, or state access:
  *
  *   `buildConsentSurface(opts)` — returns a text-only `CallToolResult`
  *   describing the background-capture decision. The text block IS the
@@ -11,8 +11,8 @@
  *   host does not render MCP Apps iframes today; the always-on text
  *   fallback ADR-0006 specified is now the only surface).
  *
- *   `buildSetupStatus(consent)` — returns a text-only `CallToolResult`
- *   describing the current consent state and how to change it.
+ *   `buildAllowlistResult(opts)` — returns the text-only `CallToolResult`
+ *   shown after `lore_configure` writes the allowlist.
  */
 
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
@@ -98,74 +98,6 @@ export function buildConsentSurface(opts: {
     content: [{ type: 'text', text }],
     structuredContent: { consent, macSupported },
   };
-}
-
-/**
- * Build a status-only result describing the current consent state and
- * how the user can change it. Text-only.
- */
-export function buildSetupStatus(consent: ConsentState): CallToolResult {
-  let text: string;
-
-  switch (consent) {
-    case 'unconsented':
-      text =
-        `Lore background capture: not yet configured.\n\n` +
-        `To enable, call \`lore_consent({ approve: true })\`.\n` +
-        `To skip, call \`lore_consent({ approve: false })\`.`;
-      break;
-
-    case 'consented':
-      text =
-        `Lore background capture: consent given.\n\n` +
-        `The background agent will be installed on the next session.\n` +
-        `To withdraw consent, call \`lore_consent({ approve: false })\`.`;
-      break;
-
-    case 'declined':
-      text =
-        `Lore background capture: declined / skipped.\n\n` +
-        `You can re-enable at any time by calling \`lore_consent({ approve: true })\`.`;
-      break;
-
-    case 'installed':
-      text =
-        `Lore background capture: agent installed but not running.\n\n` +
-        `The background agent is installed but is not currently active, so ` +
-        `nothing is being captured right now. Run \`/lore:setup\` to check ` +
-        `its health, or call \`lore_configure\` to review or change what is ` +
-        `watched (the repos, directories, or skills you choose).\n` +
-        `To disable, call \`lore_consent({ approve: false })\`.`;
-      break;
-
-    case 'idle':
-      text =
-        `Lore background capture: idle — allowlist is empty.\n\n` +
-        `The agent is installed but no repos, directories, or skills are ` +
-        `selected, so nothing is being captured. Call \`lore_configure\` to ` +
-        `choose what to watch.\n` +
-        `To disable, call \`lore_consent({ approve: false })\`.`;
-      break;
-
-    case 'capturing':
-      text =
-        `Lore background capture: active — watching your allowlist.\n\n` +
-        `New sessions matching the repos, directories, or skills you chose ` +
-        `are captured and uploaded automatically. They are never public by ` +
-        `default.\n` +
-        `To change what's captured, call \`lore_configure\`. To stop, call ` +
-        `\`lore_consent({ approve: false })\`.`;
-      break;
-
-    default: {
-      // Exhaustiveness guard — TypeScript will catch missing cases at compile
-      // time; this branch exists for runtime safety.
-      const _exhaustive: never = consent;
-      text = `Lore background capture: unknown state (${_exhaustive}).`;
-    }
-  }
-
-  return { content: [{ type: 'text', text }] };
 }
 
 /**

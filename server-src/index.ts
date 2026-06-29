@@ -58,7 +58,6 @@ const SERVER_INFO = {
 export const CONSENT_GATE_EXEMPT = new Set([
   'lore_login',
   'lore_login_resume',
-  'lore_setup',
   'lore_consent',
 ]);
 

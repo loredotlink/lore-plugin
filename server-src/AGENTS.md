@@ -4,7 +4,7 @@
 
 **Banned pattern:** any `spawn` / `exec` / `child_process` / launchd / plist install invocation that can run before explicit consent is recorded.
 
-**Allowed exceptions:** the Task-5 install entry in `tools/lore_consent.ts` (`beginBackgroundAgentInstall`), which may only be called after `writePluginState({ …, consent: 'consented' })`; post-install control-plane CLI calls from `tools/lore_setup.ts`, `tools/lore_configure.ts` (via `lib/uploadAllowlist.ts`), and future control-plane tools when plugin state is `installed | idle | capturing`.
+**Allowed exceptions:** the Task-5 install entry in `tools/lore_consent.ts` (`beginBackgroundAgentInstall`), which may only be called after `writePluginState({ …, consent: 'consented' })`; post-install control-plane CLI calls from `tools/lore_configure.ts` (via `lib/uploadAllowlist.ts`), and future control-plane tools when plugin state is `installed | idle | capturing`.
 
 **Why:** the background agent must never be installed without explicit user opt-in — see design doc `docs/plans/2026-05-31-plugin-consent-surface-design.md`.
 
@@ -12,7 +12,7 @@
 ```ts
 await writePluginState({ ...state, consent: 'consented' }, opts.home);
 beginBackgroundAgentInstall({ home: opts.home }); // called only after consent write
-readBackgroundCaptureStatus(); // called only after installed / idle / capturing state
+readCaptureAllowlist(); // control-plane CLI call, only after installed / idle / capturing state
 ```
 
 **Don't:**

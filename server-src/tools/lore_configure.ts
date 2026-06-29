@@ -14,14 +14,11 @@
  *
  * Requires the background agent to be installed first — only valid from
  * the `installed`, `idle`, or `capturing` states. From `consented` or
- * `declined`, it points the user back at `/lore:setup`. From
- * `unconsented` the consent gate intercepts before this handler runs.
+ * `declined`, it points the user back at `lore_consent({ approve: true })`.
+ * From `unconsented` the consent gate intercepts before this handler runs.
  */
 
-import {
-  buildAllowlistResult,
-  buildSetupStatus,
-} from '../lib/consentSurface.js';
+import { buildAllowlistResult } from '../lib/consentSurface.js';
 import {
   readPluginState,
   writePluginState,
@@ -132,7 +129,7 @@ export const loreConfigureTool: ToolDefinition = {
     '`directories` (absolute paths), or `skills` (skill ids). ' +
     'Defaults to merging with the existing allowlist; pass `mode: "replace"` ' +
     'to overwrite it (replace with all-empty lists to stop capturing). ' +
-    'Requires background capture to be set up first via `lore_setup`.',
+    'Requires background capture to be enabled first via `lore_consent({ approve: true })`.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -199,7 +196,7 @@ function notInstalledResult(consent: ConsentState): CallToolResult {
       {
         type: 'text',
         text:
-          `${prefix} Run \`/lore:setup\` (or call \`lore_consent({ approve: true })\`) ` +
+          `${prefix} Call \`lore_consent({ approve: true })\` ` +
           `to install the background agent before choosing an allowlist.`,
       },
     ],
@@ -219,7 +216,7 @@ function cliError(action: string, message: string): CallToolResult {
   // failure looks like a missing CLI, fall back to the setup pointer.
   const text = /not found|ENOENT|command not found/i.test(message)
     ? `Lore could not ${action} because the background agent CLI is not available. ` +
-      `Run \`/lore:setup\` to (re)install it.`
+      `Call \`lore_consent({ approve: true })\` to (re)install it.`
     : `Lore could not ${action}: ${message}`;
   return { content: [{ type: 'text', text }], isError: true };
 }

@@ -10,8 +10,8 @@
  *
  * `approve === false` → sets consent to 'declined'. This same path also
  *   serves the "disable" flow from a `consented` state. Returns a
- *   confirmation that manual share/reads keep working and `/lore:setup`
- *   can re-enable later.
+ *   confirmation that manual share/reads keep working and
+ *   `lore_consent({ approve: true })` can re-enable later.
  *
  * Constraints:
  *   - Consent is written before any installer shell-out.
@@ -94,7 +94,7 @@ export async function beginBackgroundAgentInstall(
         ok: false,
         reason: 'install_failed',
         message:
-          'Could not install Lore automatically because npm was not found. Install Node.js/npm, then run `/lore:setup` again.',
+          'Could not install Lore automatically because npm was not found. Install Node.js/npm, then call `lore_consent({ approve: true })` again.',
       };
     }
     const install = await runCommand('npm', ['install', '-g', '@loredotlink/cli']);
@@ -171,13 +171,13 @@ export async function runLoreConsent(
       return (
         `Consent declined. ${disable.message} ` +
         'Manual `/lore:share` and `/lore:read` commands continue to work as usual. ' +
-        'Run `/lore:setup` to re-enable automatic capture later.'
+        'Call `lore_consent({ approve: true })` to re-enable automatic capture later.'
       );
     }
     await writePluginState({ ...state, consent: 'declined' }, opts.home);
     return (
       'Consent declined. Manual `/lore:share` and `/lore:read` commands continue to work as usual. ' +
-      'Run `/lore:setup` to re-enable automatic capture later.'
+      'Call `lore_consent({ approve: true })` to re-enable automatic capture later.'
     );
   }
 }

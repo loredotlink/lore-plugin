@@ -64,7 +64,7 @@ async function setConsent(consent: ConsentState): Promise<void> {
 
 describe('runLoreConfigure — not yet installed', () => {
   for (const consent of ['consented', 'declined'] as const) {
-    test(`consent=${consent} → points at /lore:setup, does not touch the CLI`, async () => {
+    test(`consent=${consent} → points at lore_consent, does not touch the CLI`, async () => {
       await setConsent(consent);
       const result = await runLoreConfigure(
         { repos: ['owner/repo'] },
@@ -78,7 +78,7 @@ describe('runLoreConfigure — not yet installed', () => {
           },
         },
       );
-      expect(textOf(result)).toContain('/lore:setup');
+      expect(textOf(result)).toContain('lore_consent({ approve: true })');
       expect((await readPluginState(home)).consent).toBe(consent);
     });
   }
@@ -189,7 +189,7 @@ describe('runLoreConfigure — failures', () => {
     expect((await readPluginState(home)).consent).toBe('idle');
   });
 
-  test('a missing-CLI error points back at /lore:setup', async () => {
+  test('a missing-CLI error points back at lore_consent', async () => {
     await setConsent('idle');
     const result = await runLoreConfigure(
       { repos: ['owner/repo'] },
@@ -203,7 +203,7 @@ describe('runLoreConfigure — failures', () => {
       },
     );
     expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain('/lore:setup');
+    expect(textOf(result)).toContain('lore_consent({ approve: true })');
   });
 
   test('rejects a non-string-array input', async () => {
