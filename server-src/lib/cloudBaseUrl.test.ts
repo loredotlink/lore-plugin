@@ -1,4 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   cloudBaseUrl,
   cloudMcpBaseUrl,
@@ -11,19 +14,30 @@ const PROD_DEFAULT = 'https://mcp.lore.link';
 
 describe('cloudBaseUrl', () => {
   let saved: string | undefined;
+  let savedPluginStateDir: string | undefined;
+  let tempDir: string | undefined;
 
   beforeEach(() => {
     saved = process.env[ENV_KEY];
+    savedPluginStateDir = process.env.LORE_PLUGIN_STATE_DIR;
+    tempDir = undefined;
     delete process.env[ENV_KEY];
     delete process.env[MCP_ENV_KEY];
+    delete process.env.LORE_PLUGIN_STATE_DIR;
     __resetCloudBaseUrlForTests();
   });
 
   afterEach(() => {
+    if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
     if (saved === undefined) {
       delete process.env[ENV_KEY];
     } else {
       process.env[ENV_KEY] = saved;
+    }
+    if (savedPluginStateDir === undefined) {
+      delete process.env.LORE_PLUGIN_STATE_DIR;
+    } else {
+      process.env.LORE_PLUGIN_STATE_DIR = savedPluginStateDir;
     }
     delete process.env[MCP_ENV_KEY];
     __resetCloudBaseUrlForTests();
@@ -106,5 +120,29 @@ describe('cloudBaseUrl', () => {
     process.env[MCP_ENV_KEY] = 'http://localhost:4000///';
     __resetCloudBaseUrlForTests();
     expect(cloudMcpBaseUrl()).toBe('http://localhost:4000');
+  });
+
+  test('cloudMcpBaseUrl uses installed plugin runtime config when env override is unset', () => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lore-plugin-config-test-'));
+    process.env.LORE_PLUGIN_STATE_DIR = tempDir;
+    const configFile = path.join(tempDir, 'harness', 'amp', 'lore-plugin', 'lore-plugin-config.json');
+    fs.mkdirSync(path.dirname(configFile), { recursive: true });
+    fs.writeFileSync(configFile, JSON.stringify({ mcpBaseUrl: 'http://localhost:4000///' }));
+
+    __resetCloudBaseUrlForTests();
+    expect(cloudBaseUrl()).toBe(PROD_DEFAULT);
+    expect(cloudMcpBaseUrl()).toBe('http://localhost:4000');
+  });
+
+  test('explicit cloudMcpBaseUrl env override wins over installed plugin runtime config', () => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lore-plugin-config-test-'));
+    process.env.LORE_PLUGIN_STATE_DIR = tempDir;
+    process.env[MCP_ENV_KEY] = 'http://localhost:5000';
+    const configFile = path.join(tempDir, 'harness', 'amp', 'lore-plugin', 'lore-plugin-config.json');
+    fs.mkdirSync(path.dirname(configFile), { recursive: true });
+    fs.writeFileSync(configFile, JSON.stringify({ mcpBaseUrl: 'http://localhost:4000' }));
+
+    __resetCloudBaseUrlForTests();
+    expect(cloudMcpBaseUrl()).toBe('http://localhost:5000');
   });
 });

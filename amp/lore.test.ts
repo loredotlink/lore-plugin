@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { PluginCommandContext } from '@ampcode/plugin';
 
-import { shareActiveThread } from './lore';
+import { inferLoreStateDirFromAmpPluginUrl, shareActiveThread } from './lore';
 
 function makeContext(): PluginCommandContext & {
   appendedMessages: Array<{ type: 'user-message'; content: string }>;
@@ -69,6 +73,38 @@ function makeContext(): PluginCommandContext & {
 
   return ctx;
 }
+
+describe('installed Amp plugin state dir inference', () => {
+  test('infers the owning Lore state dir from the materialized harness plugin path', () => {
+    const stateDir = path.join('/tmp', 'home', '.lore-dev-stack');
+    const pluginFile = path.join(stateDir, 'harness', 'amp', 'lore-plugin', 'amp', 'lore.ts');
+
+    expect(inferLoreStateDirFromAmpPluginUrl(pathToFileURL(pluginFile).href)).toBe(stateDir);
+  });
+
+  test('infers through Amp plugin symlinks', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lore-amp-plugin-test-'));
+    try {
+      const stateDir = path.join(root, '.lore-dev-stack');
+      const pluginFile = path.join(stateDir, 'harness', 'amp', 'lore-plugin', 'amp', 'lore.ts');
+      const symlinkFile = path.join(root, '.config', 'amp', 'plugins', 'lore.ts');
+      fs.mkdirSync(path.dirname(pluginFile), { recursive: true });
+      fs.mkdirSync(path.dirname(symlinkFile), { recursive: true });
+      fs.writeFileSync(pluginFile, 'export default function plugin() {}\n');
+      fs.symlinkSync(pluginFile, symlinkFile);
+
+      expect(inferLoreStateDirFromAmpPluginUrl(pathToFileURL(symlinkFile).href)).toBe(fs.realpathSync(stateDir));
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('returns null for source-tree plugin paths', () => {
+    const sourceFile = path.join('/repo', 'packages', 'lore-plugin', 'amp', 'lore.ts');
+
+    expect(inferLoreStateDirFromAmpPluginUrl(pathToFileURL(sourceFile).href)).toBeNull();
+  });
+});
 
 describe('Lore Amp command', () => {
   test('writes the Lore thread URL into the active Amp thread after sharing', async () => {

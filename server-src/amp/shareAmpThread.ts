@@ -8,6 +8,7 @@ const execFileAsync = promisify(execFile);
 
 export type ShareAmpThreadArgs = {
   threadId?: string;
+  activeThreadId?: string;
   visibility?: AmpShareVisibility;
   highlight?: string;
 };
@@ -85,11 +86,12 @@ export function createShareCurrentAmpThreadTool(deps: ShareAmpThreadDeps): AmpPl
       },
       additionalProperties: false,
     },
-    execute: async (input: Record<string, unknown>) => {
+    execute: async (input: Record<string, unknown>, ctx: unknown) => {
       try {
         const result = await shareAmpThread(
           {
             threadId: optionalString(input.thread_id),
+            activeThreadId: resolveToolContextThreadId(ctx),
             visibility: optionalVisibility(input.visibility),
             highlight: optionalString(input.highlight),
           },
@@ -114,7 +116,7 @@ export async function shareAmpThread(
   args: ShareAmpThreadArgs,
   deps: ShareAmpThreadDeps,
 ): Promise<unknown> {
-  const threadId = firstNonEmpty(args.threadId, deps.env?.AMP_CURRENT_THREAD_ID);
+  const threadId = firstNonEmpty(args.threadId, args.activeThreadId, deps.env?.AMP_CURRENT_THREAD_ID);
   if (!threadId) {
     throw new Error(
       'No active Amp thread could be resolved. Run this command from an active Amp thread (ctx.thread.id), set AMP_CURRENT_THREAD_ID, or pass thread_id explicitly.',
@@ -158,6 +160,13 @@ function optionalVisibility(value: unknown): AmpShareVisibility | undefined {
 
 function firstNonEmpty(...values: Array<string | undefined>): string | undefined {
   return values.find((value) => typeof value === 'string' && value.trim() !== '')?.trim();
+}
+
+function resolveToolContextThreadId(ctx: unknown): string | undefined {
+  if (ctx === null || typeof ctx !== 'object') return undefined;
+  const thread = (ctx as { thread?: unknown }).thread;
+  if (thread === null || typeof thread !== 'object') return undefined;
+  return optionalString((thread as { id?: unknown }).id);
 }
 
 function extractTitle(exportedJson: string): string | undefined {

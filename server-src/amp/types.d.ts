@@ -8,6 +8,7 @@ declare module '@ampcode/plugin' {
   export interface PluginToolContext {
     ui: PluginUI;
     logger: PluginLogger;
+    thread?: PluginThread;
   }
 
   export interface PluginToolDefinition {
@@ -77,6 +78,7 @@ declare module '@ampcode/plugin' {
   export interface PluginAPI {
     logger: PluginLogger;
     system: PluginSystem;
+    $: ShellFunction;
     registerCommand(
       id: string,
       options: PluginCommandOptions,

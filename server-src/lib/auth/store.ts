@@ -36,12 +36,20 @@ export { TokensSchema, type Tokens };
 /** This binary owns the `plugin` slot of the shared `~/.lore/tokens.json`. */
 const CLIENT_KEY = 'plugin' as const;
 
+function expandHome(p: string, home: string): string {
+  return p.replace(/^~(?=$|\/)/, home);
+}
+
 /**
- * Canonical Lore state directory (`~/.lore`). Shared with the CLI; the plugin
- * ships on macOS only but `~/.lore` is the CLI's cross-platform home, so both
- * clients resolve to the same path in production.
+ * Canonical Lore state directory. Shared with the CLI; production resolves to
+ * `~/.lore`, while local/dev harness installs may pass `LORE_DEV_STATE_DIR` so
+ * the plugin reads the same client-keyed token file the desktop configured.
  */
 export function stateDir(home: string = os.homedir()): string {
+  const pluginStateDir = process.env.LORE_PLUGIN_STATE_DIR?.trim();
+  if (pluginStateDir) return path.resolve(expandHome(pluginStateDir, home));
+  const devStateDir = process.env.LORE_DEV_STATE_DIR?.trim();
+  if (devStateDir) return path.resolve(expandHome(devStateDir, home));
   return path.join(home, '.lore');
 }
 

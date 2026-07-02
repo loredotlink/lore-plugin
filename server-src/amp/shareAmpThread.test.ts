@@ -206,6 +206,23 @@ describe('shareAmpThread', () => {
     ]);
   });
 
+  test('share_current_amp_thread Amp tool uses the active tool context thread when no thread_id is supplied', async () => {
+    const exportedThreadIds: string[] = [];
+    const tool = createShareCurrentAmpThreadTool({
+      env: { AMP_CURRENT_THREAD_ID: 'env-thread' },
+      runAmpExport: async (threadId) => {
+        exportedThreadIds.push(threadId);
+        return ampExportJson({ title: 'Context Tool Share' });
+      },
+      share: async () => ({ thread_id: 'lore-context-tool', thread_url: 'https://lore.test/lore-context-tool' }),
+    });
+
+    const result = await tool.execute({}, { thread: { id: 'context-thread' } });
+
+    expect(result).toBe(JSON.stringify({ thread_id: 'lore-context-tool', thread_url: 'https://lore.test/lore-context-tool' }));
+    expect(exportedThreadIds).toEqual(['context-thread']);
+  });
+
   test('share_current_amp_thread Amp tool returns an actionable text error when no thread is resolvable', async () => {
     let exportCalls = 0;
     let shareCalls = 0;

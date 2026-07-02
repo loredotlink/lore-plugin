@@ -19,7 +19,15 @@ import { cloudBaseUrl } from '../cloudBaseUrl';
 
 export type DiscoveredEndpoints = OAuthDiscoveredEndpoints;
 
+function expandHome(p: string, home: string): string {
+  return p.replace(/^~(?=$|\/)/, home);
+}
+
 function stateDir(home: string = os.homedir()): string {
+  const pluginStateDir = process.env.LORE_PLUGIN_STATE_DIR?.trim();
+  if (pluginStateDir) return path.resolve(expandHome(pluginStateDir, home));
+  const devStateDir = process.env.LORE_DEV_STATE_DIR?.trim();
+  if (devStateDir) return path.resolve(expandHome(devStateDir, home));
   return path.join(home, '.lore');
 }
 

@@ -27,9 +27,30 @@ const validTokens: Tokens = {
   scope: 'read:sessions write:sessions',
 };
 
+const originalDevStateDir = process.env.LORE_DEV_STATE_DIR;
+const originalPluginStateDir = process.env.LORE_PLUGIN_STATE_DIR;
+
+afterEach(() => {
+  if (originalDevStateDir === undefined) delete process.env.LORE_DEV_STATE_DIR;
+  else process.env.LORE_DEV_STATE_DIR = originalDevStateDir;
+  if (originalPluginStateDir === undefined) delete process.env.LORE_PLUGIN_STATE_DIR;
+  else process.env.LORE_PLUGIN_STATE_DIR = originalPluginStateDir;
+});
+
 describe('tokensFilePath', () => {
   test('points at the canonical ~/.lore tokens file', () => {
     expect(tokensFilePath('/Users/test')).toBe('/Users/test/.lore/tokens.json');
+  });
+
+  test('honors explicit dev state dir override', () => {
+    process.env.LORE_DEV_STATE_DIR = '~/custom-lore-dev-state';
+    expect(tokensFilePath('/Users/test')).toBe('/Users/test/custom-lore-dev-state/tokens.json');
+  });
+
+  test('installed plugin state dir takes precedence over dev state dir override', () => {
+    process.env.LORE_DEV_STATE_DIR = '~/custom-lore-dev-state';
+    process.env.LORE_PLUGIN_STATE_DIR = '~/installed-lore-plugin-state';
+    expect(tokensFilePath('/Users/test')).toBe('/Users/test/installed-lore-plugin-state/tokens.json');
   });
 
   test('defaults to os.homedir() when no override is passed', () => {

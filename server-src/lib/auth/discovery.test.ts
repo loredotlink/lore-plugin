@@ -118,12 +118,16 @@ beforeEach(() => {
   home = makeTmpHome();
   __resetInFlightForTests();
   process.env.LORE_MCP_BASE_URL = TEST_BASE;
+  delete process.env.LORE_PLUGIN_STATE_DIR;
+  delete process.env.LORE_DEV_STATE_DIR;
   __resetCloudBaseUrlForTests();
 });
 
 afterEach(() => {
   rmrf(home);
   delete process.env.LORE_MCP_BASE_URL;
+  delete process.env.LORE_PLUGIN_STATE_DIR;
+  delete process.env.LORE_DEV_STATE_DIR;
   __resetCloudBaseUrlForTests();
   __resetInFlightForTests();
 });
@@ -136,6 +140,17 @@ describe('discoveryCacheFilePath', () => {
   test('returns path alongside the canonical ~/.lore tokens.json', () => {
     const h = '/Users/test';
     expect(discoveryCacheFilePath(h)).toBe('/Users/test/.lore/discovery-cache.json');
+  });
+
+  test('honors explicit dev state dir override', () => {
+    process.env.LORE_DEV_STATE_DIR = '~/custom-lore-dev-state';
+    expect(discoveryCacheFilePath('/Users/test')).toBe('/Users/test/custom-lore-dev-state/discovery-cache.json');
+  });
+
+  test('installed plugin state dir takes precedence over dev state dir override', () => {
+    process.env.LORE_DEV_STATE_DIR = '~/custom-lore-dev-state';
+    process.env.LORE_PLUGIN_STATE_DIR = '~/installed-lore-plugin-state';
+    expect(discoveryCacheFilePath('/Users/test')).toBe('/Users/test/installed-lore-plugin-state/discovery-cache.json');
   });
 
   test('defaults to os.homedir() when no override is passed', () => {

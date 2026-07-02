@@ -1,9 +1,12 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
 import type { PluginAPI, PluginCommandContext } from '@ampcode/plugin';
 
 import { toAmpToolDefinition } from '../server-src/amp/ampToolAdapter.js';
 import {
   createShareCurrentAmpThreadTool,
-  runAmpThreadExport,
   runAmpThreadExportWithShell,
   runShareAmpSession,
   shareAmpThread,
@@ -59,6 +62,41 @@ type AmpThreadExport = {
 
 const uploadedMessageCountByThread = new Map<string, number>();
 
+const INSTALLED_AMP_PLUGIN_SUFFIX = `${path.sep}harness${path.sep}amp${path.sep}lore-plugin${path.sep}amp${path.sep}lore.ts`;
+
+export function inferLoreStateDirFromAmpPluginUrl(importMetaUrl: string): string | null {
+  let pluginFile: string;
+  try {
+    pluginFile = fileURLToPath(importMetaUrl);
+  } catch {
+    return null;
+  }
+  try {
+    pluginFile = fs.realpathSync(pluginFile);
+  } catch {
+    // If Amp ever loads a non-filesystem URL or an already-removed plugin file,
+    // fall back to checking the original path before giving up.
+  }
+
+  if (!pluginFile.endsWith(INSTALLED_AMP_PLUGIN_SUFFIX)) return null;
+  return pluginFile.slice(0, -INSTALLED_AMP_PLUGIN_SUFFIX.length);
+}
+
+function inferLoreStateDirFromAmpConfig(home: string, env: NodeJS.ProcessEnv): string | null {
+  const xdgConfigHome = env.XDG_CONFIG_HOME?.trim();
+  const configHome = xdgConfigHome && path.isAbsolute(xdgConfigHome) ? xdgConfigHome : path.join(home, '.config');
+  return inferLoreStateDirFromAmpPluginUrl(pathToFileURL(path.join(configHome, 'amp', 'plugins', 'lore.ts')).href);
+}
+
+function configureLoreStateDirForInstalledAmpPlugin(importMetaUrl: string): void {
+  if (process.env.LORE_PLUGIN_STATE_DIR?.trim()) return;
+  const inferred = inferLoreStateDirFromAmpPluginUrl(importMetaUrl) ??
+    inferLoreStateDirFromAmpConfig(process.env.HOME || process.cwd(), process.env);
+  if (inferred) process.env.LORE_PLUGIN_STATE_DIR = inferred;
+}
+
+configureLoreStateDirForInstalledAmpPlugin(import.meta.url);
+
 export default function loreAmpPlugin(amp: PluginAPI): void {
   installPassiveAmpThreadMirror(amp);
 
@@ -77,7 +115,7 @@ export default function loreAmpPlugin(amp: PluginAPI): void {
   amp.registerTool(
     createShareCurrentAmpThreadTool({
       env: process.env,
-      runAmpExport: runAmpThreadExport,
+      runAmpExport: (threadId) => runAmpThreadExportWithShell(threadId, amp.$),
       share: runShareAmpSession,
       ampBaseUrl: amp.system.ampURL,
     }),
