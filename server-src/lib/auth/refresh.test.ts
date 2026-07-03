@@ -45,7 +45,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { refreshLockDirPath } from '@lore/identity-store';
+import { readClientTokens, refreshLockDirPath, writeClientTokens } from '@lore/identity-store';
 import { AuthRequiredError } from '../errors';
 import {
   getValidAccessToken,
@@ -191,11 +191,13 @@ async function primeDiscoveryCache(home: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 let home: string;
+const originalExternalTokenManager = process.env.LORE_EXTERNAL_TOKEN_MANAGER;
 
 beforeEach(async () => {
   home = makeTmpHome();
   __resetInFlightForTests();
   __resetDiscoveryInFlightForTests();
+  delete process.env.LORE_EXTERNAL_TOKEN_MANAGER;
   process.env.LORE_MCP_BASE_URL = TEST_BASE;
   __resetCloudBaseUrlForTests();
   // Prime the discovery cache so most tests only handle the token endpoint.
@@ -205,6 +207,8 @@ beforeEach(async () => {
 afterEach(() => {
   rmrf(home);
   delete process.env.LORE_MCP_BASE_URL;
+  if (originalExternalTokenManager === undefined) delete process.env.LORE_EXTERNAL_TOKEN_MANAGER;
+  else process.env.LORE_EXTERNAL_TOKEN_MANAGER = originalExternalTokenManager;
   __resetCloudBaseUrlForTests();
   __resetInFlightForTests();
   __resetDiscoveryInFlightForTests();
@@ -215,6 +219,59 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('getValidAccessToken', () => {
+  test('externally-managed mode returns the desktop token slot without network calls', async () => {
+    process.env.LORE_EXTERNAL_TOKEN_MANAGER = '1';
+    await writeClientTokens(stateDir(home), 'desktop', freshTokens({ access_token: 'desktop-access' }));
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      return jsonResponse(successRefreshBody(), 200);
+    }) as unknown as typeof fetch;
+
+    const got = await getValidAccessToken({ now, fetchImpl, home });
+
+    expect(got).toBe('desktop-access');
+    expect(calls).toBe(0);
+  });
+
+  test('externally-managed mode does not refresh, delete, or mutate token slots', async () => {
+    process.env.LORE_EXTERNAL_TOKEN_MANAGER = 'true';
+    const desktopTokens = expiredTokens({ access_token: 'desktop-expired', refresh_token: '' });
+    const pluginTokens = expiredTokens({ access_token: 'plugin-expired', refresh_token: 'plugin-refresh' });
+    await writeClientTokens(stateDir(home), 'desktop', desktopTokens);
+    await writeTokens(pluginTokens, home);
+
+    const got = await getValidAccessToken({
+      now,
+      fetchImpl: makeFullRoutingFetch({
+        tokenResponse: () => {
+          throw new Error('external mode must not refresh');
+        },
+      }),
+      home,
+    });
+
+    expect(got).toBe('desktop-expired');
+    expect(await readClientTokens(stateDir(home), 'desktop')).toEqual(desktopTokens);
+    expect(await readTokens(home)).toEqual(pluginTokens);
+  });
+
+  test('externally-managed mode throws AuthRequiredError when the desktop slot is absent', async () => {
+    process.env.LORE_EXTERNAL_TOKEN_MANAGER = '1';
+    await writeTokens(freshTokens({ access_token: 'plugin-access' }), home);
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      return jsonResponse(successRefreshBody(), 200);
+    }) as unknown as typeof fetch;
+
+    await expect(
+      getValidAccessToken({ now, fetchImpl, home }),
+    ).rejects.toBeInstanceOf(AuthRequiredError);
+    expect(calls).toBe(0);
+    expect((await readTokens(home))?.access_token).toBe('plugin-access');
+  });
+
   test('throws AuthRequiredError and makes no network call when tokens file is absent', async () => {
     let calls = 0;
     const fetchImpl = (async () => {

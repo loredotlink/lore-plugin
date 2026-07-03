@@ -58,6 +58,7 @@ import fs from 'node:fs';
 import {
   OAuthInvalidGrantError,
   OAuthNoAuthorizationServerError,
+  readClientTokens,
   refreshLockDirPath,
   refreshOAuthTokens,
   tokenEndpointFromAccessTokenIssuer,
@@ -74,6 +75,8 @@ import { PLUGIN_AUTHKIT_CLIENT_ID } from './constants';
  * should never have a reason to tune it.
  */
 const REFRESH_SKEW_MS = 30_000;
+const TRUTHY_TOKEN_ENV = new Set(['1', 'true', 'yes', 'on']);
+const DESKTOP_MANAGED_CLIENT_KEY = 'desktop' as const;
 
 /**
  * The module-scope mutex. Exactly one concurrent refresh per process.
@@ -86,6 +89,11 @@ interface Options {
   now?: () => number;
   fetchImpl?: typeof fetch;
   home?: string;
+}
+
+function isExternallyManagedTokenMode(): boolean {
+  const value = process.env.LORE_EXTERNAL_TOKEN_MANAGER;
+  return typeof value === 'string' && TRUTHY_TOKEN_ENV.has(value.trim().toLowerCase());
 }
 
 /**
@@ -123,6 +131,14 @@ async function doGet(opts: Options): Promise<string> {
   const nowFn = opts.now ?? Date.now;
   const fetchFn = opts.fetchImpl ?? fetch;
   const home = opts.home;
+
+  if (isExternallyManagedTokenMode()) {
+    const tokens = await readClientTokens(stateDir(home), DESKTOP_MANAGED_CLIENT_KEY);
+    if (tokens === null) {
+      throw new AuthRequiredError();
+    }
+    return tokens.access_token;
+  }
 
   const tokens = await readTokens(home);
   if (tokens === null) {

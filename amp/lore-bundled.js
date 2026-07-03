@@ -24751,8 +24751,14 @@ var AUTHKIT_SCOPES2 = AUTHKIT_SCOPES;
 
 // server-src/lib/auth/refresh.ts
 var REFRESH_SKEW_MS = 30000;
+var TRUTHY_TOKEN_ENV = new Set(["1", "true", "yes", "on"]);
+var DESKTOP_MANAGED_CLIENT_KEY = "desktop";
 var inFlight2 = null;
 var activeRefreshLockStateDir = null;
+function isExternallyManagedTokenMode() {
+  const value = process.env.LORE_EXTERNAL_TOKEN_MANAGER;
+  return typeof value === "string" && TRUTHY_TOKEN_ENV.has(value.trim().toLowerCase());
+}
 function getValidAccessToken(opts = {}) {
   if (inFlight2)
     return inFlight2;
@@ -24766,6 +24772,13 @@ async function doGet(opts) {
   const nowFn = opts.now ?? Date.now;
   const fetchFn = opts.fetchImpl ?? fetch;
   const home = opts.home;
+  if (isExternallyManagedTokenMode()) {
+    const tokens3 = await readClientTokens(stateDir(home), DESKTOP_MANAGED_CLIENT_KEY);
+    if (tokens3 === null) {
+      throw new AuthRequiredError;
+    }
+    return tokens3.access_token;
+  }
   const tokens2 = await readTokens(home);
   if (tokens2 === null) {
     throw new AuthRequiredError;
