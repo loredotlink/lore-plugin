@@ -30,6 +30,13 @@ echo "  bun: $(bun --version)" >&2
 echo "  cwd: $(pwd)" >&2
 
 bun build \
+  --target=bun \
+  --format=esm \
+  --external=@ampcode/plugin \
+  amp/lore.ts \
+  --outfile amp/lore-bundled.js
+
+bun build \
   --compile \
   --target=bun-darwin-arm64 \
   server-src/index.ts \
@@ -37,5 +44,7 @@ bun build \
 
 chmod +x server/lore-mcp
 
+echo "Built: $(pwd)/amp/lore-bundled.js" >&2
+ls -la amp/lore-bundled.js >&2
 echo "Built: $(pwd)/server/lore-mcp" >&2
 ls -la server/lore-mcp >&2

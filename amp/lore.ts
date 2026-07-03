@@ -62,7 +62,10 @@ type AmpThreadExport = {
 
 const uploadedMessageCountByThread = new Map<string, number>();
 
-const INSTALLED_AMP_PLUGIN_SUFFIX = `${path.sep}harness${path.sep}amp${path.sep}lore-plugin${path.sep}amp${path.sep}lore.ts`;
+const INSTALLED_AMP_PLUGIN_SUFFIXES = [
+  `${path.sep}harness${path.sep}amp${path.sep}lore-plugin${path.sep}amp${path.sep}lore-bundled.js`,
+  `${path.sep}harness${path.sep}amp${path.sep}lore-plugin${path.sep}amp${path.sep}lore.ts`,
+];
 
 export function inferLoreStateDirFromAmpPluginUrl(importMetaUrl: string): string | null {
   let pluginFile: string;
@@ -78,8 +81,9 @@ export function inferLoreStateDirFromAmpPluginUrl(importMetaUrl: string): string
     // fall back to checking the original path before giving up.
   }
 
-  if (!pluginFile.endsWith(INSTALLED_AMP_PLUGIN_SUFFIX)) return null;
-  return pluginFile.slice(0, -INSTALLED_AMP_PLUGIN_SUFFIX.length);
+  const suffix = INSTALLED_AMP_PLUGIN_SUFFIXES.find((candidate) => pluginFile.endsWith(candidate));
+  if (!suffix) return null;
+  return pluginFile.slice(0, -suffix.length);
 }
 
 function inferLoreStateDirFromAmpConfig(home: string, env: NodeJS.ProcessEnv): string | null {

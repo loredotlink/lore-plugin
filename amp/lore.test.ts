@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { PluginCommandContext } from '@ampcode/plugin';
 
 import { inferLoreStateDirFromAmpPluginUrl, shareActiveThread } from './lore';
@@ -82,6 +82,13 @@ describe('installed Amp plugin state dir inference', () => {
     expect(inferLoreStateDirFromAmpPluginUrl(pathToFileURL(pluginFile).href)).toBe(stateDir);
   });
 
+  test('infers the owning Lore state dir from the bundled materialized harness plugin path', () => {
+    const stateDir = path.join('/tmp', 'home', '.lore-dev-stack');
+    const pluginFile = path.join(stateDir, 'harness', 'amp', 'lore-plugin', 'amp', 'lore-bundled.js');
+
+    expect(inferLoreStateDirFromAmpPluginUrl(pathToFileURL(pluginFile).href)).toBe(stateDir);
+  });
+
   test('infers through Amp plugin symlinks', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lore-amp-plugin-test-'));
     try {
@@ -103,6 +110,18 @@ describe('installed Amp plugin state dir inference', () => {
     const sourceFile = path.join('/repo', 'packages', 'lore-plugin', 'amp', 'lore.ts');
 
     expect(inferLoreStateDirFromAmpPluginUrl(pathToFileURL(sourceFile).href)).toBeNull();
+  });
+});
+
+describe('bundled Amp plugin artifact', () => {
+  test('is checked in without runtime imports of workspace packages', () => {
+    const bundlePath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'lore-bundled.js');
+    const bundle = fs.readFileSync(bundlePath, 'utf8');
+
+    expect(bundle).toContain('export {');
+    expect(bundle).not.toContain('@lore/identity-store');
+    expect(bundle).not.toContain('@lore/contracts');
+    expect(bundle).not.toContain('@lore/transcript-locate');
   });
 });
 
