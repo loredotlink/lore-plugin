@@ -27207,7 +27207,35 @@ var SAFE_AMP_TOOL_NAMES = new Set([
   "fork_thread",
   "search_threads"
 ]);
-var uploadedMessageCountByThread = new Map;
+var uploadedMessageFingerprintsByThread = new Map;
+var pendingUploadByThread = new Map;
+var mirrorPromiseByThread = new Map;
+var RUNTIME_EVENT_NAMES = [
+  "agent.start",
+  "agent_state",
+  "compaction_complete",
+  "compaction_started",
+  "delta",
+  "executor_connected",
+  "executor_guidance_discovery",
+  "executor_status",
+  "executor_tool_lease_ack",
+  "executor_tool_result",
+  "executor_tool_result_ack",
+  "executor_workspace_maybe_changed",
+  "inference_tools",
+  "message_added",
+  "message_updated",
+  "observers",
+  "plugin_message",
+  "queued_message_added",
+  "queued_message_dequeued",
+  "queued_messages",
+  "thread_settings",
+  "thread_title",
+  "tool_lease",
+  "tool_progress"
+];
 var INSTALLED_AMP_PLUGIN_SUFFIXES = [
   `${path13.sep}harness${path13.sep}amp${path13.sep}lore-plugin${path13.sep}amp${path13.sep}lore-bundled.js`,
   `${path13.sep}harness${path13.sep}amp${path13.sep}lore-plugin${path13.sep}amp${path13.sep}lore.ts`
@@ -27336,40 +27364,96 @@ function installPassiveAmpThreadMirror(amp) {
   }
   pluginWithEvents.on("session.start", (event, ctx) => {
     const threadId = resolveThreadId(event, ctx);
-    if (threadId && !uploadedMessageCountByThread.has(threadId)) {
-      uploadedMessageCountByThread.set(threadId, 0);
+    if (threadId && !uploadedMessageFingerprintsByThread.has(threadId)) {
+      uploadedMessageFingerprintsByThread.set(threadId, []);
     }
+    postRuntimeEvent("session.start", event, ctx, amp);
+  });
+  for (const eventName of RUNTIME_EVENT_NAMES) {
+    pluginWithEvents.on(eventName, (event, ctx) => {
+      postRuntimeEvent(eventName, event, ctx, amp);
+    });
+  }
+  pluginWithEvents.on("message_added", async (event, ctx) => {
+    await enqueueAmpThreadMirror(event, ctx, amp, "message_added");
+  });
+  pluginWithEvents.on("message_updated", async (event, ctx) => {
+    await enqueueAmpThreadMirror(event, ctx, amp, "message_updated");
   });
   pluginWithEvents.on("agent.end", async (event, ctx) => {
-    const threadId = resolveThreadId(event, ctx);
-    if (!threadId)
+    await postRuntimeEvent("agent.end", event, ctx, amp);
+    await enqueueAmpThreadMirror(event, ctx, amp, "agent.end");
+  });
+}
+async function postRuntimeEvent(eventName, event, ctx, amp) {
+  const runtimeRecord = runtimeRecordForEvent(eventName, event, ctx);
+  if (!runtimeRecord)
+    return;
+  try {
+    await postPassiveLogs([runtimeRecord.record]);
+  } catch (error51) {
+    amp.logger.log(`[lore] Failed to upload Amp runtime event ${eventName} for ${runtimeRecord.threadId} to Lore: ${error51 instanceof Error ? error51.message : String(error51)}`);
+  }
+}
+function enqueueAmpThreadMirror(event, ctx, amp, trigger) {
+  const threadId = resolveThreadId(event, ctx);
+  if (!threadId)
+    return Promise.resolve();
+  const previous = mirrorPromiseByThread.get(threadId) ?? Promise.resolve();
+  const next = previous.catch(() => {
+    return;
+  }).then(() => mirrorAmpThread(threadId, ctx, amp, trigger));
+  const tracked = next.finally(() => {
+    if (mirrorPromiseByThread.get(threadId) === tracked) {
+      mirrorPromiseByThread.delete(threadId);
+    }
+  });
+  mirrorPromiseByThread.set(threadId, tracked);
+  return tracked;
+}
+async function mirrorAmpThread(threadId, ctx, amp, trigger) {
+  const commandContext = ctx;
+  if (typeof commandContext.$ !== "function") {
+    amp.logger.log(`[lore] Missing shell context while exporting Amp thread ${threadId}.`);
+    return;
+  }
+  const pendingUpload = pendingUploadByThread.get(threadId);
+  if (pendingUpload) {
+    try {
+      await postPassiveLogs(pendingUpload.records);
+      uploadedMessageFingerprintsByThread.set(threadId, pendingUpload.messageFingerprints);
+      pendingUploadByThread.delete(threadId);
+    } catch (error51) {
+      amp.logger.log(`[lore] Failed to retry Amp thread ${threadId} to Lore: ${error51 instanceof Error ? error51.message : String(error51)}`);
       return;
-    const commandContext = ctx;
-    if (typeof commandContext.$ !== "function") {
-      amp.logger.log(`[lore] Missing shell context while exporting Amp thread ${threadId}.`);
+    }
+  }
+  try {
+    const exportResult = await commandContext.$`amp threads export ${threadId}`;
+    if (exportResult.exitCode !== 0) {
+      const detail = exportResult.stderr.trim() || exportResult.stdout.trim() || `exit code ${exportResult.exitCode}`;
+      throw new Error(`amp threads export failed: ${detail}`);
+    }
+    const thread = JSON.parse(exportResult.stdout);
+    if (stringOrNull(thread.id) !== threadId)
+      thread.id = threadId;
+    const previousMessageFingerprints = uploadedMessageFingerprintsByThread.get(threadId) ?? [];
+    const { records, messageFingerprints } = buildPassiveLogRecords(thread, previousMessageFingerprints);
+    if (records.length === 0) {
+      uploadedMessageFingerprintsByThread.set(threadId, messageFingerprints);
       return;
     }
     try {
-      const exportResult = await commandContext.$`amp threads export ${threadId}`;
-      if (exportResult.exitCode !== 0) {
-        const detail = exportResult.stderr.trim() || exportResult.stdout.trim() || `exit code ${exportResult.exitCode}`;
-        throw new Error(`amp threads export failed: ${detail}`);
-      }
-      const thread = JSON.parse(exportResult.stdout);
-      if (stringOrNull(thread.id) !== threadId)
-        thread.id = threadId;
-      const previousMessageCount = uploadedMessageCountByThread.get(threadId) ?? 0;
-      const { records, messageCount } = buildPassiveLogRecords(thread, previousMessageCount);
-      if (records.length === 0) {
-        uploadedMessageCountByThread.set(threadId, messageCount);
-        return;
-      }
       await postPassiveLogs(records);
-      uploadedMessageCountByThread.set(threadId, messageCount);
+      uploadedMessageFingerprintsByThread.set(threadId, messageFingerprints);
+      pendingUploadByThread.delete(threadId);
     } catch (error51) {
-      amp.logger.log(`[lore] Failed to upload Amp thread ${threadId} to Lore: ${error51 instanceof Error ? error51.message : String(error51)}`);
+      pendingUploadByThread.set(threadId, { messageFingerprints, records });
+      throw error51;
     }
-  });
+  } catch (error51) {
+    amp.logger.log(`[lore] Failed to upload Amp thread ${threadId} to Lore after ${trigger}: ${error51 instanceof Error ? error51.message : String(error51)}`);
+  }
 }
 function resolveThreadId(event, ctx) {
   if (isRecord(event)) {
@@ -27389,15 +27473,74 @@ function resolveThreadId(event, ctx) {
   }
   return null;
 }
-function buildPassiveLogRecords(thread, previousMessageCount) {
+function runtimeRecordForEvent(eventName, event, ctx) {
+  const threadId = resolveThreadId(event, ctx);
+  if (!threadId)
+    return null;
+  const eventRecord = isRecord(event) ? event : {};
+  const contextRecord = isRecord(ctx) ? ctx : {};
+  const messageId = firstRuntimeString(eventRecord, ["messageId", "messageID", "id"]) ?? firstRuntimeString(contextRecord, ["messageId", "messageID"]);
+  const timestamp = isoTimestamp(eventRecord["@timestamp"]) ?? isoTimestamp(eventRecord.timestamp) ?? isoTimestamp(eventRecord.time) ?? new Date().toISOString();
+  const attributes = {
+    "event.name": `amp.${eventName}`,
+    "session.id": threadId,
+    "amp.event.name": eventName
+  };
+  const sequence = firstRuntimeNumber(eventRecord, ["seq", "sequence"]);
+  if (sequence !== null)
+    attributes["event.sequence"] = sequence;
+  const subtype = firstRuntimeString(eventRecord, ["subtype"]);
+  if (subtype)
+    attributes["amp.event.subtype"] = subtype;
+  const toolCallId = firstRuntimeString(eventRecord, ["toolCallId", "tool_call_id"]);
+  if (toolCallId)
+    attributes.tool_use_id = toolCallId;
+  const toolName = firstRuntimeString(eventRecord, ["toolName", "tool_name"]);
+  if (toolName)
+    attributes.tool_name = toolName;
+  if (messageId)
+    attributes["prompt.id"] = messageId;
+  const records = [];
+  pushLogRecord({
+    records,
+    timestamp,
+    attributes,
+    body: event
+  });
+  const [record2] = records;
+  if (!record2)
+    return null;
+  return { threadId, record: record2 };
+}
+function firstRuntimeString(record2, keys) {
+  for (const key of keys) {
+    const value = stringOrNull(record2[key]);
+    if (value)
+      return value;
+  }
+  return null;
+}
+function firstRuntimeNumber(record2, keys) {
+  for (const key of keys) {
+    const value = record2[key];
+    if (typeof value === "number" && Number.isFinite(value))
+      return value;
+    if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) {
+      return Number(value);
+    }
+  }
+  return null;
+}
+function buildPassiveLogRecords(thread, previousMessageFingerprints) {
   const threadId = stringOrNull(thread.id);
   if (!threadId)
-    return { records: [], messageCount: 0 };
+    return { records: [], messageFingerprints: [] };
   const messages = Array.isArray(thread.messages) ? thread.messages.filter(isRecord) : [];
   const messageCount = messages.length;
-  const startIndex = Math.min(Math.max(previousMessageCount, 0), messageCount);
+  const messageFingerprints = messages.map(messageFingerprint);
+  const startIndex = firstChangedMessageIndex(previousMessageFingerprints, messageFingerprints);
   if (startIndex >= messageCount)
-    return { records: [], messageCount };
+    return { records: [], messageFingerprints };
   const fallbackTimestamp = isoTimestamp(thread.updatedAt) ?? isoTimestamp(thread.created) ?? new Date().toISOString();
   const pendingToolCalls = preloadToolCalls(messages, startIndex);
   const records = [];
@@ -27535,7 +27678,22 @@ function buildPassiveLogRecords(thread, previousMessageCount) {
       });
     }
   }
-  return { records, messageCount };
+  return { records, messageFingerprints };
+}
+function firstChangedMessageIndex(previous, current) {
+  const limit = Math.min(previous.length, current.length);
+  for (let index = 0;index < limit; index += 1) {
+    if (previous[index] !== current[index])
+      return index;
+  }
+  return previous.length === current.length ? current.length : limit;
+}
+function messageFingerprint(message) {
+  try {
+    return JSON.stringify(message);
+  } catch {
+    return String(message.messageId ?? "") + ":" + String(message.meta?.sentAt ?? "") + ":" + String(message.usage?.timestamp ?? "");
+  }
 }
 async function postPassiveLogs(records) {
   if (records.length === 0)

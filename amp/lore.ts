@@ -59,8 +59,40 @@ type AmpThreadExport = {
   created?: unknown;
   updatedAt?: unknown;
 };
+type PendingUploadBatch = {
+  messageFingerprints: string[];
+  records: JsonRecord[];
+};
 
-const uploadedMessageCountByThread = new Map<string, number>();
+const uploadedMessageFingerprintsByThread = new Map<string, string[]>();
+const pendingUploadByThread = new Map<string, PendingUploadBatch>();
+const mirrorPromiseByThread = new Map<string, Promise<void>>();
+const RUNTIME_EVENT_NAMES = [
+  'agent.start',
+  'agent_state',
+  'compaction_complete',
+  'compaction_started',
+  'delta',
+  'executor_connected',
+  'executor_guidance_discovery',
+  'executor_status',
+  'executor_tool_lease_ack',
+  'executor_tool_result',
+  'executor_tool_result_ack',
+  'executor_workspace_maybe_changed',
+  'inference_tools',
+  'message_added',
+  'message_updated',
+  'observers',
+  'plugin_message',
+  'queued_message_added',
+  'queued_message_dequeued',
+  'queued_messages',
+  'thread_settings',
+  'thread_title',
+  'tool_lease',
+  'tool_progress',
+] as const;
 
 const INSTALLED_AMP_PLUGIN_SUFFIXES = [
   `${path.sep}harness${path.sep}amp${path.sep}lore-plugin${path.sep}amp${path.sep}lore-bundled.js`,
@@ -224,46 +256,127 @@ function installPassiveAmpThreadMirror(amp: PluginAPI): void {
 
   pluginWithEvents.on('session.start', (event, ctx) => {
     const threadId = resolveThreadId(event, ctx);
-    if (threadId && !uploadedMessageCountByThread.has(threadId)) {
-      uploadedMessageCountByThread.set(threadId, 0);
+    if (threadId && !uploadedMessageFingerprintsByThread.has(threadId)) {
+      uploadedMessageFingerprintsByThread.set(threadId, []);
     }
+    void postRuntimeEvent('session.start', event, ctx, amp);
+  });
+
+  for (const eventName of RUNTIME_EVENT_NAMES) {
+    pluginWithEvents.on(eventName, (event, ctx) => {
+      void postRuntimeEvent(eventName, event, ctx, amp);
+    });
+  }
+
+  pluginWithEvents.on('message_added', async (event, ctx) => {
+    await enqueueAmpThreadMirror(event, ctx, amp, 'message_added');
+  });
+
+  pluginWithEvents.on('message_updated', async (event, ctx) => {
+    await enqueueAmpThreadMirror(event, ctx, amp, 'message_updated');
   });
 
   pluginWithEvents.on('agent.end', async (event, ctx) => {
-    const threadId = resolveThreadId(event, ctx);
-    if (!threadId) return;
-    const commandContext = ctx as {
-      $?: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<ShellResult>;
-    };
-    if (typeof commandContext.$ !== 'function') {
-      amp.logger.log(`[lore] Missing shell context while exporting Amp thread ${threadId}.`);
-      return;
-    }
+    await postRuntimeEvent('agent.end', event, ctx, amp);
+    await enqueueAmpThreadMirror(event, ctx, amp, 'agent.end');
+  });
+}
 
+async function postRuntimeEvent(eventName: string, event: unknown, ctx: unknown, amp: PluginAPI): Promise<void> {
+  const runtimeRecord = runtimeRecordForEvent(eventName, event, ctx);
+  if (!runtimeRecord) return;
+  try {
+    await postPassiveLogs([runtimeRecord.record]);
+  } catch (error) {
+    amp.logger.log(
+      `[lore] Failed to upload Amp runtime event ${eventName} for ${runtimeRecord.threadId} to Lore: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+function enqueueAmpThreadMirror(
+  event: unknown,
+  ctx: unknown,
+  amp: PluginAPI,
+  trigger: string,
+): Promise<void> {
+  const threadId = resolveThreadId(event, ctx);
+  if (!threadId) return Promise.resolve();
+
+  const previous = mirrorPromiseByThread.get(threadId) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(() => mirrorAmpThread(threadId, ctx, amp, trigger));
+  const tracked = next.finally(() => {
+    if (mirrorPromiseByThread.get(threadId) === tracked) {
+      mirrorPromiseByThread.delete(threadId);
+    }
+  });
+  mirrorPromiseByThread.set(threadId, tracked);
+  return tracked;
+}
+
+async function mirrorAmpThread(
+  threadId: string,
+  ctx: unknown,
+  amp: PluginAPI,
+  trigger: string,
+): Promise<void> {
+  const commandContext = ctx as {
+    $?: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<ShellResult>;
+  };
+  if (typeof commandContext.$ !== 'function') {
+    amp.logger.log(`[lore] Missing shell context while exporting Amp thread ${threadId}.`);
+    return;
+  }
+
+  const pendingUpload = pendingUploadByThread.get(threadId);
+  if (pendingUpload) {
     try {
-      const exportResult = await commandContext.$`amp threads export ${threadId}`;
-      if (exportResult.exitCode !== 0) {
-        const detail = exportResult.stderr.trim() || exportResult.stdout.trim() || `exit code ${exportResult.exitCode}`;
-        throw new Error(`amp threads export failed: ${detail}`);
-      }
-      const thread = JSON.parse(exportResult.stdout) as AmpThreadExport;
-      if (stringOrNull(thread.id) !== threadId) thread.id = threadId;
-      const previousMessageCount = uploadedMessageCountByThread.get(threadId) ?? 0;
-      const { records, messageCount } = buildPassiveLogRecords(thread, previousMessageCount);
-      if (records.length === 0) {
-        uploadedMessageCountByThread.set(threadId, messageCount);
-        return;
-      }
-      await postPassiveLogs(records);
-      uploadedMessageCountByThread.set(threadId, messageCount);
+      await postPassiveLogs(pendingUpload.records);
+      uploadedMessageFingerprintsByThread.set(threadId, pendingUpload.messageFingerprints);
+      pendingUploadByThread.delete(threadId);
     } catch (error) {
       amp.logger.log(
-        `[lore] Failed to upload Amp thread ${threadId} to Lore: ${
+        `[lore] Failed to retry Amp thread ${threadId} to Lore: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
+      return;
     }
-  });
+  }
+
+  try {
+    const exportResult = await commandContext.$`amp threads export ${threadId}`;
+    if (exportResult.exitCode !== 0) {
+      const detail = exportResult.stderr.trim() || exportResult.stdout.trim() || `exit code ${exportResult.exitCode}`;
+      throw new Error(`amp threads export failed: ${detail}`);
+    }
+    const thread = JSON.parse(exportResult.stdout) as AmpThreadExport;
+    if (stringOrNull(thread.id) !== threadId) thread.id = threadId;
+    const previousMessageFingerprints = uploadedMessageFingerprintsByThread.get(threadId) ?? [];
+    const { records, messageFingerprints } = buildPassiveLogRecords(thread, previousMessageFingerprints);
+    if (records.length === 0) {
+      uploadedMessageFingerprintsByThread.set(threadId, messageFingerprints);
+      return;
+    }
+    try {
+      await postPassiveLogs(records);
+      uploadedMessageFingerprintsByThread.set(threadId, messageFingerprints);
+      pendingUploadByThread.delete(threadId);
+    } catch (error) {
+      pendingUploadByThread.set(threadId, { messageFingerprints, records });
+      throw error;
+    }
+  } catch (error) {
+    amp.logger.log(
+      `[lore] Failed to upload Amp thread ${threadId} to Lore after ${trigger}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }
 
 function resolveThreadId(event: unknown, ctx: unknown): string | null {
@@ -282,18 +395,80 @@ function resolveThreadId(event: unknown, ctx: unknown): string | null {
   return null;
 }
 
-function buildPassiveLogRecords(thread: AmpThreadExport, previousMessageCount: number): {
+function runtimeRecordForEvent(eventName: string, event: unknown, ctx: unknown): {
+  threadId: string;
+  record: JsonRecord;
+} | null {
+  const threadId = resolveThreadId(event, ctx);
+  if (!threadId) return null;
+  const eventRecord = isRecord(event) ? event : {};
+  const contextRecord = isRecord(ctx) ? ctx : {};
+  const messageId =
+    firstRuntimeString(eventRecord, ['messageId', 'messageID', 'id']) ??
+    firstRuntimeString(contextRecord, ['messageId', 'messageID']);
+  const timestamp =
+    isoTimestamp(eventRecord['@timestamp']) ??
+    isoTimestamp(eventRecord.timestamp) ??
+    isoTimestamp(eventRecord.time) ??
+    new Date().toISOString();
+  const attributes: JsonRecord = {
+    'event.name': `amp.${eventName}`,
+    'session.id': threadId,
+    'amp.event.name': eventName,
+  };
+  const sequence = firstRuntimeNumber(eventRecord, ['seq', 'sequence']);
+  if (sequence !== null) attributes['event.sequence'] = sequence;
+  const subtype = firstRuntimeString(eventRecord, ['subtype']);
+  if (subtype) attributes['amp.event.subtype'] = subtype;
+  const toolCallId = firstRuntimeString(eventRecord, ['toolCallId', 'tool_call_id']);
+  if (toolCallId) attributes.tool_use_id = toolCallId;
+  const toolName = firstRuntimeString(eventRecord, ['toolName', 'tool_name']);
+  if (toolName) attributes.tool_name = toolName;
+  if (messageId) attributes['prompt.id'] = messageId;
+  const records: JsonRecord[] = [];
+  pushLogRecord({
+    records,
+    timestamp,
+    attributes,
+    body: event,
+  });
+  const [record] = records;
+  if (!record) return null;
+  return { threadId, record };
+}
+
+function firstRuntimeString(record: JsonRecord, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = stringOrNull(record[key]);
+    if (value) return value;
+  }
+  return null;
+}
+
+function firstRuntimeNumber(record: JsonRecord, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) {
+      return Number(value);
+    }
+  }
+  return null;
+}
+
+function buildPassiveLogRecords(thread: AmpThreadExport, previousMessageFingerprints: string[]): {
   records: JsonRecord[];
-  messageCount: number;
+  messageFingerprints: string[];
 } {
   const threadId = stringOrNull(thread.id);
-  if (!threadId) return { records: [], messageCount: 0 };
+  if (!threadId) return { records: [], messageFingerprints: [] };
   const messages = Array.isArray(thread.messages)
     ? (thread.messages.filter(isRecord) as AmpMessage[])
     : [];
   const messageCount = messages.length;
-  const startIndex = Math.min(Math.max(previousMessageCount, 0), messageCount);
-  if (startIndex >= messageCount) return { records: [], messageCount };
+  const messageFingerprints = messages.map(messageFingerprint);
+  const startIndex = firstChangedMessageIndex(previousMessageFingerprints, messageFingerprints);
+  if (startIndex >= messageCount) return { records: [], messageFingerprints };
 
   const fallbackTimestamp = isoTimestamp(thread.updatedAt) ?? isoTimestamp(thread.created) ?? new Date().toISOString();
   const pendingToolCalls = preloadToolCalls(messages, startIndex);
@@ -433,7 +608,23 @@ function buildPassiveLogRecords(thread: AmpThreadExport, previousMessageCount: n
     }
   }
 
-  return { records, messageCount };
+  return { records, messageFingerprints };
+}
+
+function firstChangedMessageIndex(previous: string[], current: string[]): number {
+  const limit = Math.min(previous.length, current.length);
+  for (let index = 0; index < limit; index += 1) {
+    if (previous[index] !== current[index]) return index;
+  }
+  return previous.length === current.length ? current.length : limit;
+}
+
+function messageFingerprint(message: AmpMessage): string {
+  try {
+    return JSON.stringify(message);
+  } catch {
+    return String(message.messageId ?? '') + ':' + String(message.meta?.sentAt ?? '') + ':' + String(message.usage?.timestamp ?? '');
+  }
 }
 
 async function postPassiveLogs(records: JsonRecord[]): Promise<void> {
