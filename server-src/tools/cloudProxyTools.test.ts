@@ -7,6 +7,10 @@ import { AuthRequiredError, AUTH_REQUIRED_MESSAGE } from '../lib/errors';
 import { writeTokens, readTokens, type Tokens } from '../lib/auth/store';
 import { __resetCloudBaseUrlForTests } from '../lib/cloudBaseUrl';
 import { __resetInFlightForTests } from '../lib/auth/refresh';
+import {
+  discoverEndpoints,
+  __resetInFlightForTests as __resetDiscoveryInFlightForTests,
+} from '../lib/auth/discovery';
 
 function makeTmpHome(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-proxy-tools-test-'));
@@ -29,11 +33,41 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+// A cloud 401 now forces one refresh before deleting tokens (retry-before-
+// delete, see cloudCall.ts). To exercise the "dead session → auth-required +
+// tokens cleared" outcome, the refresh must reveal a dead token
+// (invalid_grant), which requires the discovery + token endpoints to be
+// mocked. Prime the discovery cache so the routing fetch only handles /mcp +
+// the token endpoint.
+const TOKEN_ENDPOINT = 'https://signin.lore.tanagram.ai/oauth2/token';
+function discoveryResponse(url: string): Response | null {
+  if (url.includes('oauth-protected-resource')) {
+    return jsonResponse({
+      resource: 'https://api.lore.tanagram.ai',
+      authorization_servers: ['https://signin.lore.tanagram.ai'],
+    });
+  }
+  if (url.includes('oauth-authorization-server')) {
+    return jsonResponse({ issuer: 'https://signin.lore.tanagram.ai', token_endpoint: TOKEN_ENDPOINT });
+  }
+  return null;
+}
+async function primeDiscoveryCache(h: string): Promise<void> {
+  const f = (async (url: string) => {
+    const r = discoveryResponse(String(url));
+    if (r) return r;
+    throw new Error(`prime fetch unexpected URL: ${url}`);
+  }) as unknown as typeof fetch;
+  await discoverEndpoints({ fetchImpl: f, home: h });
+  __resetDiscoveryInFlightForTests();
+}
+
 describe('generated cloud proxy tools', () => {
   let home: string;
   beforeEach(() => {
     home = makeTmpHome();
     __resetInFlightForTests();
+    __resetDiscoveryInFlightForTests();
     process.env.LORE_MCP_BASE_URL = 'http://localhost:4000';
     __resetCloudBaseUrlForTests();
   });
@@ -42,6 +76,7 @@ describe('generated cloud proxy tools', () => {
     delete process.env.LORE_MCP_BASE_URL;
     __resetCloudBaseUrlForTests();
     __resetInFlightForTests();
+    __resetDiscoveryInFlightForTests();
   });
 
   test('derives the proxy tool list and schemas from shared specs', () => {
@@ -117,10 +152,17 @@ describe('generated cloud proxy tools', () => {
     });
   });
 
-  test('cloud 401 → tokens deleted + auth-required result', async () => {
+  test('cloud 401 with a dead refresh token → tokens deleted + auth-required result', async () => {
     await writeTokens(validTokens(), home);
-    const fetchImpl = (async () =>
-      jsonResponse({ error: 'unauthorized' }, 401)) as unknown as typeof fetch;
+    await primeDiscoveryCache(home);
+    // /mcp rejects; the forced refresh reveals a dead token → confirmed dead
+    // session → tokens cleared + auth-required result.
+    const fetchImpl = (async (url: string) => {
+      const s = String(url);
+      if (s === 'http://localhost:4000/mcp') return jsonResponse({ error: 'unauthorized' }, 401);
+      if (s === TOKEN_ENDPOINT) return jsonResponse({ error: 'invalid_grant' }, 400);
+      return discoveryResponse(s) ?? jsonResponse({}, 500);
+    }) as unknown as typeof fetch;
     const result = await runCloudProxyTool('get_thread', { thread_id: 'x' }, { fetchImpl, home });
     expect(result).toEqual({
       isError: true,

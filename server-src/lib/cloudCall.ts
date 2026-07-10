@@ -8,15 +8,21 @@
  *   401 specifically, propagate everything else. Centralizing here lets
  *   each tool be a thin pass-through.
  *
- * Why 401 is special-cased:
+ * Why 401 is special-cased (retry-before-delete):
  *   `getValidAccessToken()` already refreshes the local token if it
- *   thinks it's expired. A 401 from the cloud despite a fresh token
- *   means the cloud revoked the refresh token (or the access token) in
- *   between — typically because the user logged out from another device
- *   or an admin revoked the session. In that case the only path forward
- *   is `lore_login` again, so we wipe the on-disk tokens and raise
- *   `AuthRequiredError`. Any other non-2xx is propagated as-is — the
- *   caller (or the agent on retry) might recover.
+ *   thinks it's expired. A 401 from the cloud despite a locally-valid
+ *   token can mean the access token was revoked/expired server-side, or
+ *   another client rotated the session — but it can ALSO be a transient
+ *   edge (clock skew right after a refresh, an audience-fallback miss, a
+ *   momentary cloud auth blip). Deleting the session on the first 401
+ *   turned all of those into a forced re-login, which was the "keeps
+ *   logging me out" bug. So we now force ONE refresh and retry the call
+ *   once. Only if the freshly-refreshed token is ALSO rejected do we
+ *   conclude the session is dead, wipe the on-disk tokens, and raise
+ *   `AuthRequiredError`. A dead refresh token surfaces as
+ *   `AuthRequiredError` from `forceRefreshAccessToken` (it wipes there);
+ *   a transient refresh failure propagates verbatim WITHOUT wiping, so
+ *   the caller can retry later. Any other non-2xx is propagated as-is.
  *
  * Why we don't catch AuthRequiredError here:
  *   The per-tool dispatcher maps `AuthRequiredError` into a
@@ -33,7 +39,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { AuthRequiredError } from './errors';
-import { getValidAccessToken } from './auth/refresh.js';
+import { getValidAccessToken, forceRefreshAccessToken } from './auth/refresh.js';
 import { deleteTokens } from './auth/store.js';
 import { cloudMcpBaseUrl } from './cloudBaseUrl';
 
@@ -83,34 +89,53 @@ export async function callCloudTool<TResult = unknown>(
   // Acquire the token first. If this throws AuthRequiredError, we MUST
   // NOT touch the network — the test asserts `fetchImpl` was never
   // called. Letting the throw propagate naturally handles that.
-  const token = await getValidAccessToken({ home: opts.home });
+  const token = await getValidAccessToken({ home: opts.home, fetchImpl: opts.fetchImpl });
   const fetchFn = opts.fetchImpl ?? fetch;
 
-  const envelope = {
-    jsonrpc: '2.0' as const,
-    id: randomUUID(),
-    method: 'tools/call',
-    params: {
-      name: toolName,
-      arguments: args,
-    },
+  const url = `${cloudMcpBaseUrl()}/mcp`;
+  // Build a fresh JSON-RPC envelope (with a new unique id) per attempt, so a
+  // retry after a 401 never reuses the first attempt's id.
+  const postWithToken = (bearer: string): Promise<Response> => {
+    const envelope = {
+      jsonrpc: '2.0' as const,
+      id: randomUUID(),
+      method: 'tools/call',
+      params: {
+        name: toolName,
+        arguments: args,
+      },
+    };
+    return fetchFn(url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${bearer}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(envelope),
+    });
   };
 
-  const url = `${cloudMcpBaseUrl()}/mcp`;
-  const res = await fetchFn(url, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${token}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(envelope),
-  });
+  let res = await postWithToken(token);
 
   if (res.status === 401) {
-    // Cloud-side revocation. The tokens we held no longer work; wipe
-    // them so the next call lands cleanly on the "no tokens" path.
-    await deleteTokens(opts.home);
-    throw new AuthRequiredError();
+    // Retry-before-delete (see module docstring). Force one refresh and retry
+    // once. `forceRefreshAccessToken` wipes + throws AuthRequiredError on a
+    // dead refresh token, and throws verbatim (tokens preserved) on a
+    // transient refresh failure — either way we do NOT reach the delete below
+    // unless the retry itself 401s.
+    const refreshedToken = await forceRefreshAccessToken({
+      previousAccessToken: token,
+      home: opts.home,
+      fetchImpl: opts.fetchImpl,
+    });
+    res = await postWithToken(refreshedToken);
+    if (res.status === 401) {
+      // Confirmed: even a freshly refreshed access token is rejected. The
+      // session is genuinely dead; wipe so the next call lands cleanly on the
+      // "no tokens" path.
+      await deleteTokens(opts.home);
+      throw new AuthRequiredError();
+    }
   }
 
   if (!res.ok) {

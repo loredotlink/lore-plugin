@@ -11,6 +11,10 @@ import {
   type Tokens,
 } from './auth/store';
 import { __resetCloudBaseUrlForTests } from './cloudBaseUrl';
+import {
+  discoverEndpoints,
+  __resetInFlightForTests as __resetDiscoveryInFlightForTests,
+} from './auth/discovery';
 
 function makeTmpHome(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'lore-cloudcall-test-'));
@@ -95,19 +99,107 @@ function captureFetch(
   return { fetchImpl, calls };
 }
 
+// ---------------------------------------------------------------------------
+// 401 retry-before-delete helpers
+//
+// A cloud 401 must NOT immediately delete the session. cloudCall forces one
+// credential refresh and retries the /mcp call once, threading the injected
+// `fetchImpl` through the refresh so tests stay hermetic. These helpers mock
+// the token endpoint (and PRM/AS, though the discovery cache is primed so the
+// call under test only hits the token endpoint + /mcp).
+// ---------------------------------------------------------------------------
+const TEST_PRM_URL_FRAGMENT = 'oauth-protected-resource';
+const TEST_AS_URL_FRAGMENT = 'oauth-authorization-server';
+const TEST_TOKEN_ENDPOINT = 'https://signin.lore.tanagram.ai/oauth2/token';
+const MCP_PROXY_URL = 'http://localhost:4000/mcp';
+
+function prmBody() {
+  return {
+    resource: 'https://api.lore.tanagram.ai',
+    authorization_servers: ['https://signin.lore.tanagram.ai'],
+  };
+}
+function asBody() {
+  return { issuer: 'https://signin.lore.tanagram.ai', token_endpoint: TEST_TOKEN_ENDPOINT };
+}
+function refreshBody(overrides: Record<string, unknown> = {}) {
+  return {
+    access_token: 'access-REFRESHED',
+    refresh_token: 'refresh-REFRESHED',
+    expires_in: 3600,
+    token_type: 'Bearer',
+    scope: 'mcp.read mcp.write',
+    ...overrides,
+  };
+}
+
+// Prime the on-disk discovery cache so the forced refresh in the call under
+// test only needs the token endpoint (not PRM/AS).
+async function primeDiscoveryCache(h: string): Promise<void> {
+  const primeFetch = (async (url: string) => {
+    const s = String(url);
+    if (s.includes(TEST_PRM_URL_FRAGMENT)) return jsonResponse(prmBody());
+    if (s.includes(TEST_AS_URL_FRAGMENT)) return jsonResponse(asBody());
+    throw new Error(`prime fetch unexpected URL: ${s}`);
+  }) as unknown as typeof fetch;
+  await discoverEndpoints({ fetchImpl: primeFetch, home: h });
+  __resetDiscoveryInFlightForTests();
+}
+
+// A fetch that returns a scripted status sequence for successive /mcp calls,
+// serves the token endpoint for the forced refresh, and records both.
+function makeRetryFetch(opts: {
+  mcpStatuses: number[];
+  mcpResult?: unknown;
+  tokenResponder?: () => Response;
+}): { fetchImpl: typeof fetch; mcpCalls: CapturedRequest[]; tokenCalls: () => number } {
+  const mcpCalls: CapturedRequest[] = [];
+  let tokenCalls = 0;
+  const fetchImpl = (async (url: string, init?: RequestInit): Promise<Response> => {
+    const s = String(url);
+    if (s === MCP_PROXY_URL) {
+      const headers: Record<string, string> = {};
+      for (const [k, v] of Object.entries((init?.headers ?? {}) as Record<string, string>)) {
+        headers[k.toLowerCase()] = v;
+      }
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+      mcpCalls.push({ url: s, method: init?.method, headers, body });
+      const idx = mcpCalls.length - 1;
+      const status =
+        opts.mcpStatuses[idx] ?? opts.mcpStatuses[opts.mcpStatuses.length - 1] ?? 200;
+      if (status === 200) {
+        return rpcSuccess((body as { id: string }).id, opts.mcpResult ?? { ok: true });
+      }
+      return jsonResponse({ error: 'unauthorized' }, status);
+    }
+    if (s === TEST_TOKEN_ENDPOINT) {
+      tokenCalls += 1;
+      return opts.tokenResponder ? opts.tokenResponder() : jsonResponse(refreshBody());
+    }
+    if (s.includes(TEST_PRM_URL_FRAGMENT)) return jsonResponse(prmBody());
+    if (s.includes(TEST_AS_URL_FRAGMENT)) return jsonResponse(asBody());
+    throw new Error(`retry fetch unexpected URL: ${s}`);
+  }) as unknown as typeof fetch;
+  return { fetchImpl, mcpCalls, tokenCalls: () => tokenCalls };
+}
+
 describe('callCloudTool', () => {
   let home: string;
   beforeEach(() => {
     home = makeTmpHome();
     __resetInFlightForTests();
+    __resetDiscoveryInFlightForTests();
     process.env.LORE_MCP_PROXY_BASE_URL = 'http://localhost:4000';
+    process.env.LORE_MCP_BASE_URL = 'https://mcp.lore.tanagram.ai';
     __resetCloudBaseUrlForTests();
   });
   afterEach(() => {
     rmrf(home);
     delete process.env.LORE_MCP_PROXY_BASE_URL;
+    delete process.env.LORE_MCP_BASE_URL;
     __resetCloudBaseUrlForTests();
     __resetInFlightForTests();
+    __resetDiscoveryInFlightForTests();
   });
 
   test('happy path: returns result, sends bearer + content-type, POSTs to /mcp', async () => {
@@ -149,17 +241,75 @@ describe('callCloudTool', () => {
     expect(calls.length).toBe(0);
   });
 
-  test('401 from cloud: deletes tokens and throws AuthRequiredError', async () => {
+  test('cloud 401 then success: forces one refresh, retries once, tokens preserved (not deleted)', async () => {
     await writeTokens(validTokens(), home);
-    const { fetchImpl, calls } = captureFetch(() =>
-      jsonResponse({ error: 'unauthorized' }, 401),
-    );
+    await primeDiscoveryCache(home);
+    const { fetchImpl, mcpCalls, tokenCalls } = makeRetryFetch({
+      mcpStatuses: [401, 200],
+      mcpResult: { thread_id: 't_ok' },
+    });
+    const result = await callCloudTool('share_session', {}, { fetchImpl, home });
+    expect(result).toEqual({ thread_id: 't_ok' });
+    // Exactly one retry: first call 401 with the live token, retry with the
+    // refreshed token.
+    expect(mcpCalls.length).toBe(2);
+    expect(mcpCalls[0]!.headers['authorization']).toBe('Bearer access-LIVE');
+    expect(mcpCalls[1]!.headers['authorization']).toBe('Bearer access-REFRESHED');
+    expect(tokenCalls()).toBe(1);
+    // A single transient 401 must NEVER wipe the session.
+    const after = await readTokens(home);
+    expect(after?.access_token).toBe('access-REFRESHED');
+  });
+
+  test('cloud 401 twice (even after a successful refresh): deletes tokens and throws AuthRequiredError', async () => {
+    await writeTokens(validTokens(), home);
+    await primeDiscoveryCache(home);
+    const { fetchImpl, mcpCalls, tokenCalls } = makeRetryFetch({ mcpStatuses: [401, 401] });
     await expect(
       callCloudTool('share_session', {}, { fetchImpl, home }),
     ).rejects.toBeInstanceOf(AuthRequiredError);
-    expect(calls.length).toBe(1);
-    // Tokens file gone.
+    // Refreshed once, retried once, still 401 → confirmed revocation.
+    expect(mcpCalls.length).toBe(2);
+    expect(tokenCalls()).toBe(1);
     expect(await readTokens(home)).toBeNull();
+  });
+
+  test('cloud 401 then a transient refresh failure: tokens preserved, no retry, not AuthRequiredError', async () => {
+    await writeTokens(validTokens(), home);
+    await primeDiscoveryCache(home);
+    const { fetchImpl, mcpCalls } = makeRetryFetch({
+      mcpStatuses: [401],
+      tokenResponder: () => jsonResponse({ error: 'server_error' }, 503),
+    });
+    let caught: unknown;
+    try {
+      await callCloudTool('share_session', {}, { fetchImpl, home });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    // A failed refresh is transient — it must not delete the session or be
+    // reported as auth-required (which would prompt a needless re-login).
+    expect(caught).not.toBeInstanceOf(AuthRequiredError);
+    const after = await readTokens(home);
+    expect(after?.access_token).toBe('access-LIVE');
+    // No retry when there is no fresh token to retry with.
+    expect(mcpCalls.length).toBe(1);
+  });
+
+  test('cloud 401 then invalid_grant on refresh: deletes tokens and throws AuthRequiredError', async () => {
+    await writeTokens(validTokens(), home);
+    await primeDiscoveryCache(home);
+    const { fetchImpl, mcpCalls } = makeRetryFetch({
+      mcpStatuses: [401],
+      tokenResponder: () => jsonResponse({ error: 'invalid_grant' }, 400),
+    });
+    await expect(
+      callCloudTool('share_session', {}, { fetchImpl, home }),
+    ).rejects.toBeInstanceOf(AuthRequiredError);
+    // A dead refresh token is a confirmed revocation → session cleared.
+    expect(await readTokens(home)).toBeNull();
+    expect(mcpCalls.length).toBe(1);
   });
 
   test('500 from cloud: throws non-AuthRequiredError, tokens preserved', async () => {
