@@ -45,10 +45,11 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readClientTokens, refreshLockDirPath, writeClientTokens } from '@lore/identity-store';
+import { readClientTokens, refreshLockDirPath, writeApiKey, writeClientTokens } from '@lore/identity-store';
 import { AuthRequiredError } from '../errors';
 import {
   getValidAccessToken,
+  forceRefreshAccessToken,
   __resetInFlightForTests,
 } from './refresh';
 import { readTokens, writeTokens, tokensFilePath, stateDir, type Tokens } from './store';
@@ -725,5 +726,49 @@ describe('getValidAccessToken', () => {
     });
     const got = await getValidAccessToken({ now, fetchImpl: workingFetch, home });
     expect(got).toBe('access-NEW');
+  });
+});
+
+describe('API-key mode', () => {
+  const noFetch = (async () => {
+    throw new Error('fetch must not be called in API-key mode');
+  }) as unknown as typeof fetch;
+
+  test('returns the LORE_API_KEY env value without reading tokens or refreshing', async () => {
+    process.env.LORE_API_KEY = 'lore_uak_env';
+    try {
+      const token = await getValidAccessToken({ home, fetchImpl: noFetch, now });
+      expect(token).toBe('lore_uak_env');
+    } finally {
+      delete process.env.LORE_API_KEY;
+    }
+  });
+
+  test('returns the stored shared apiKey without refreshing', async () => {
+    await writeApiKey(stateDir(home), { value: 'lore_uak_stored', created_at: FIXED_NOW });
+    const token = await getValidAccessToken({ home, fetchImpl: noFetch, now });
+    expect(token).toBe('lore_uak_stored');
+  });
+
+  test('env apiKey takes precedence over a valid OAuth slot', async () => {
+    await writeTokens(freshTokens(), home);
+    process.env.LORE_API_KEY = 'lore_uak_env';
+    try {
+      const token = await getValidAccessToken({ home, fetchImpl: noFetch, now });
+      expect(token).toBe('lore_uak_env');
+    } finally {
+      delete process.env.LORE_API_KEY;
+    }
+  });
+
+  test('forceRefreshAccessToken throws AuthRequiredError in apiKey mode (a key cannot be refreshed)', async () => {
+    process.env.LORE_API_KEY = 'lore_uak_env';
+    try {
+      await expect(
+        forceRefreshAccessToken({ previousAccessToken: 'lore_uak_env', home, fetchImpl: noFetch, now }),
+      ).rejects.toBeInstanceOf(AuthRequiredError);
+    } finally {
+      delete process.env.LORE_API_KEY;
+    }
   });
 });

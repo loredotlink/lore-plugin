@@ -58,6 +58,7 @@ import fs from 'node:fs';
 import {
   OAuthInvalidGrantError,
   OAuthNoAuthorizationServerError,
+  readApiKey,
   readClientTokens,
   refreshLockDirPath,
   refreshOAuthTokens,
@@ -77,6 +78,31 @@ import { PLUGIN_AUTHKIT_CLIENT_ID } from './constants';
 const REFRESH_SKEW_MS = 30_000;
 const TRUTHY_TOKEN_ENV = new Set(['1', 'true', 'yes', 'on']);
 const DESKTOP_MANAGED_CLIENT_KEY = 'desktop' as const;
+
+/**
+ * Environment override for the shared Lore API key. When set, it wins over the
+ * on-disk apiKey slot and the OAuth tokens — so a credential-less context (a
+ * dispatched subagent, CI) that inherits only the environment can still
+ * authenticate. Empty/whitespace is treated as unset.
+ */
+const LORE_API_KEY_ENV = 'LORE_API_KEY';
+function apiKeyFromEnv(): string | null {
+  const value = process.env[LORE_API_KEY_ENV]?.trim();
+  return value && value.length > 0 ? value : null;
+}
+
+/**
+ * Resolve a long-lived Lore API key credential if one is available: the
+ * environment override first, then the shared on-disk apiKey slot. An API key
+ * needs no refresh (no expiry, no rotation), so callers that find one return it
+ * directly and skip the whole OAuth refresh machinery.
+ */
+async function resolveApiKeyCredential(home: string | undefined): Promise<string | null> {
+  const envKey = apiKeyFromEnv();
+  if (envKey) return envKey;
+  const stored = await readApiKey(stateDir(home));
+  return stored?.value ?? null;
+}
 
 /**
  * The module-scope mutex. Exactly one concurrent refresh per process.
@@ -131,6 +157,13 @@ async function doGet(opts: Options): Promise<string> {
   const nowFn = opts.now ?? Date.now;
   const fetchFn = opts.fetchImpl ?? fetch;
   const home = opts.home;
+
+  // API-key mode: a long-lived Lore API key (env override or the shared on-disk
+  // slot) authenticates directly — no refresh, no expiry, no rotation. It is
+  // the durable "sign in once" credential, so it takes precedence over the
+  // OAuth slot and the whole refresh path below.
+  const apiKey = await resolveApiKeyCredential(home);
+  if (apiKey) return apiKey;
 
   if (isExternallyManagedTokenMode()) {
     const tokens = await readClientTokens(stateDir(home), DESKTOP_MANAGED_CLIENT_KEY);
@@ -241,6 +274,14 @@ export async function forceRefreshAccessToken(opts: {
   const nowFn = opts.now ?? Date.now;
   const fetchFn = opts.fetchImpl ?? fetch;
   const home = opts.home;
+
+  // API-key mode has no refresh token: a 401 means the key was revoked. There
+  // is nothing to redeem, so surface auth-required (the user re-provisions or
+  // re-logs-in) rather than attempting an OAuth refresh that would fail
+  // confusingly.
+  if (await resolveApiKeyCredential(home)) {
+    throw new AuthRequiredError();
+  }
 
   if (isExternallyManagedTokenMode()) {
     // The desktop app owns refresh for its slot; we cannot redeem it here.
