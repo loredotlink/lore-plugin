@@ -186,6 +186,29 @@ describe('runLoreLoginResume', () => {
     expect(persisted!.expires_at).toBeLessThan(FIXED_NOW + 3_600_000 + 1000);
   });
 
+  test('provisions the shared API key after a successful resume', async () => {
+    const now = () => 1_700_000_000_000;
+    const { fetchImpl } = makeFetch([
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse(tokenPairBody()) },
+    ]);
+    const { sleep } = makeSleep();
+    let provisionCalls = 0;
+    const result = await runLoreLoginResume({
+      device_code: 'dev-RESUME',
+      expires_in_seconds: 600,
+      interval_seconds: 3,
+      fetchImpl,
+      now,
+      sleep,
+      home,
+      provisionApiKey: async () => {
+        provisionCalls++;
+      },
+    });
+    expect(result).toEqual({ ok: true });
+    expect(provisionCalls).toBe(1);
+  });
+
   test('defaults applied: omitted expires_in/interval → 600s cap, 5s interval', async () => {
     // Cap of 600s. Advance clock by 200s per now() so after 3 polls we hit the cap.
     const FIXED_START = 1_700_000_000_000;

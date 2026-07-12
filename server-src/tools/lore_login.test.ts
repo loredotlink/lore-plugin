@@ -221,6 +221,49 @@ describe('runLoreLogin', () => {
     expect(persisted!.expires_at).toBeLessThan(FIXED_NOW + 3_600_000 + 1000);
   });
 
+  test('provisions the shared API key after a successful login', async () => {
+    const now = () => 1_700_000_000_000;
+    const { fetchImpl } = makeFetch([
+      { url: TEST_DEVICE_ENDPOINT, res: jsonResponse(deviceCodeBody()) },
+      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse(tokenPairBody()) },
+    ]);
+    const { sleep } = makeSleep();
+    let provisionCalls = 0;
+    const result = await runLoreLogin({
+      fetchImpl,
+      spawnImpl: () => ({ status: 0 }),
+      now,
+      sleep,
+      home,
+      provisionApiKey: async () => {
+        provisionCalls++;
+      },
+    });
+    expect(result).toEqual({ ok: true });
+    expect(provisionCalls).toBe(1);
+  });
+
+  test('does not provision when the browser cannot be opened (no login yet)', async () => {
+    const now = () => 1_700_000_000_000;
+    const { fetchImpl } = makeFetch([
+      { url: TEST_DEVICE_ENDPOINT, res: jsonResponse(deviceCodeBody()) },
+    ]);
+    const { sleep } = makeSleep();
+    let provisionCalls = 0;
+    const result = await runLoreLogin({
+      fetchImpl,
+      spawnImpl: () => ({ status: 1 }),
+      now,
+      sleep,
+      home,
+      provisionApiKey: async () => {
+        provisionCalls++;
+      },
+    });
+    expect((result as { ok: boolean }).ok).toBe(false);
+    expect(provisionCalls).toBe(0);
+  });
+
   test('happy-path return value does not leak credentials', async () => {
     const now = () => 1_700_000_000_000;
     const { fetchImpl } = makeFetch([

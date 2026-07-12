@@ -33,6 +33,7 @@
 
 import os from 'node:os';
 import { pollDeviceToken } from '../lib/auth/deviceFlow.js';
+import { tryProvisionSharedApiKey } from '../lib/auth/provision.js';
 import type { ToolDefinition, ToolDispatchOpts } from '../lib/tool.js';
 
 /**
@@ -62,11 +63,17 @@ export async function runLoreLoginResume(opts: {
   now: () => number;
   sleep: (ms: number) => Promise<void>;
   home: string;
+  /**
+   * Provision the shared Lore API key after a successful resume. Injected so
+   * the pure core stays offline in tests; the production handler wires the
+   * real (non-fatal) implementation. Defaults to a no-op.
+   */
+  provisionApiKey?: () => Promise<void>;
 }): Promise<
   | { ok: true }
   | { ok: false; reason: 'expired_token'; message: string }
 > {
-  return pollDeviceToken({
+  const result = await pollDeviceToken({
     device_code: opts.device_code,
     expires_in_seconds: opts.expires_in_seconds ?? DEFAULT_EXPIRES_IN_SECONDS,
     interval_seconds: opts.interval_seconds ?? DEFAULT_INTERVAL_SECONDS,
@@ -75,6 +82,13 @@ export async function runLoreLoginResume(opts: {
     sleep: opts.sleep,
     home: opts.home,
   });
+
+  // Mirror lore_login: provision the shared API key once the headless resume
+  // completes, so headless/SSH logins get the durable credential too.
+  if (result.ok) {
+    await (opts.provisionApiKey ?? (async () => {}))();
+  }
+  return result;
 }
 
 /** Default sleeper for the production handler. Mirrors `lore_login.ts`. */
@@ -98,6 +112,7 @@ export const loreLoginResumeTool: ToolDefinition = {
   },
   handler: async (args: unknown, opts?: ToolDispatchOpts) => {
     const { device_code } = args as { device_code: string };
+    const home = opts?.home ?? os.homedir();
     return runLoreLoginResume({
       device_code,
       fetchImpl: globalThis.fetch,
@@ -105,7 +120,8 @@ export const loreLoginResumeTool: ToolDefinition = {
       sleep: defaultSleep,
       // Resume must persist under the same dispatcher home as lore_login so
       // the polled tokens land in the plugin's state dir, not the process HOME.
-      home: opts?.home ?? os.homedir(),
+      home,
+      provisionApiKey: () => tryProvisionSharedApiKey({ home }),
     });
   },
 };

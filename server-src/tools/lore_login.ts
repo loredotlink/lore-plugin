@@ -54,6 +54,7 @@
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import { initiateDeviceCode, pollDeviceToken } from '../lib/auth/deviceFlow.js';
+import { tryProvisionSharedApiKey } from '../lib/auth/provision.js';
 import type { ToolDefinition, ToolDispatchOpts } from '../lib/tool.js';
 
 /**
@@ -98,6 +99,12 @@ export async function runLoreLogin(opts: {
   now: () => number;
   sleep: (ms: number) => Promise<void>;
   home: string;
+  /**
+   * Provision the shared Lore API key after a successful login. Injected so
+   * the pure core stays offline in tests; the production handler wires the
+   * real (non-fatal) implementation. Defaults to a no-op.
+   */
+  provisionApiKey?: () => Promise<void>;
 }): Promise<LoreLoginResult> {
   const { fetchImpl, spawnImpl, now, sleep, home } = opts;
 
@@ -124,7 +131,7 @@ export async function runLoreLogin(opts: {
   // Step 3: delegate to the poll loop. The loop handles the hard cap,
   // slow_down/authorization_pending/expired_token branching, and token
   // persistence on success.
-  return pollDeviceToken({
+  const result = await pollDeviceToken({
     device_code: device.device_code,
     expires_in_seconds: device.expires_in,
     interval_seconds: device.interval,
@@ -133,6 +140,13 @@ export async function runLoreLogin(opts: {
     sleep,
     home,
   });
+
+  // Step 4: on success, provision the shared API key so this machine (and any
+  // context reading the shared slot) authenticates without token refresh.
+  if (result.ok) {
+    await (opts.provisionApiKey ?? (async () => {}))();
+  }
+  return result;
 }
 
 /**
@@ -161,6 +175,7 @@ export const loreLoginTool: ToolDefinition = {
   },
   handler: async (_args: unknown, opts?: ToolDispatchOpts): Promise<LoreLoginResult> => {
     const openBrowserOverride = opts?.openBrowser;
+    const home = opts?.home ?? os.homedir();
     return runLoreLogin({
       fetchImpl: globalThis.fetch,
       spawnImpl: openBrowserOverride
@@ -175,7 +190,8 @@ export const loreLoginTool: ToolDefinition = {
       // token slot lands at the same path its other tools read from. Falling
       // back to os.homedir() only when no override is supplied keeps the
       // CLI/process HOME from clobbering the dispatcher's state dir.
-      home: opts?.home ?? os.homedir(),
+      home,
+      provisionApiKey: () => tryProvisionSharedApiKey({ home }),
     });
   },
 };
