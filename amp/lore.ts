@@ -124,7 +124,13 @@ function inferLoreStateDirFromAmpConfig(home: string, env: NodeJS.ProcessEnv): s
   return inferLoreStateDirFromAmpPluginUrl(pathToFileURL(path.join(configHome, 'amp', 'plugins', 'lore.ts')).href);
 }
 
-function configureLoreStateDirForInstalledAmpPlugin(importMetaUrl: string): void {
+export function configureLoreStateDirForInstalledAmpPlugin(importMetaUrl: string): void {
+  // Test isolation (TAN-5045): the plugin test suite imports this module into a
+  // single shared bun-test process. Setting LORE_PLUGIN_STATE_DIR here would be
+  // an absolute override that wins over every other test's explicit `home`
+  // argument, silently redirecting their token writes onto the developer's real
+  // ~/.lore. The bun-test preload sets this flag so the inference never runs.
+  if (process.env.LORE_PLUGIN_TEST_SANDBOX === '1') return;
   if (process.env.LORE_PLUGIN_STATE_DIR?.trim()) return;
   const inferred = inferLoreStateDirFromAmpPluginUrl(importMetaUrl) ??
     inferLoreStateDirFromAmpConfig(process.env.HOME || process.cwd(), process.env);

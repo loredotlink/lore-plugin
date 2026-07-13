@@ -1,0 +1,8 @@
+# Test configuration for the Lore plugin package.
+#
+# The preload runs once before any test file loads. It sandboxes the suite so
+# it can never write into the developer's real ~/.lore (TAN-5045): it disables
+# module-load state-dir inference and arms a hard write guard. See
+# server-src/testSetup.ts.
+[test]
+preload = ["./server-src/testSetup.ts"]

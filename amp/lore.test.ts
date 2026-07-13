@@ -5,7 +5,11 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { PluginCommandContext } from '@ampcode/plugin';
 
-import { inferLoreStateDirFromAmpPluginUrl, shareActiveThread } from './lore';
+import {
+  configureLoreStateDirForInstalledAmpPlugin,
+  inferLoreStateDirFromAmpPluginUrl,
+  shareActiveThread,
+} from './lore';
 
 function makeContext(): PluginCommandContext & {
   appendedMessages: Array<{ type: 'user-message'; content: string }>;
@@ -110,6 +114,57 @@ describe('installed Amp plugin state dir inference', () => {
     const sourceFile = path.join('/repo', 'packages', 'lore-plugin', 'amp', 'lore.ts');
 
     expect(inferLoreStateDirFromAmpPluginUrl(pathToFileURL(sourceFile).href)).toBeNull();
+  });
+});
+
+describe('configureLoreStateDirForInstalledAmpPlugin — test-suite isolation (TAN-5045)', () => {
+  // The plugin test suite imports this module into ONE shared bun-test
+  // process. If the module's top-level inference ran here it would set
+  // LORE_PLUGIN_STATE_DIR process-wide, and — because that env var is an
+  // absolute override that wins over the explicit `home` arg — redirect every
+  // OTHER test's token writes into the developer's real ~/.lore. The test
+  // preload sets LORE_PLUGIN_TEST_SANDBOX=1 so inference is a no-op.
+  function withEnv(fn: () => void): void {
+    const savedFlag = process.env.LORE_PLUGIN_TEST_SANDBOX;
+    const savedStateDir = process.env.LORE_PLUGIN_STATE_DIR;
+    try {
+      fn();
+    } finally {
+      if (savedFlag === undefined) delete process.env.LORE_PLUGIN_TEST_SANDBOX;
+      else process.env.LORE_PLUGIN_TEST_SANDBOX = savedFlag;
+      if (savedStateDir === undefined) delete process.env.LORE_PLUGIN_STATE_DIR;
+      else process.env.LORE_PLUGIN_STATE_DIR = savedStateDir;
+    }
+  }
+
+  const installedPluginUrl = pathToFileURL(
+    path.join('/tmp', 'home', '.lore-dev-stack', 'harness', 'amp', 'lore-plugin', 'amp', 'lore.ts'),
+  ).href;
+
+  test('does NOT mutate LORE_PLUGIN_STATE_DIR when the sandbox flag is set', () => {
+    withEnv(() => {
+      process.env.LORE_PLUGIN_TEST_SANDBOX = '1';
+      delete process.env.LORE_PLUGIN_STATE_DIR;
+
+      configureLoreStateDirForInstalledAmpPlugin(installedPluginUrl);
+
+      expect(process.env.LORE_PLUGIN_STATE_DIR).toBeUndefined();
+    });
+  });
+
+  test('infers and sets LORE_PLUGIN_STATE_DIR when the sandbox flag is absent', () => {
+    withEnv(() => {
+      delete process.env.LORE_PLUGIN_TEST_SANDBOX;
+      delete process.env.LORE_PLUGIN_STATE_DIR;
+
+      configureLoreStateDirForInstalledAmpPlugin(installedPluginUrl);
+
+      // Snapshot the env: TS narrows `process.env.X` to `undefined` after the
+      // `delete` above and can't see the opaque call reassign it. A fresh
+      // object breaks that flow-narrowing.
+      const env = { ...process.env };
+      expect(env.LORE_PLUGIN_STATE_DIR).toBe(path.join('/tmp', 'home', '.lore-dev-stack'));
+    });
   });
 });
 
