@@ -18432,7 +18432,7 @@ var docsContract = c.router({
       404: errorSchema,
       422: errorSchema
     },
-    summary: "Update a doc. If prosemirror_json changes, the server re-syncs lore.mention_references from mention nodes."
+    summary: "Update a doc title, rich-text body, status, or parent project."
   },
   deleteDoc: {
     method: "DELETE",
@@ -19852,8 +19852,6 @@ var c5 = initContract();
 var errorSchema5 = exports_external.object({ message: exports_external.string() });
 var mentionTargetKindValues = ["thread", "plan", "doc", "user"];
 var mentionTargetKindSchema = exports_external.enum(mentionTargetKindValues);
-var mentionSourceKindValues = ["doc", "project"];
-var mentionSourceKindSchema = exports_external.enum(mentionSourceKindValues);
 var mentionResultSchema = exports_external.object({
   kind: mentionTargetKindSchema,
   id: exports_external.string().min(1),
@@ -19874,24 +19872,6 @@ var mentionSearchQuerySchema = exports_external.object({
     return parts.length > 0 ? parts : undefined;
   }).pipe(exports_external.array(mentionTargetKindSchema).optional())
 });
-var backlinkObjectSchema = exports_external.object({
-  source_kind: mentionSourceKindSchema,
-  source_id: exports_external.string().min(1),
-  source_title: exports_external.string().min(1),
-  source_href: exports_external.string().min(1),
-  target_kind: mentionTargetKindSchema,
-  target_id: exports_external.string().min(1),
-  created_at: exports_external.string().datetime()
-});
-var backlinksResponseSchema = exports_external.object({
-  type: exports_external.literal("list"),
-  list_type: exports_external.literal("backlink"),
-  objects: exports_external.array(backlinkObjectSchema)
-});
-var listBacklinksQuerySchema = exports_external.object({
-  target_kind: mentionTargetKindSchema,
-  target_id: exports_external.string().min(1).max(64)
-});
 var mentionsContract = c5.router({
   searchMentions: {
     method: "GET",
@@ -19906,20 +19886,6 @@ var mentionsContract = c5.router({
       422: errorSchema5
     },
     summary: "Search threads, plans, files, and users by title/name for @-mention typeahead. Org-scoped, max 10 results across all kinds."
-  },
-  listBacklinks: {
-    method: "GET",
-    path: "/mentions/backlinks",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    query: listBacklinksQuerySchema,
-    responses: {
-      200: backlinksResponseSchema,
-      401: errorSchema5,
-      403: errorSchema5
-    },
-    summary: "List every doc/project body in the caller\u2019s organization that mentions the given target. Newest-first."
   }
 });
 
@@ -20159,7 +20125,7 @@ var projectsContract = c7.router({
       404: errorSchema7,
       422: errorSchema7
     },
-    summary: "Update a project\u2019s name or rich-text body. Body changes re-sync mention_references for source_kind=project."
+    summary: "Update a project\u2019s name or rich-text body."
   },
   archiveProject: {
     method: "POST",
