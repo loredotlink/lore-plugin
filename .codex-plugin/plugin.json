@@ -1,6 +1,6 @@
 {
   "name": "lore",
-  "version": "1.0.46",
+  "version": "1.0.48",
   "description": "Share Claude Code, Cowork, and Codex sessions to Lore and read threads back.",
   "author": {
     "name": "Lore",
@@ -9,7 +9,7 @@
   },
   "homepage": "https://lore.link",
   "repository": "https://github.com/loredotlink/lore-plugin",
-  "license": "MIT",
+  "license": "FSL-1.1-ALv2",
   "keywords": [
     "lore",
     "loredotlink",

@@ -1,23 +1,14 @@
-# Lore plugin
+# Lore Agent Harness Plugins
 
-Source of truth lives in `loredotlink/lore` under `packages/lore-plugin`. The
-standalone `loredotlink/lore-plugin` repository is mirrored from this directory.
+This repo contains skills for sharing and working with [Lore threads](https://lore.link). The skills are distributed as plugins for Claude Code, Cowork, Codex, and Amp.
 
-Share your Claude Code, Cowork, Codex, or Amp session to [Lore](https://lore.link) and read threads back, without leaving the agent.
+See [the docs](https://lore.link/docs/using-lore) for more details.
 
 ## Install
 
 ### Claude Code
 
-From inside a session, run `/plugins` to open the interactive plugins TUI:
-
-```text
-/plugins
-```
-
-In the TUI, switch to the **Marketplaces** tab, choose **Add Marketplace**, enter `loredotlink/lore-plugin`, then open the new **loredotlink** marketplace and install the **Lore** plugin.
-
-From a plain terminal (outside a session), you can do it in one shot:
+From a plain terminal (outside a session), run the following commands:
 
 ```bash
 claude plugin marketplace add loredotlink/lore-plugin
@@ -30,12 +21,12 @@ Codex uses the same shared package through [`.agents/plugins/marketplace.json`](
 
 ### Amp
 
-Amp does not use the Claude/Codex manifests. Amp loads TypeScript plugins from local files:
+[Amp](https://ampcode.com/) does not use the Claude/Codex manifests. Amp loads TypeScript plugins from local files:
 
 - Project plugin: `.amp/plugins/*.ts`
 - System plugin: `~/.config/amp/plugins/*.ts`
 
-For a user-level install from the published plugin repository, copy-paste the full block below:
+Use the script below to clone this repo and symlink the Amp plugin into a location that Amp will recognize:
 
 ```bash
 if [ -d ~/.local/share/lore-plugin/.git ]; then
@@ -67,42 +58,27 @@ Then reload plugins from Amp's command palette with `plugins: reload`. The comma
   Tool: fork_thread
 ```
 
-The canonical Amp implementation is [`amp/lore.ts`](./amp/lore.ts). This package also includes [`./.amp/plugins/lore.ts`](./.amp/plugins/lore.ts), a thin Amp-layout entrypoint that delegates to the canonical implementation without duplicating command or tool registration. Keep that package layout intact; neither `.amp/plugins/lore.ts` nor `amp/lore.ts` is standalone — they import shared files from this checkout.
-
-For local development in the Lore monorepo, run Amp from `packages/lore-plugin` so it can load `packages/lore-plugin/.amp/plugins/lore.ts`. For a user-level local install while iterating on a monorepo checkout, symlink the canonical Amp implementation file and keep the relative package files available:
-
-```bash
-mkdir -p ~/.config/amp/plugins
-ln -s "$(pwd)/packages/lore-plugin/amp/lore.ts" ~/.config/amp/plugins/lore.ts
-```
-
-If you run those commands from `packages/lore-plugin`, use `$(pwd)/amp/lore.ts` as the symlink target instead.
-
 ## What you get
 
-- **`/lore:share`** — in Claude Code/Cowork/Codex, post the current local session to Lore. Returns a shareable URL and copies it to the clipboard when a local clipboard tool is available, plus a brief note if your session included uploaded or generated files. Visibility is private in v1; re-share from the Lore web UI to make a thread workspace-visible.
-- **`/lore:fork`** — distill a visible Lore thread into intent-conditioned handoff context for continuing work.
-- **`Lore: Share active Amp thread`** — in Amp, export the active Amp thread with the local Amp CLI, upload the raw export to Lore as `harness: 'amp'`, include the Lore URL in the notification, append it back into the Amp thread, copy it to the clipboard, and show it in a copyable dialog only when the thread append or clipboard copy is unavailable.
+- **`/lore:share`** — uploads the current session to Lore, and returns a shareable URL.
+- **`/lore:fork`** — distill an existing Lore thread into intent-conditioned handoff context for continuing work.
 - **`/lore:read`** / read tools — fetch a Lore thread by ID or URL, or list and search threads by title.
+- **`Lore: Share active Amp thread`** — in Amp, export the active Amp thread with the local Amp CLI, upload the raw export to Lore as `harness: 'amp'`, and return the Lore URL for that session.
 - **`share_current_amp_thread`** — an Amp tool for explicit natural-language invocation. It accepts `{ thread_id?: string, visibility?: 'private' | 'workspace' | 'public', highlight?: string }`; if `thread_id` is omitted, `AMP_CURRENT_THREAD_ID` must be set or the tool returns an actionable error. `highlight` is a natural-language description of the block or block range to emphasize in the returned Lore URL.
 
-Natural-language phrasings work in hosts that surface the plugin tools and skills on every turn. Amp's safe MVP is explicit: use the command-palette share command for the active thread, or call `share_current_amp_thread` with a known Amp `thread_id`. The Amp tool does not guess the active thread from undocumented tool context.
+In Claude Code, Cowork, and Codex, you can also share to Lore using natural language (e.g. "share this session to Lore").
+
+When you share a thread, you can also specify specific blocks that should be highlighted (e.g. "share the final outcome of this investigation"). Lore resolves the description against parsed thread blocks and returns a `thread_url` with corresponding anchor tags when it finds a confident match. If highlight resolution fails or times out, sharing still succeeds and returns the base thread URL without anchor tags.
 
 ## First-time setup
 
-The first time you use `/lore:share`, `/lore:read`, or the Amp share/read tools, the plugin's `lore_login` tool opens a browser to the WorkOS AuthKit consent screen with a device code pre-filled. Sign in, click Allow, and the tool returns. The plugin persists tokens under the canonical `~/.lore/tokens.json` file (mode 0600), shared with the `lore` CLI through `@lore/identity-store`, and refreshes them silently on subsequent calls. Existing tokens from the old `~/Library/Application Support/tanagram/lore/tokens.json` plugin path are migrated on first read. If the browser cannot be opened automatically (SSH, no GUI), `lore_login` returns a `verification_uri` + `device_code` and the agent calls `lore_login_resume` once you complete the flow on another device.
+The first time you use `/lore:share`, `/lore:read`, or the Amp share/read tools, the plugin's `lore_login` tool opens a browser kick off a login flow. The plugin persists an auth and refresh token in the `~/.lore/tokens.json` file (mode 0600). If the browser cannot be opened automatically (SSH or other environments without a GUI), `lore_login` returns a `verification_uri` + `device_code` and the agent calls `lore_login_resume` once you complete the flow on another device.
 
 ## Architecture
 
 The shared package contains host-specific manifests for Claude Code and Codex, an Amp TypeScript plugin entrypoint, one bundled stdio MCP server that reads Claude/Cowork/Codex local session bytes off disk, and the proxy/auth code that talks to the Lore cloud MCP at `https://mcp.lore.link/mcp`. The stdio binary is a Bun-compiled single executable. Auth runs in-process via the `lib/auth/` library, with shared token storage, legacy migration, OAuth discovery, and refresh logic delegated to `@lore/identity-store`: RFC 8628 device-code flow against WorkOS AuthKit, discovery-driven (PRM → AS metadata, cached at `~/.lore/discovery-cache.json`), with silent refresh and 401-triggered re-login. See [`DESIGN.md`](./DESIGN.md) for the full breakdown.
 
-Cloud-facing Lore MCP tool metadata lives in `packages/contracts/src/mcp.ts`. The plugin imports those specs to generate stdio proxy tools for cloud-owned tools such as `list_threads`, `get_thread`, `fork_thread`, and `search_threads`; it should not hand-maintain separate copies of those schemas. `share_session` is the intentional exception: the cloud schema requires `harness` and `transcript`, while the plugin-facing schema exposes only local session selection and highlight fields. The plugin reads the transcript from disk and forwards the cloud-shaped payload internally.
-
-Amp sharing is host-specific because Amp sessions are exported through `amp threads export <thread_id>` instead of the shared on-disk session detector. The Amp command and natural-language tool both call the same `shareAmpThread` helper, which delegates upload/auth behavior to the existing `runShareSession` core.
-
-Share tools support optional highlighted links. When a caller passes `highlight`, Lore resolves the description against parsed thread blocks and returns a `thread_url` with a `#block` or `#start-end` anchor when it finds a confident match. If highlight resolution fails or times out, sharing still succeeds and returns the base thread URL.
-
-The human-facing prompts now live under [`skills/`](./skills) rather than a separate `commands/` tree so the package layout is shared across agents.
+This repo is a mirrored subtree from our internal monorepo.
 
 ## Requirements and limitations
 
@@ -113,4 +89,4 @@ The human-facing prompts now live under [`skills/`](./skills) rather than a sepa
 
 ## License
 
-MIT
+Licensed under the [Functional Source License, Version 1.1, ALv2 Future License (FSL-1.1-ALv2)](./LICENSE).

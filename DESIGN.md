@@ -71,7 +71,7 @@ That server exposes two kinds of tools:
 - Local session tools: `list_local_sessions`, `read_local_session`, `share_session`
 - Lore cloud proxy tools: `get_thread`, `list_threads`, `fork_thread`, `search_threads`, `lore_login`, `lore_login_resume`
 
-Cloud proxy tool metadata is generated from the shared specs in `packages/contracts/src/mcp.ts`, so the plugin does not carry a second copy of cloud-owned tool schemas. `share_session` stays custom because the local stdio tool hides `harness` and `transcript`, reads the active session from disk, then forwards the cloud-shaped payload internally.
+Cloud-facing Lore MCP tool metadata lives in `packages/contracts/src/mcp.ts`. The plugin imports those specs to generate stdio proxy tools for cloud-owned tools such as `list_threads`, `get_thread`, `fork_thread`, and `search_threads`; it should not hand-maintain separate copies of those schemas. `share_session` is the intentional exception: the cloud schema requires `harness` and `transcript`, while the plugin-facing schema exposes only local session selection and highlight fields. The plugin reads the transcript from disk and forwards the cloud-shaped payload internally.
 
 From Claude Code/Cowork/Codex, there is just one MCP server. The local process decides whether a request needs filesystem access, cloud access, or both. Amp uses the same cloud/auth tool implementations for reads and login, but its share command/tool calls the Amp adapter because Amp threads come from the Amp CLI export command rather than `server-src/lib/session`.
 
@@ -95,7 +95,7 @@ Runtime-specific readers:
 
 Every reader normalizes to the same `SessionPayload` shape: session id, optional conversation id, transcript text, uploads, outputs, and transcript path.
 
-Amp is not a `SessionSource` in the MVP. The Amp adapter resolves a thread ID from the command context, an explicit tool input, or `AMP_CURRENT_THREAD_ID`, then exports raw JSON through the Amp CLI.
+Amp is not a `SessionSource` in the MVP. Amp sharing is host-specific because the adapter resolves a thread ID from the command context, an explicit tool input, or `AMP_CURRENT_THREAD_ID`, then exports the raw session through `amp threads export <thread_id>` instead of using the shared on-disk session detector. The Amp command and natural-language tool both call the same `shareAmpThread` helper, which delegates upload/auth behavior to the existing `runShareSession` core.
 
 ## Share flow
 
@@ -143,7 +143,16 @@ Amp uses TypeScript plugin files instead of the Claude/Codex manifests. Local in
 - Project plugin: `.amp/plugins/*.ts`
 - System plugin: `~/.config/amp/plugins/*.ts`
 
-The canonical implementation is `amp/lore.ts`. `packages/lore-plugin/.amp/plugins/lore.ts` is a thin local-layout entrypoint that re-exports the canonical implementation so there is an obvious file in Amp's expected shape without duplicated registrations. After installing or changing it, reload Amp from the command palette with `plugins: reload`.
+The canonical implementation is `amp/lore.ts`. `packages/lore-plugin/.amp/plugins/lore.ts` is a thin local-layout entrypoint that re-exports the canonical implementation so there is an obvious file in Amp's expected shape without duplicated registrations. Keep that package layout intact; neither `.amp/plugins/lore.ts` nor `amp/lore.ts` is standalone — they import shared files from this checkout.
+
+For local development in the Lore monorepo, run Amp from `packages/lore-plugin` so it can load `packages/lore-plugin/.amp/plugins/lore.ts`. For a user-level local install while iterating on a monorepo checkout, symlink the canonical Amp implementation file and keep the relative package files available:
+
+```bash
+mkdir -p ~/.config/amp/plugins
+ln -s "$(pwd)/packages/lore-plugin/amp/lore.ts" ~/.config/amp/plugins/lore.ts
+```
+
+If you run those commands from `packages/lore-plugin`, use `$(pwd)/amp/lore.ts` as the symlink target instead. After installing or changing the plugin, reload Amp from the command palette with `plugins: reload`.
 
 No Amp marketplace distribution is assumed or documented for this MVP.
 

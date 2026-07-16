@@ -1,8 +1,9 @@
 {
   "name": "@loredotlink/lore-plugin",
-  "version": "1.0.46",
+  "version": "1.0.48",
   "private": true,
   "type": "module",
+  "license": "FSL-1.1-ALv2",
   "scripts": {
     "build": "./scripts/build.sh",
     "lint": "tsc --noEmit",
