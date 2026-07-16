@@ -22,9 +22,9 @@ beginBackgroundAgentInstall(); // no prior consent check
 
 ## 2. The plugin works install-free
 
-**Banned pattern:** routing reads / `lore_login` / `lore_login_resume` / manual `share_session` through a shelled CLI binary, or adding those tool names to the consent gate (i.e. removing them from `CONSENT_GATE_EXEMPT` or adding them to a new gate).
+**Banned pattern:** routing reads / `lore_login` / `lore_login_resume` / manual `share_session` through a shelled CLI binary, or reading `PluginState.consent` from the MCP dispatcher to gate ordinary tool calls.
 
-**Allowed exception:** none — these tools must always proxy to the hosted MCP via `lib/cloudCall.ts` regardless of CLI install state.
+**Allowed exceptions:** `tools/lore_consent.ts` and post-install background-capture control-plane tools may inspect consent; ordinary tools must always run regardless of CLI install state.
 
 **Why:** auth and manual sharing must work before (and without) the CLI being installed — see ADR-0002 `docs/adr/0002-plugin-cli-two-clients-one-contract.md`.
 
@@ -38,8 +38,8 @@ export const loreLoginTool: ToolDefinition = { … handler: () => cloudCall(…)
 ```ts
 // Do NOT shell out to the CLI for reads/auth/manual share
 execSync('lore-mcp share …');
-// Do NOT add lore_login* to a gate
-const GATE = new Set(['share_session', 'lore_login']); // wrong
+// Do NOT gate ordinary MCP tools on background-capture consent
+if (state.consent === 'unconsented') return buildConsentSurface(); // wrong
 ```
 
 ## 3. No inline `{ type: 'resource' }` blocks in tool results
@@ -52,7 +52,7 @@ const GATE = new Set(['share_session', 'lore_login']); // wrong
 
 **Do:**
 ```ts
-return { content: [{ type: 'text', text }], structuredContent: { consent, macSupported } };
+return { content: [{ type: 'text', text }], structuredContent: { consent } };
 ```
 
 **Don't:**

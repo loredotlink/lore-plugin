@@ -63,7 +63,7 @@ async function setConsent(consent: ConsentState): Promise<void> {
 }
 
 describe('runLoreConfigure — not yet installed', () => {
-  for (const consent of ['consented', 'declined'] as const) {
+  for (const consent of ['unconsented', 'consented', 'declined'] as const) {
     test(`consent=${consent} → points at lore_consent, does not touch the CLI`, async () => {
       await setConsent(consent);
       const result = await runLoreConfigure(

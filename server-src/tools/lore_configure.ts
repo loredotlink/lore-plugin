@@ -14,8 +14,8 @@
  *
  * Requires the background agent to be installed first — only valid from
  * the `installed`, `idle`, or `capturing` states. From `consented` or
- * `declined`, it points the user back at `lore_consent({ approve: true })`.
- * From `unconsented` the consent gate intercepts before this handler runs.
+ * `declined`, or `unconsented`, it points the user back at
+ * `lore_consent({ approve: true })`.
  */
 
 import { buildAllowlistResult } from '../lib/consentSurface.js';
