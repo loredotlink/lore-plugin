@@ -52,7 +52,7 @@ import {
 } from '../lib/pluginState.js';
 
 export const WATCHER_TIP =
-  'Tip: install `@loredotlink/cli` (`npm i -g @loredotlink/cli`) to auto-share new sessions in the background. Run `lore watch --help` to learn more.';
+  'Tip: install our macOS app (https://lore.link/docs/overview) to auto-share new sessions in the background.';
 
 export type ShareSessionResult = {
   thread_id: string;
