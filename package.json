@@ -1,6 +1,6 @@
 {
-  "name": "@tanagram/lore-plugin",
-  "version": "1.0.44",
+  "name": "@loredotlink/lore-plugin",
+  "version": "1.0.45",
   "private": true,
   "type": "module",
   "scripts": {

@@ -1,19 +1,19 @@
 {
-  "name": "tanagram",
-  "description": "Tanagram plugins for Claude Code.",
+  "name": "loredotlink",
+  "description": "Lore plugins for Claude Code.",
   "owner": {
-    "name": "Tanagram",
+    "name": "Lore",
     "url": "https://lore.link"
   },
   "plugins": [
     {
-      "name": "lore",
+      "name": "plugin",
       "source": "./",
       "description": "Share local sessions to Lore and read Lore threads back.",
       "homepage": "https://lore.link",
       "license": "MIT",
       "category": "collaboration",
-      "keywords": ["lore", "tanagram", "share", "threads", "collaboration"]
+      "keywords": ["lore", "loredotlink", "share", "threads", "collaboration"]
     }
   ]
 }

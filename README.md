@@ -1,7 +1,7 @@
 # Lore plugin
 
-Source of truth lives in `tanagram/lore` under `packages/lore-plugin`. The
-standalone `tanagram/lore-plugin` repository is mirrored from this directory.
+Source of truth lives in `loredotlink/lore` under `packages/lore-plugin`. The
+standalone `loredotlink/lore-plugin` repository is mirrored from this directory.
 
 Share your Claude Code, Cowork, Codex, or Amp session to [Lore](https://lore.link) and read threads back, without leaving the agent.
 
@@ -15,13 +15,13 @@ From inside a session, run `/plugins` to open the interactive plugins TUI:
 /plugins
 ```
 
-In the TUI, switch to the **Marketplaces** tab, choose **Add Marketplace**, enter `tanagram/lore-plugin`, then open the new **tanagram** marketplace and install the **Lore** plugin.
+In the TUI, switch to the **Marketplaces** tab, choose **Add Marketplace**, enter `loredotlink/lore-plugin`, then open the new **loredotlink** marketplace and install the **Lore** plugin.
 
 From a plain terminal (outside a session), you can do it in one shot:
 
 ```bash
-claude plugin marketplace add tanagram/lore-plugin
-claude plugin install lore@tanagram
+claude plugin marketplace add loredotlink/lore-plugin
+claude plugin install plugin@loredotlink
 ```
 
 ### Codex
@@ -41,7 +41,7 @@ For a user-level install from the published plugin repository, copy-paste the fu
 if [ -d ~/.local/share/lore-plugin/.git ]; then
   git -C ~/.local/share/lore-plugin pull --ff-only
 else
-  git clone https://github.com/tanagram/lore-plugin ~/.local/share/lore-plugin
+  git clone https://github.com/loredotlink/lore-plugin ~/.local/share/lore-plugin
 fi
 
 cd ~/.local/share/lore-plugin

@@ -1,18 +1,18 @@
 {
   "name": "lore",
-  "version": "1.0.44",
+  "version": "1.0.45",
   "description": "Share Claude Code, Cowork, and Codex sessions to Lore and read threads back.",
   "author": {
-    "name": "Tanagram",
+    "name": "Lore",
     "email": "founders@lore.link",
     "url": "https://lore.link"
   },
   "homepage": "https://lore.link",
-  "repository": "https://github.com/tanagram/lore-plugin",
+  "repository": "https://github.com/loredotlink/lore-plugin",
   "license": "MIT",
   "keywords": [
     "lore",
-    "tanagram",
+    "loredotlink",
     "codex",
     "claude",
     "share",
@@ -24,7 +24,7 @@
     "displayName": "Lore",
     "shortDescription": "Share sessions and read Lore threads",
     "longDescription": "Lore bundles a local MCP server plus shared skills so Claude Code and Codex can resolve the active local session, upload it to Lore, and read Lore threads back without routing transcript bytes through the agent context.",
-    "developerName": "Tanagram",
+    "developerName": "Lore",
     "category": "Coding",
     "capabilities": [
       "Interactive",

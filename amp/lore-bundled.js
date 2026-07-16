@@ -24071,7 +24071,7 @@ var apiContract = c10.router({
       413: errorSchema10,
       422: errorSchema10
     },
-    summary: "Upload a custom cover image for a thread. Author or Tanagram admin only. Bytes go to the same storage substrate the AI cover uses (S3 in prod, filesystem in dev), and the threads row is updated atomically with the new cover_storage_url, cover_status='ready', cover_generated_at=now, cover_model='user-uploaded' so subsequent re-rolls / how-to fan-outs treat the upload like any other ready cover."
+    summary: "Upload a custom cover image for a thread. Author or Lore admin only. Bytes go to the same storage substrate the AI cover uses (S3 in prod, filesystem in dev), and the threads row is updated atomically with the new cover_storage_url, cover_status='ready', cover_generated_at=now, cover_model='user-uploaded' so subsequent re-rolls / how-to fan-outs treat the upload like any other ready cover."
   },
   listThreadComments: {
     method: "GET",
@@ -24846,7 +24846,7 @@ var apiContract = c10.router({
       401: errorSchema10,
       403: errorSchema10
     },
-    summary: "Cross-org operational counts. Tanagram admins only."
+    summary: "Cross-org operational counts. Lore admins only."
   },
   adminListOrganizations: {
     method: "GET",
@@ -24859,7 +24859,7 @@ var apiContract = c10.router({
       401: errorSchema10,
       403: errorSchema10
     },
-    summary: "List every organization with member and thread counts. Tanagram admins only."
+    summary: "List every organization with member and thread counts. Lore admins only."
   },
   adminEntityGraph: {
     method: "GET",
@@ -24875,7 +24875,7 @@ var apiContract = c10.router({
       403: errorSchema10,
       404: errorSchema10
     },
-    summary: "Entity graph (persons, foot guns, decisions, and optionally threads) for one organization. Tanagram admins only."
+    summary: "Entity graph (persons, foot guns, decisions, and optionally threads) for one organization. Lore admins only."
   },
   adminListUsers: {
     method: "GET",
@@ -24889,7 +24889,7 @@ var apiContract = c10.router({
       401: errorSchema10,
       403: errorSchema10
     },
-    summary: "List every user with their org memberships and thread count. Tanagram admins only."
+    summary: "List every user with their org memberships and thread count. Lore admins only."
   },
   adminListThreads: {
     method: "GET",
@@ -24903,7 +24903,7 @@ var apiContract = c10.router({
       401: errorSchema10,
       403: errorSchema10
     },
-    summary: "List live threads across every organization. Tanagram admins only."
+    summary: "List live threads across every organization. Lore admins only."
   },
   adminListTweetLeads: {
     method: "GET",
@@ -24916,7 +24916,7 @@ var apiContract = c10.router({
       401: errorSchema10,
       403: errorSchema10
     },
-    summary: "List unreplied tweet leads from the last 24h, ranked by relevance. Tanagram admins only."
+    summary: "List unreplied tweet leads from the last 24h, ranked by relevance. Lore admins only."
   },
   adminUpdateTweetLead: {
     method: "PATCH",
@@ -24932,7 +24932,7 @@ var apiContract = c10.router({
       403: errorSchema10,
       404: errorSchema10
     },
-    summary: "Update a tweet lead status (replied/dismissed/new). Tanagram admins only."
+    summary: "Update a tweet lead status (replied/dismissed/new). Lore admins only."
   },
   adminLookupThread: {
     method: "GET",
@@ -24948,7 +24948,7 @@ var apiContract = c10.router({
       403: errorSchema10,
       404: errorSchema10
     },
-    summary: "Look up a thread by thread id, thread file id, or harness session id. Tanagram admins only."
+    summary: "Look up a thread by thread id, thread file id, or harness session id. Lore admins only."
   },
   adminForceFollow: {
     method: "POST",
@@ -24980,7 +24980,7 @@ var apiContract = c10.router({
       403: errorSchema10,
       404: errorSchema10
     },
-    summary: "Permanently remove a thread. Tanagram admins only."
+    summary: "Permanently remove a thread. Lore admins only."
   },
   adminDeleteSkill: {
     method: "DELETE",
@@ -24998,7 +24998,7 @@ var apiContract = c10.router({
       403: errorSchema10,
       404: errorSchema10
     },
-    summary: "Permanently remove a skill and its sync records. Tanagram admins only."
+    summary: "Permanently remove a skill and its sync records. Lore admins only."
   },
   adminReparseThreadFile: {
     method: "POST",
@@ -25016,7 +25016,7 @@ var apiContract = c10.router({
       403: errorSchema10,
       404: errorSchema10
     },
-    summary: "Re-enqueue parsing for a thread file. Tanagram admins only."
+    summary: "Re-enqueue parsing for a thread file. Lore admins only."
   },
   listCardFeed: {
     method: "GET",
@@ -25131,7 +25131,7 @@ var apiContract = c10.router({
       401: errorSchema10,
       403: errorSchema10
     },
-    summary: "Share-link k-factor, funnel, sparkline, and top sharers by window. Tanagram admins only."
+    summary: "Share-link k-factor, funnel, sparkline, and top sharers by window. Lore admins only."
   },
   adminActiveUsers: {
     method: "GET",
@@ -25144,7 +25144,7 @@ var apiContract = c10.router({
       401: errorSchema10,
       403: errorSchema10
     },
-    summary: "DAU/WAU/MAU/all-time active-user buckets \u2014 distinct users with product usage: CLI/plugin publishes and web writes + presence on the thread-event spine, plus desktop-app daily activity touches (user_activity_daily); auth/token issuance excluded. Tanagram admins only."
+    summary: "DAU/WAU/MAU/all-time active-user buckets \u2014 distinct users with product usage: CLI/plugin publishes and web writes + presence on the thread-event spine, plus desktop-app daily activity touches (user_activity_daily); auth/token issuance excluded. Lore admins only."
   },
   adminUserPipeline: {
     method: "GET",
@@ -25161,7 +25161,7 @@ var apiContract = c10.router({
       403: errorSchema10,
       404: errorSchema10
     },
-    summary: "Per-user upload-pipeline health drilldown: heartbeat/web presence, 14-day OTEL ingest + rejections, projection ledger, upload sessions, thread parsing, and a computed verdict. Tanagram admins only."
+    summary: "Per-user upload-pipeline health drilldown: heartbeat/web presence, 14-day OTEL ingest + rejections, projection ledger, upload sessions, thread parsing, and a computed verdict. Lore admins only."
   },
   adminReferrals: {
     method: "GET",
@@ -25174,7 +25174,7 @@ var apiContract = c10.router({
       401: errorSchema10,
       403: errorSchema10
     },
-    summary: "Cross-organization invite-link funnel: lifetime + 30-day counts, 60-day daily timeseries, top inviters, recent attributions. Tanagram admins only."
+    summary: "Cross-organization invite-link funnel: lifetime + 30-day counts, 60-day daily timeseries, top inviters, recent attributions. Lore admins only."
   },
   adminOnboardingSources: {
     method: "GET",
@@ -25200,7 +25200,7 @@ var apiContract = c10.router({
       401: errorSchema10,
       403: errorSchema10
     },
-    summary: "List transactional email templates and their editable preview fields. Tanagram admins only."
+    summary: "List transactional email templates and their editable preview fields. Lore admins only."
   },
   adminPreviewEmailTemplate: {
     method: "POST",
@@ -25219,7 +25219,7 @@ var apiContract = c10.router({
       403: errorSchema10,
       404: errorSchema10
     },
-    summary: "Render a transactional email template with supplied values. Tanagram admins only."
+    summary: "Render a transactional email template with supplied values. Lore admins only."
   },
   adminSendEmailTemplate: {
     method: "POST",
@@ -25239,7 +25239,7 @@ var apiContract = c10.router({
       404: errorSchema10,
       503: errorSchema10
     },
-    summary: "Send a transactional email template through Resend. Tanagram admins only."
+    summary: "Send a transactional email template through Resend. Lore admins only."
   },
   getBillingState: {
     method: "GET",

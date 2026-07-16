@@ -1,11 +1,11 @@
 {
-  "name": "tanagram",
+  "name": "loredotlink",
   "interface": {
-    "displayName": "Tanagram"
+    "displayName": "Lore"
   },
   "plugins": [
     {
-      "name": "lore",
+      "name": "plugin",
       "source": {
         "source": "local",
         "path": "."
