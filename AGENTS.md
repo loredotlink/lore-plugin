@@ -1,16 +1,7 @@
 # Lore plugin invariants
 
-## Plugin changes require reviewed version bumps
+- Plugin content changes require a greater, matching version in `package.json`, `.claude-plugin/plugin.json`, and `.codex-plugin/plugin.json`. Manifest-only synchronization must still leave all three equal. Enforced by `scripts/check-lore-plugin-version-bump.mjs` in `.github/workflows/lore-plugin-version-check.yml`.
+- Cloud-owned tools (`list_threads`, `get_thread`, `fork_thread`, `search_threads`) are generated in `server-src/tools/cloudProxyTools.ts` from `@lore/contracts/mcp`; `share_session` is the local-wrapper exception. `cloudProxyTools.test.ts` and `tools/index.test.ts` provide partial enforcement.
+- Changes under `server-src/**` are built and smoke-tested by `.github/workflows/lore-plugin-binary-drift.yml`.
 
-- **Banned pattern:** PR changes under `packages/lore-plugin/` without increasing `version` in `package.json`, `.claude-plugin/plugin.json`, and `.codex-plugin/plugin.json`.
-- **Allowed exceptions:** PRs that only touch those three version manifest files.
-- **Why:** the monorepo is the plugin source of truth, and distribution changes must land through protected PRs with an explicit reviewed version bump.
-- **Enforced by:** `.github/workflows/lore-plugin-version-check.yml` via `scripts/check-lore-plugin-version-bump.mjs`.
-
-## Cloud MCP tools are generated from shared specs
-
-- **Banned pattern:** new hand-written `server-src/tools/get_thread.ts`, `server-src/tools/list_threads.ts`, `server-src/tools/search_threads.ts`, or duplicated `inputSchema`/`description` for cloud-owned tools.
-- **Allowed exceptions:** `server-src/tools/cloudProxyTools.ts` and `server-src/tools/share_session.ts` for the plugin-local wrapper.
-- **Why:** `@lore/contracts/mcp` is the source of truth for public MCP tool metadata; the plugin only adds local stdio/auth/proxy behavior.
-- **Enforced by:** `server-src/tools/cloudProxyTools.test.ts` and `server-src/tools/index.test.ts`.
-- **Do / don't:** do `import { cloudProxyTools } from './cloudProxyTools.js'`; don't add `export const getThreadTool = { name: 'get_thread', inputSchema: { ... } }`.
+For server behavior, follow `server-src/AGENTS.md`.
