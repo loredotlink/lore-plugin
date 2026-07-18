@@ -10,7 +10,7 @@
       "name": "plugin",
       "source": "./",
       "description": "Share local sessions to Lore and read Lore threads back.",
-      "homepage": "https://lore.link",
+      "homepage": "https://lore.link/share",
       "license": "MIT",
       "category": "collaboration",
       "keywords": ["lore", "loredotlink", "share", "threads", "collaboration"]

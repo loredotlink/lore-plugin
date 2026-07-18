@@ -1,7 +1,7 @@
 {
   "name": "lore",
   "description": "Share Claude Code and Cowork sessions to Lore and read threads back.",
-  "version": "1.0.49",
+  "version": "1.0.50",
   "author": {
     "name": "Lore",
     "url": "https://lore.link"

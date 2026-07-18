@@ -1,6 +1,6 @@
 # Lore Agent Harness Plugins
 
-This repo contains skills for sharing and working with [Lore threads](https://lore.link). The skills are distributed as plugins for Claude Code, Cowork, Codex, and Amp.
+This repo contains skills for sharing and working with [Lore threads](https://lore.link). The skills are distributed as plugins for Claude Code, Cowork, Codex, and Amp. See how to [share Claude Code sessions with your team](https://lore.link/share).
 
 See [the docs](https://lore.link/docs/using-lore) for more details.
 

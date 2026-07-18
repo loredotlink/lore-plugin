@@ -30,7 +30,7 @@ Strip framing words ("name it", "call it", "titled", surrounding quotes) and pas
 ## Tool Flow
 
 1. Call the `lore-local` MCP tool `share_session` with no arguments.
-2. If the user includes a natural-language highlight request after `/share`, pass that request as `highlight`. For example, `/share where I made the parser handle Amp exports` should call `share_session({ highlight: "where I made the parser handle Amp exports" })`.
+2. If the user includes a natural-language highlight request after `/lore:share`, pass that request as `highlight`. For example, `/lore:share where I made the parser handle Amp exports` should call `share_session({ highlight: "where I made the parser handle Amp exports" })`.
 3. If the user asked for a specific older session, call `list_local_sessions`, pick the match, then call `share_session({ session_id })` (or `share_session({ session_id, highlight })` when they also asked for a highlight).
 4. Surface `thread_url` prominently. If `clipboard_copied` is true, mention that the shared link was copied to the clipboard. If `clipboard_copied` is false, still show the link and mention that clipboard copy was unavailable. If `highlight` was supplied and resolved, `thread_url` already includes the selected block anchor or range. If the result includes `_tip`, show it after the link.
 
