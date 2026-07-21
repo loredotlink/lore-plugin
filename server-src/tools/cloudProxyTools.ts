@@ -9,6 +9,7 @@ import {
   buildMcpContractToolSpecs,
   mcpSearchThreadsToolSpec,
   type McpStaticToolSpec,
+  type McpTextCallToolResult,
 } from '@lore/contracts/mcp';
 
 import { callCloudTool } from '../lib/cloudCall.js';
@@ -19,7 +20,7 @@ export async function runCloudProxyTool(
   toolName: string,
   args: Record<string, unknown>,
   opts: { fetchImpl?: typeof fetch; home?: string } = {},
-): Promise<unknown> {
+): Promise<McpTextCallToolResult> {
   try {
     return await callCloudTool(toolName, args, opts);
   } catch (err) {

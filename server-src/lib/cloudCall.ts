@@ -37,6 +37,10 @@
  *   are cheap and remove that whole class of bug.
  */
 
+import {
+  mcpTextCallToolResultSchema,
+  type McpTextCallToolResult,
+} from '@lore/contracts/mcp';
 import { randomUUID } from 'node:crypto';
 import { AuthRequiredError } from './errors';
 import { getValidAccessToken, forceRefreshAccessToken } from './auth/refresh.js';
@@ -48,10 +52,10 @@ interface Options {
   home?: string;
 }
 
-interface JsonRpcSuccess<T> {
+interface JsonRpcSuccess {
   jsonrpc: '2.0';
   id: string;
-  result: T;
+  result: unknown;
 }
 
 interface JsonRpcError {
@@ -79,13 +83,13 @@ const ERROR_BODY_EXCERPT_LIMIT = 512;
  * @param args      The `params.arguments` object the cloud tool expects.
  * @param opts      `fetchImpl` and `home` exist for tests; production
  *                  callers pass nothing.
- * @returns         The `result` field of the JSON-RPC response, verbatim.
+ * @returns         A validated MCP text `CallToolResult` from the cloud.
  */
-export async function callCloudTool<TResult = unknown>(
+export async function callCloudTool(
   toolName: string,
   args: Record<string, unknown>,
   opts: Options = {},
-): Promise<TResult> {
+): Promise<McpTextCallToolResult> {
   // Acquire the token first. If this throws AuthRequiredError, we MUST
   // NOT touch the network — the test asserts `fetchImpl` was never
   // called. Letting the throw propagate naturally handles that.
@@ -173,7 +177,7 @@ export async function callCloudTool<TResult = unknown>(
     throw new Error('cloud response was not valid JSON-RPC');
   }
 
-  const rpc = json as Partial<JsonRpcSuccess<TResult>> & Partial<JsonRpcError>;
+  const rpc = json as Partial<JsonRpcSuccess> & Partial<JsonRpcError>;
 
   if (rpc.error) {
     const message = rpc.error.message ?? 'unknown cloud error';
@@ -189,5 +193,10 @@ export async function callCloudTool<TResult = unknown>(
     throw new Error('cloud response was not valid JSON-RPC');
   }
 
-  return rpc.result as TResult;
+  const result = mcpTextCallToolResultSchema.safeParse(rpc.result);
+  if (!result.success) {
+    throw new Error('cloud response was not a valid MCP tool result');
+  }
+
+  return result.data;
 }

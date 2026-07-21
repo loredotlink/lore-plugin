@@ -30,14 +30,20 @@
  *     dispatcher's catch-all in `index.ts`.
  *
  * Input schema:
- *   `properties` exposes only `session_id`. The dispatcher's
- *   `additionalProperties: false` rejects any agent attempt to pass
- *   `transcript`, `harness`, or anything else — neither field is part
- *   of the agent-visible contract any more. This is the schema-layer
- *   half of the defense-in-depth pair; the merge-order rule above is
- *   the runtime half.
+ *   `properties` exposes only local session selection and presentation
+ *   inputs. The dispatcher's `additionalProperties: false` rejects any
+ *   agent attempt to pass `transcript` or `harness` — neither field is
+ *   part of the agent-visible contract. This is the schema-layer half of
+ *   the defense-in-depth pair; the merge-order rule above is the runtime
+ *   half.
  */
-import { mcpShareSessionPluginToolSpec } from '@lore/contracts/mcp';
+import {
+  mcpShareSessionPluginResultSchema,
+  mcpShareSessionPluginToolSpec,
+  mcpShareSessionResultSchema,
+  type McpShareSessionPluginResult,
+  type McpTextCallToolResult,
+} from '@lore/contracts/mcp';
 
 import type { ToolDefinition } from '../lib/tool.js';
 import { callCloudTool } from '../lib/cloudCall.js';
@@ -53,18 +59,6 @@ import {
 
 export const WATCHER_TIP =
   'Tip: install our macOS app (https://lore.link/docs/overview) to auto-share new sessions in the background.';
-
-export type ShareSessionResult = {
-  thread_id: string;
-  thread_url: string;
-  clipboard_copied?: boolean;
-  highlight?: {
-    query: string;
-    matched: boolean;
-    start_block_id: string | null;
-    end_block_id: string | null;
-  };
-};
 
 export type ShareSessionArgs = {
   session_id?: string;
@@ -95,13 +89,13 @@ const RUNTIME_TO_HARNESS: Record<string, string> = {
 export async function runShareSession(
   args: Record<string, unknown>,
   opts: { fetchImpl?: typeof fetch; home?: string; harness?: string } = {},
-): Promise<unknown> {
+): Promise<McpTextCallToolResult> {
   try {
     const harness = opts.harness ?? 'cowork';
     // Plugin-controlled `harness` is spread LAST so it overrides any
     // (currently impossible, but defense-in-depth) caller-supplied
     // value. See module docstring.
-    return await callCloudTool<ShareSessionResult>(
+    return await callCloudTool(
       'share_session',
       { ...args, harness },
       opts,
@@ -141,7 +135,7 @@ export async function shareSessionFromDisk(
     env?: NodeJS.ProcessEnv;
     copyToClipboard?: (text: string) => Promise<boolean>;
   } = {},
-): Promise<unknown> {
+): Promise<McpTextCallToolResult> {
   const source = opts.source ?? detectSource(opts.env);
   const env = opts.env ?? process.env;
   const session = runReadLocalSession({
@@ -163,11 +157,7 @@ export async function shareSessionFromDisk(
   );
 
   // If the share failed (auth-required shape), skip state mutation.
-  if (
-    result !== null &&
-    typeof result === 'object' &&
-    (result as Record<string, unknown>).isError === true
-  ) {
+  if (result.isError === true) {
     return result;
   }
 
@@ -194,43 +184,50 @@ export async function shareSessionFromDisk(
     return resultWithClipboard;
   }
 
-  // Append tip to content array if result is MCP content shape, otherwise
-  // wrap both in a combined object.
-  if (
-    resultWithClipboard !== null &&
-    typeof resultWithClipboard === 'object' &&
-    Array.isArray((resultWithClipboard as Record<string, unknown>).content)
-  ) {
-    const r = resultWithClipboard as { content: unknown[] };
-    return { ...r, content: [...r.content, { type: 'text', text: tipText }] };
-  }
-
-  // Result is a plain object (e.g. {thread_id, thread_url}); attach tip
-  // as a separate property so the caller still gets the structured data.
-  return { ...(resultWithClipboard as object), _tip: tipText };
+  return {
+    ...resultWithClipboard,
+    content: [
+      ...resultWithClipboard.content,
+      { type: 'text', text: tipText },
+    ],
+  };
 }
 
 async function attachClipboardStatus(
-  result: unknown,
+  result: McpTextCallToolResult,
   copier: (text: string) => Promise<boolean>,
-): Promise<unknown> {
-  if (result === null || typeof result !== 'object' || Array.isArray(result)) {
-    return result;
+): Promise<McpTextCallToolResult> {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(result.content[0]!.text);
+  } catch {
+    throw new Error('cloud share_session result was not valid JSON');
   }
 
-  const threadUrl = (result as Record<string, unknown>).thread_url;
-  if (typeof threadUrl !== 'string' || threadUrl.length === 0) {
-    return result;
+  const parsed = mcpShareSessionResultSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error('cloud share_session result did not match its contract');
   }
 
   let clipboardCopied = false;
   try {
-    clipboardCopied = await copier(threadUrl);
+    clipboardCopied = await copier(parsed.data.thread_url);
   } catch {
     clipboardCopied = false;
   }
 
-  return { ...(result as object), clipboard_copied: clipboardCopied };
+  const pluginResult: McpShareSessionPluginResult =
+    mcpShareSessionPluginResultSchema.parse({
+      ...parsed.data,
+      clipboard_copied: clipboardCopied,
+    });
+  return {
+    ...result,
+    content: [
+      { ...result.content[0]!, text: JSON.stringify(pluginResult) },
+      ...result.content.slice(1),
+    ],
+  };
 }
 
 export const shareSessionTool: ToolDefinition = {

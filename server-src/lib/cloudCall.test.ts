@@ -1,4 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import {
+  mcpTextCallToolResultSchema,
+  type McpTextCallToolResult,
+} from '@lore/contracts/mcp';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -45,6 +49,12 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function rpcSuccess(id: string, result: unknown): Response {
   return jsonResponse({ jsonrpc: '2.0', id, result });
+}
+
+function textToolResult(payload: unknown): McpTextCallToolResult {
+  return mcpTextCallToolResultSchema.parse({
+    content: [{ type: 'text', text: JSON.stringify(payload) }],
+  });
 }
 
 function rpcError(
@@ -168,7 +178,10 @@ function makeRetryFetch(opts: {
       const status =
         opts.mcpStatuses[idx] ?? opts.mcpStatuses[opts.mcpStatuses.length - 1] ?? 200;
       if (status === 200) {
-        return rpcSuccess((body as { id: string }).id, opts.mcpResult ?? { ok: true });
+        return rpcSuccess(
+          (body as { id: string }).id,
+          opts.mcpResult ?? textToolResult({ ok: true }),
+        );
       }
       return jsonResponse({ error: 'unauthorized' }, status);
     }
@@ -204,7 +217,10 @@ describe('callCloudTool', () => {
 
   test('happy path: returns result, sends bearer + content-type, POSTs to /mcp', async () => {
     await writeTokens(validTokens(), home);
-    const expectedResult = { thread_id: 't_123', url: 'https://lore/x' };
+    const expectedResult = textToolResult({
+      thread_id: 't_123',
+      thread_url: 'https://lore/x',
+    });
     const { fetchImpl, calls } = captureFetch((req) =>
       rpcSuccess((req.body as { id: string }).id, expectedResult),
     );
@@ -246,10 +262,10 @@ describe('callCloudTool', () => {
     await primeDiscoveryCache(home);
     const { fetchImpl, mcpCalls, tokenCalls } = makeRetryFetch({
       mcpStatuses: [401, 200],
-      mcpResult: { thread_id: 't_ok' },
+      mcpResult: textToolResult({ thread_id: 't_ok' }),
     });
     const result = await callCloudTool('share_session', {}, { fetchImpl, home });
-    expect(result).toEqual({ thread_id: 't_ok' });
+    expect(result).toEqual(textToolResult({ thread_id: 't_ok' }));
     // Exactly one retry: first call 401 with the live token, retry with the
     // refreshed token.
     expect(mcpCalls.length).toBe(2);
@@ -379,10 +395,23 @@ describe('callCloudTool', () => {
     ).rejects.toThrow('cloud response was not valid JSON-RPC');
   });
 
+  test('raw JSON-RPC result without the MCP content envelope is rejected', async () => {
+    await writeTokens(validTokens(), home);
+    const { fetchImpl } = captureFetch((req) =>
+      rpcSuccess((req.body as { id: string }).id, {
+        thread_id: 't_raw',
+        thread_url: 'https://lore/t_raw',
+      }),
+    );
+    await expect(
+      callCloudTool('share_session', {}, { fetchImpl, home }),
+    ).rejects.toThrow('cloud response was not a valid MCP tool result');
+  });
+
   test('each call gets a unique id', async () => {
     await writeTokens(validTokens(), home);
     const { fetchImpl, calls } = captureFetch((req) =>
-      rpcSuccess((req.body as { id: string }).id, {}),
+      rpcSuccess((req.body as { id: string }).id, textToolResult({})),
     );
     await callCloudTool('share_session', {}, { fetchImpl, home });
     await callCloudTool('share_session', {}, { fetchImpl, home });
@@ -395,7 +424,7 @@ describe('callCloudTool', () => {
     // Confirm by counting calls to a fetchImpl that includes the auth
     // header — one fetch ⇔ one token acquisition in this implementation.
     const { fetchImpl, calls } = captureFetch((req) =>
-      rpcSuccess((req.body as { id: string }).id, { ok: true }),
+      rpcSuccess((req.body as { id: string }).id, textToolResult({ ok: true })),
     );
     await callCloudTool('get_thread', { id: 'x' }, { fetchImpl, home });
     expect(calls.length).toBe(1);

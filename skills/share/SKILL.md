@@ -32,7 +32,7 @@ Strip framing words ("name it", "call it", "titled", surrounding quotes) and pas
 1. Call the `lore-local` MCP tool `share_session` with no arguments.
 2. If the user includes a natural-language highlight request after `/lore:share`, pass that request as `highlight`. For example, `/lore:share where I made the parser handle Amp exports` should call `share_session({ highlight: "where I made the parser handle Amp exports" })`.
 3. If the user asked for a specific older session, call `list_local_sessions`, pick the match, then call `share_session({ session_id })` (or `share_session({ session_id, highlight })` when they also asked for a highlight).
-4. Surface `thread_url` prominently. If `clipboard_copied` is true, mention that the shared link was copied to the clipboard. If `clipboard_copied` is false, still show the link and mention that clipboard copy was unavailable. If `highlight` was supplied and resolved, `thread_url` already includes the selected block anchor or range. If the result includes `_tip`, show it after the link.
+4. Surface `thread_url` prominently. If `clipboard_copied` is true, mention that the shared link was copied to the clipboard. If `clipboard_copied` is false, still show the link and mention that clipboard copy was unavailable. If `highlight` was supplied and resolved, `thread_url` already includes the selected block anchor or range. If the result includes a tip, show it after the link.
 
 The share result is a JSON object with:
 
@@ -40,7 +40,7 @@ The share result is a JSON object with:
 - `thread_url` — the shareable Lore link. Always show this to the user as the primary result.
 - `clipboard_copied` — true when the plugin copied `thread_url` to the user's clipboard, false when clipboard copy was unavailable.
 - `highlight` — present only when a highlight query was supplied and Lore resolved it. It includes `query`, `matched`, `start_block_id`, and `end_block_id`; when `matched` is true, `thread_url` is already anchored.
-- `_tip` — optional plugin tip text.
+- The tool may also return an additional tip after the JSON result.
 
 ## Failure Modes
 

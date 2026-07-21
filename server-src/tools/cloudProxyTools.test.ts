@@ -1,4 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import {
+  mcpTextCallToolResultSchema,
+  type McpTextCallToolResult,
+} from '@lore/contracts/mcp';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,6 +34,12 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'content-type': 'application/json' },
+  });
+}
+
+function textToolResult(payload: unknown): McpTextCallToolResult {
+  return mcpTextCallToolResultSchema.parse({
+    content: [{ type: 'text', text: JSON.stringify(payload) }],
   });
 }
 
@@ -111,7 +121,7 @@ describe('generated cloud proxy tools', () => {
 
   test('happy path: returns cloud result verbatim', async () => {
     await writeTokens(validTokens(), home);
-    const expected = { id: 't_1', body: 'thread contents' };
+    const expected = textToolResult({ id: 't_1', body: 'thread contents' });
     const fetchImpl = (async (_: string, init?: RequestInit) => {
       const body = JSON.parse(init?.body as string) as { id: string };
       return jsonResponse({ jsonrpc: '2.0', id: body.id, result: expected });
@@ -132,7 +142,7 @@ describe('generated cloud proxy tools', () => {
       return jsonResponse({
         jsonrpc: '2.0',
         id: body.id,
-        result: { threads: [] },
+        result: textToolResult({ threads: [] }),
       });
     }) as unknown as typeof fetch;
     await runCloudProxyTool(
