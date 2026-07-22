@@ -1,9 +1,9 @@
 # lore MCP server binary
 
 This directory holds the compiled MCP server that ships with the
-lore plugin. The plugin's `.mcp.json` hardcodes the path
-`server/lore-mcp` — so the binary lives here, it's
-committed to git, and `/plugin install` gets a working server with no
+lore plugin. The Claude/Cowork `.mcp.json` and Codex
+`.codex-plugin/mcp.json` both point to `server/lore-mcp` — so the binary lives here, it's
+committed to git, and plugin installation gets a working server with no
 build step on the user's machine.
 
 ## Build

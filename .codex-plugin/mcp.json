@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "lore-local": {
+      "type": "stdio",
+      "command": "sh",
+      "args": ["-c", "exec ./server/lore-mcp"],
+      "cwd": "."
+    }
+  }
+}

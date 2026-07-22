@@ -5,7 +5,7 @@
   },
   "plugins": [
     {
-      "name": "plugin",
+      "name": "lore",
       "source": {
         "source": "local",
         "path": "."

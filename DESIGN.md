@@ -71,7 +71,7 @@ The shared prompts live under `skills/` rather than a host-specific `commands/` 
 
 ## Local MCP server
 
-`.mcp.json` registers one bundled stdio server, `lore-local`, backed by the committed Bun executable at `server/lore-mcp`.
+The root `.mcp.json` registers one bundled stdio server, `lore-local`, for Claude Code and Cowork using their plugin-root expansion. The Codex manifest points to `.codex-plugin/mcp.json`, which registers the same executable with a plugin-root-relative `cwd` as required by Codex. Both configurations run the committed Bun executable at `server/lore-mcp`.
 
 That server exposes two kinds of tools:
 

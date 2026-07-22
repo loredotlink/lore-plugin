@@ -17,7 +17,14 @@ claude plugin install plugin@loredotlink
 
 ### Codex
 
-Codex uses the same shared package through [`.agents/plugins/marketplace.json`](./.agents/plugins/marketplace.json).
+From a plain terminal (outside a session), run:
+
+```bash
+codex plugin marketplace add loredotlink/lore-plugin
+codex plugin add lore@loredotlink
+```
+
+Start a new Codex session after installation. Type `@share` and select the Lore share skill to insert `$lore:share`, or ask Codex to share the session to Lore in natural language.
 
 ### Amp
 
@@ -60,9 +67,9 @@ Then reload plugins from Amp's command palette with `plugins: reload`. The comma
 
 ## What you get
 
-- **`/lore:share`** — uploads the current session to Lore, and returns a shareable URL.
-- **`/lore:fork`** — distill an existing Lore thread into intent-conditioned handoff context for continuing work.
-- **`/lore:read`** / read tools — fetch a Lore thread by ID or URL, or list and search threads by title.
+- **Share skill** — `/lore:share` in Claude Code/Cowork or `$lore:share` in Codex uploads the current session to Lore and returns a shareable URL.
+- **Fork skill** — `/lore:fork` in Claude Code/Cowork distills an existing Lore thread into intent-conditioned handoff context for continuing work; Codex exposes the same installed skill through its `@` picker.
+- **Read skill/tools** — `/lore:read` in Claude Code/Cowork fetches a Lore thread by ID or URL, or lists and searches threads by title; Codex exposes the same installed skill through its `@` picker.
 - **`Lore: Share active Amp thread`** — in Amp, export the active Amp thread with the local Amp CLI, upload the raw export to Lore as `harness: 'amp'`, and return the Lore URL for that session.
 - **`share_current_amp_thread`** — an Amp tool for explicit natural-language invocation. It accepts `{ thread_id?: string, visibility?: 'private' | 'workspace' | 'public', highlight?: string }`; if `thread_id` is omitted, `AMP_CURRENT_THREAD_ID` must be set or the tool returns an actionable error. `highlight` is a natural-language description of the block or block range to emphasize in the returned Lore URL.
 
@@ -74,7 +81,7 @@ When you share a thread, you can also specify specific blocks that should be hig
 
 ## First-time setup
 
-The first time you use `/lore:share`, `/lore:read`, or the Amp share/read tools, the plugin's `lore_login` tool opens a browser kick off a login flow. The plugin persists an auth and refresh token in the `~/.lore/tokens.json` file (mode 0600). If the browser cannot be opened automatically (SSH or other environments without a GUI), `lore_login` returns a `verification_uri` + `device_code` and the agent calls `lore_login_resume` once you complete the flow on another device.
+The first time you use a Lore share/read skill or the Amp share/read tools, the plugin's `lore_login` tool opens a browser to kick off a login flow. The plugin persists an auth and refresh token in the `~/.lore/tokens.json` file (mode 0600). If the browser cannot be opened automatically (SSH or other environments without a GUI), `lore_login` returns a `verification_uri` + `device_code` and the agent calls `lore_login_resume` once you complete the flow on another device.
 
 ## Architecture
 
