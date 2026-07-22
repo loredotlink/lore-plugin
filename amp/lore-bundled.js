@@ -18180,15 +18180,6 @@ var initContract = () => {
 // ../contracts/src/entities/kinds.ts
 var entityKindValues = ["person", "foot_gun", "decision"];
 var entityKindSchema = exports_external.enum(entityKindValues);
-var flavorValues = [
-  "engineering",
-  "marketing",
-  "finance",
-  "product",
-  "operations",
-  "general"
-];
-var flavorSchema = exports_external.enum(flavorValues);
 var personRoleSchema = exports_external.enum([
   "authored",
   "commented",
@@ -20563,7 +20554,6 @@ var regionListObjectSchema = exports_external.object({
   status: regionStatusSchema,
   thread_count: exports_external.number().int().nonnegative(),
   contributor_count: exports_external.number().int().nonnegative(),
-  comment_count: exports_external.number().int().nonnegative(),
   contributors_preview: exports_external.array(regionAuthorSchema).max(3),
   top_filepath: exports_external.string().nullable(),
   last_active_at: exports_external.string().datetime(),
@@ -20661,8 +20651,7 @@ var unfiledThreadSchema = exports_external.object({
   title: exports_external.string(),
   created_at: exports_external.string().datetime(),
   author: regionAuthorSchema,
-  user_message_count: exports_external.number().int().nonnegative(),
-  comment_count: exports_external.number().int().nonnegative()
+  user_message_count: exports_external.number().int().nonnegative()
 });
 var listUnfiledThreadsResponseSchema = exports_external.object({
   type: exports_external.literal("list"),
@@ -20941,6 +20930,7 @@ var threadEventTypeSchema = exports_external.enum([
   "thread.completed",
   "thread.block.appended",
   "thread.dock.turn_completed",
+  "thread.dock.turn_cancel_requested",
   "thread.comment.created",
   "thread.comment.updated",
   "thread.comment.deleted",
@@ -21029,8 +21019,15 @@ var threadEventSchema = exports_external.discriminatedUnion("type", [
     type: exports_external.literal("thread.dock.turn_completed"),
     payload: exports_external.object({
       thread_id: exports_external.string().min(1),
+      prompt_block_id: exports_external.string().min(1),
       stop_reason: exports_external.enum(["end_turn", "aborted", "error"]),
       error: exports_external.string().nullable()
+    })
+  }),
+  threadEventBase.extend({
+    type: exports_external.literal("thread.dock.turn_cancel_requested"),
+    payload: exports_external.object({
+      thread_id: exports_external.string().min(1)
     })
   }),
   threadEventBase.extend({
@@ -21843,13 +21840,24 @@ var threadBlockCommentThreadBaseSchema = exports_external.object({
 var threadBlockCommentThreadSchema = threadBlockCommentThreadBaseSchema.extend({
   comments: exports_external.array(threadBlockCommentSchema)
 });
+var dockHostToolMarkerV1Schema = exports_external.object({
+  version: exports_external.literal(1),
+  kind: exports_external.literal("host_tool"),
+  tool_name: exports_external.string().min(1),
+  tool_call_id: exports_external.string().min(1),
+  metadata: exports_external.record(exports_external.string(), exports_external.string())
+}).strict();
+var dockHostToolActivityV1Schema = dockHostToolMarkerV1Schema;
+var dockTerminalPresentationV1Schema = dockHostToolMarkerV1Schema;
 var threadBlockObjectSchema = exports_external.object({
   id: exports_external.string().min(1),
   type: exports_external.string().min(1),
   index_in_thread: exports_external.number().int().nonnegative(),
   isCritiqued: exports_external.boolean(),
   comment_threads: exports_external.array(threadBlockCommentThreadSchema).optional(),
-  exploration: exports_external.lazy(() => explorationSnapshotSchema).optional()
+  exploration: exports_external.lazy(() => explorationSnapshotSchema).optional(),
+  host_tool_activity: exports_external.array(dockHostToolActivityV1Schema).optional(),
+  terminal_presentation: dockTerminalPresentationV1Schema.optional()
 }).passthrough();
 var threadBlockListResponseSchema = exports_external.object({
   type: exports_external.literal("list"),
@@ -21878,20 +21886,6 @@ var threadCommentSchema = exports_external.object({
   updated_at: exports_external.string().datetime(),
   deleted_at: exports_external.string().datetime().nullable()
 });
-var listThreadCommentsResponseSchema = exports_external.object({
-  type: exports_external.literal("list"),
-  list_type: exports_external.literal("thread_comment"),
-  objects: exports_external.array(threadCommentSchema)
-});
-var createThreadCommentRequestSchema = exports_external.object({
-  content: exports_external.string().trim().min(1).max(4000),
-  parent_comment_id: exports_external.string().min(1).optional()
-});
-var createThreadCommentResponseSchema = threadCommentSchema;
-var updateThreadCommentRequestSchema = exports_external.object({
-  content: exports_external.string().trim().min(1).max(4000)
-});
-var updateThreadCommentResponseSchema = threadCommentSchema;
 var threadShareResponseSchema = exports_external.object({
   type: exports_external.literal("thread_share"),
   id: exports_external.string(),
@@ -21932,30 +21926,6 @@ var skillSharesListResponseSchema = exports_external.object({
   has_more: exports_external.boolean(),
   objects: exports_external.array(skillShareResponseSchema)
 });
-var deleteThreadCommentResponseSchema = threadCommentSchema;
-var threadCommentEventSchema = exports_external.discriminatedUnion("kind", [
-  exports_external.object({
-    kind: exports_external.literal("created"),
-    thread_id: exports_external.string().min(1),
-    actor_user_id: exports_external.string().min(1),
-    version: exports_external.number(),
-    comment: threadCommentSchema
-  }),
-  exports_external.object({
-    kind: exports_external.literal("updated"),
-    thread_id: exports_external.string().min(1),
-    actor_user_id: exports_external.string().min(1),
-    version: exports_external.number(),
-    comment: threadCommentSchema
-  }),
-  exports_external.object({
-    kind: exports_external.literal("deleted"),
-    thread_id: exports_external.string().min(1),
-    actor_user_id: exports_external.string().min(1),
-    version: exports_external.number(),
-    comment: threadCommentSchema
-  })
-]);
 var threadSummaryStatusSchema = exports_external.enum([
   "pending",
   "generating",
@@ -22116,8 +22086,9 @@ var askThreadsRequestSchema = exports_external.object({
   conversation: exports_external.array(askThreadsConversationTurnSchema).max(6).optional().describe("Bounded prior question-and-answer turns, ordered newest last"),
   context_items: exports_external.array(askThreadsContextItemSchema).max(20).optional().describe("Visible exploration labels available to resolve a scoped follow-up")
 });
+var loreThreadMessageTextSchema = exports_external.string().trim().min(1).max(20000);
 var loreThreadMessageRequestSchema = askThreadsRequestSchema.omit({ question: true }).extend({
-  message: exports_external.string().trim().min(1).max(20000)
+  message: loreThreadMessageTextSchema
 });
 var askThreadsOutcomeClasses = [
   "served",
@@ -22295,6 +22266,12 @@ var explorationSnapshotSchema = exports_external.discriminatedUnion("version", [
 ]);
 var loreThreadStreamEventSchema = exports_external.discriminatedUnion("type", [
   exports_external.object({ type: exports_external.literal("thread_created"), thread_id: exports_external.string().min(1) }),
+  exports_external.object({
+    type: exports_external.literal("ask_started"),
+    ask_id: exports_external.string().min(1),
+    session_id: exports_external.string().min(1),
+    turn_index: exports_external.number().int().nonnegative()
+  }),
   exports_external.object({ type: exports_external.literal("plan"), plan: askThreadsPlanSummarySchema }),
   exports_external.object({ type: exports_external.literal("trace_step"), step: askThreadsTraceStepSchema }),
   exports_external.object({
@@ -22416,7 +22393,6 @@ var threadResourceSchema = exports_external.object({
   title_status: threadTitleStatusSchema,
   title_generated_at: exports_external.string().nullable(),
   title_source: threadTitleSourceSchema,
-  comment_count: exports_external.number().int().nonnegative(),
   is_favorited: exports_external.boolean(),
   card: threadCardSchema,
   viewer_access: exports_external.enum(["owner", "workspace", "grant", "public"]).optional(),
@@ -22565,7 +22541,6 @@ var threadListObjectSchema = exports_external.object({
   last_activity_at: exports_external.string().datetime().nullable(),
   blocks: threadBlockListResponseSchema,
   user_message_count: exports_external.number().int().nonnegative(),
-  comment_count: exports_external.number().int().nonnegative(),
   files_touched: exports_external.array(exports_external.string()),
   skills_invoked: exports_external.array(exports_external.string()),
   harness: harnessSchema,
@@ -23134,6 +23109,62 @@ var adminReparseThreadFileResponseSchema = exports_external.object({
   thread_file_id: exports_external.string().min(1),
   event_name: exports_external.literal("lore/thread-files.parse.requested")
 });
+var adminThreadReprojectionSourceSchema = exports_external.enum(["uploaded_transcript", "otel"]);
+var adminReprojectThreadResponseSchema = exports_external.discriminatedUnion("source", [
+  exports_external.object({
+    source: exports_external.literal("uploaded_transcript"),
+    thread_id: exports_external.string().min(1),
+    thread_file_id: exports_external.string().min(1),
+    baseline_version: exports_external.number().int().nonnegative(),
+    event_name: exports_external.literal("lore/thread-files.parse.requested")
+  }),
+  exports_external.object({
+    source: exports_external.literal("otel"),
+    thread_id: exports_external.string().min(1),
+    session_id: exports_external.string().min(1),
+    baseline_version: exports_external.number().int().nonnegative(),
+    event_name: exports_external.literal("lore/otel.session.projection.requested")
+  })
+]);
+var adminThreadReprojectionStatusQuerySchema = exports_external.discriminatedUnion("source", [
+  exports_external.object({
+    source: exports_external.literal("uploaded_transcript"),
+    baseline_version: exports_external.coerce.number().int().nonnegative(),
+    thread_file_id: exports_external.string().min(1)
+  }),
+  exports_external.object({
+    source: exports_external.literal("otel"),
+    baseline_version: exports_external.coerce.number().int().nonnegative(),
+    session_id: exports_external.string().min(1)
+  })
+]);
+var adminThreadReprojectionStatusBaseSchema = {
+  thread_id: exports_external.string().min(1),
+  source: adminThreadReprojectionSourceSchema
+};
+var adminThreadReprojectionStatusResponseSchema = exports_external.discriminatedUnion("status", [
+  exports_external.object({
+    ...adminThreadReprojectionStatusBaseSchema,
+    status: exports_external.literal("queued")
+  }),
+  exports_external.object({
+    ...adminThreadReprojectionStatusBaseSchema,
+    status: exports_external.literal("succeeded"),
+    completed_at: exports_external.string()
+  }),
+  exports_external.object({
+    ...adminThreadReprojectionStatusBaseSchema,
+    status: exports_external.literal("failed"),
+    completed_at: exports_external.string().nullable(),
+    error: exports_external.string().min(1)
+  }),
+  exports_external.object({
+    ...adminThreadReprojectionStatusBaseSchema,
+    status: exports_external.literal("skipped"),
+    completed_at: exports_external.string().nullable(),
+    reason: exports_external.string().min(1)
+  })
+]);
 var shareTokenResponseSchema = exports_external.object({
   token: exports_external.string().min(1),
   thread_id: exports_external.string().min(1)
@@ -24583,80 +24614,6 @@ var apiContract = c12.router({
     },
     summary: "Upload a custom cover image for a thread. Author or Tanagram admin only. Bytes go to the same storage substrate the AI cover uses (S3 in prod, filesystem in dev), and the threads row is updated atomically with the new cover_storage_url, cover_status='ready', cover_generated_at=now, cover_model='user-uploaded' so subsequent re-rolls / how-to fan-outs treat the upload like any other ready cover."
   },
-  listThreadComments: {
-    method: "GET",
-    path: "/threads/:threadId/comments",
-    pathParams: exports_external.object({
-      threadId: exports_external.string().min(1)
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    responses: {
-      200: listThreadCommentsResponseSchema,
-      403: errorSchema12,
-      404: errorSchema12
-    },
-    summary: "List all (live + soft-deleted as tombstones) comments on a public thread, flat with parent_comment_id pointers."
-  },
-  createThreadComment: {
-    method: "POST",
-    path: "/threads/:threadId/comments",
-    pathParams: exports_external.object({
-      threadId: exports_external.string().min(1)
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: createThreadCommentRequestSchema,
-    responses: {
-      201: createThreadCommentResponseSchema,
-      401: errorSchema12,
-      403: errorSchema12,
-      404: errorSchema12,
-      422: errorSchema12
-    },
-    summary: "Post a top-level or reply comment on a public thread."
-  },
-  updateThreadComment: {
-    method: "PATCH",
-    path: "/threads/:threadId/comments/:commentId",
-    pathParams: exports_external.object({
-      threadId: exports_external.string().min(1),
-      commentId: exports_external.string().min(1)
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: updateThreadCommentRequestSchema,
-    responses: {
-      200: updateThreadCommentResponseSchema,
-      401: errorSchema12,
-      403: errorSchema12,
-      404: errorSchema12,
-      422: errorSchema12
-    },
-    summary: "Edit your own thread comment (author only; rejects edits to soft-deleted rows)."
-  },
-  deleteThreadComment: {
-    method: "DELETE",
-    path: "/threads/:threadId/comments/:commentId",
-    pathParams: exports_external.object({
-      threadId: exports_external.string().min(1),
-      commentId: exports_external.string().min(1)
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: exports_external.object({}).optional(),
-    responses: {
-      200: deleteThreadCommentResponseSchema,
-      401: errorSchema12,
-      403: errorSchema12,
-      404: errorSchema12
-    },
-    summary: "Soft-delete your own thread comment (author only). Idempotent."
-  },
   createThreadShare: {
     method: "POST",
     path: "/threads/:threadId/shares",
@@ -25529,6 +25486,44 @@ var apiContract = c12.router({
       404: errorSchema12
     },
     summary: "Re-enqueue parsing for a thread file. Tanagram admins only."
+  },
+  adminReprojectThread: {
+    method: "POST",
+    path: "/admin/threads/:id/reproject",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1).describe("Thread id, e.g. th_xxx.")
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: exports_external.object({}).optional(),
+    responses: {
+      200: adminReprojectThreadResponseSchema,
+      401: errorSchema12,
+      403: errorSchema12,
+      404: errorSchema12,
+      409: errorSchema12,
+      500: errorSchema12
+    },
+    summary: "Re-project a thread from its current uploaded transcript or OTEL session. Tanagram admins only."
+  },
+  adminGetThreadReprojectionStatus: {
+    method: "GET",
+    path: "/admin/threads/:id/reprojection-status",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1).describe("Thread id, e.g. th_xxx.")
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    query: adminThreadReprojectionStatusQuerySchema,
+    responses: {
+      200: adminThreadReprojectionStatusResponseSchema,
+      401: errorSchema12,
+      403: errorSchema12,
+      404: errorSchema12
+    },
+    summary: "Get the outcome of an admin-triggered thread re-projection."
   },
   listCardFeed: {
     method: "GET",
