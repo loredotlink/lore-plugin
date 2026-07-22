@@ -68,6 +68,8 @@ Then reload plugins from Amp's command palette with `plugins: reload`. The comma
 
 In Claude Code, Cowork, and Codex, you can also share to Lore using natural language (e.g. "share this session to Lore").
 
+The plugin intentionally does not configure or manage automatic background capture. Use the Lore desktop app's **Configure Session Uploads** screen for its embedded capture process, or run interactive `lore configure` and the CLI lifecycle commands for the standalone background agent.
+
 When you share a thread, you can also specify specific blocks that should be highlighted (e.g. "share the final outcome of this investigation"). Lore resolves the description against parsed thread blocks and returns a `thread_url` with corresponding anchor tags when it finds a confident match. If highlight resolution fails or times out, sharing still succeeds and returns the base thread URL without anchor tags.
 
 ## First-time setup
@@ -77,6 +79,8 @@ The first time you use `/lore:share`, `/lore:read`, or the Amp share/read tools,
 ## Architecture
 
 The shared package contains host-specific manifests for Claude Code and Codex, an Amp TypeScript plugin entrypoint, one bundled stdio MCP server that reads Claude/Cowork/Codex local session bytes off disk, and the proxy/auth code that talks to the Lore cloud MCP at `https://mcp.lore.link/mcp`. The stdio binary is a Bun-compiled single executable. Auth runs in-process via the `lib/auth/` library, with shared token storage, legacy migration, OAuth discovery, and refresh logic delegated to `@lore/identity-store`: RFC 8628 device-code flow against WorkOS AuthKit, discovery-driven (PRM → AS metadata, cached at `~/.lore/discovery-cache.json`), with silent refresh and 401-triggered re-login. See [`DESIGN.md`](./DESIGN.md) for the full breakdown.
+
+Capture ownership is deliberately outside this package: Desktop owns embedded configuration and capture, while the CLI owns standalone configuration and background-agent lifecycle. The plugin owns authentication, local reads, explicit sharing, and cloud consumption only; it never shells out to `lore configure`, `lore enable`, `lore disable`, or `lore status`.
 
 This repo is a mirrored subtree from our internal monorepo.
 

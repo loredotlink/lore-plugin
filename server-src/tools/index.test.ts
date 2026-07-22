@@ -9,8 +9,6 @@ describe('tools barrel', () => {
       'read_local_session',
       'lore_login',
       'lore_login_resume',
-      'lore_consent',
-      'lore_configure',
       'share_session',
       'list_threads',
       'get_thread',

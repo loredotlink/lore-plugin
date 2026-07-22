@@ -22583,6 +22583,7 @@ var listThreadsQuerySchema = exports_external.object({
   created_at: exports_external.string().min(1).optional(),
   filepath_prefixes: exports_external.string().min(1).optional(),
   decision_kinds: exports_external.string().min(1).optional().describe("Comma-separated decision kinds (asked, requested, decided, corrected, shared, requirement); returns threads with at least one matching decision."),
+  harnesses: exports_external.string().min(1).optional().describe("Comma-separated harness values (claudeCode, codex, amp, cowork, \u2026); returns threads produced by any of them."),
   q: exports_external.string().trim().min(1).max(200).optional(),
   shared_only: exports_external.coerce.string().min(1).optional().describe("When 'true', return only threads the viewer explicitly shared.")
 });
@@ -27177,6 +27178,9 @@ import path8 from "path";
 var COWORK_SESSIONS_DIR_NAME = "local-agent-mode-sessions";
 var TRANSCRIPT_FILENAME_CANDIDATES = ["audit.jsonl", "transcript.jsonl"];
 function coworkSessionsRoot(home = os5.homedir()) {
+  const override = process.env.LORE_COWORK_SESSIONS_DIR?.trim();
+  if (override)
+    return override;
   return path8.join(home, "Library", "Application Support", "Claude", COWORK_SESSIONS_DIR_NAME);
 }
 function listCoworkSessions(sessionsRoot) {
@@ -28526,14 +28530,10 @@ import fsp3 from "fs/promises";
 import os8 from "os";
 import path12 from "path";
 var PluginStateSchema = exports_external.object({
-  share_count: exports_external.number().int().nonnegative(),
-  watcher_prompt_dismissed: exports_external.boolean(),
-  consent: exports_external.enum(["unconsented", "consented", "declined", "installed", "idle", "capturing"]).default("unconsented")
+  share_count: exports_external.number().int().nonnegative()
 });
 var DEFAULT_STATE = {
-  share_count: 0,
-  watcher_prompt_dismissed: false,
-  consent: "unconsented"
+  share_count: 0
 };
 function pluginStateFilePath(home = os8.homedir()) {
   return path12.join(home, "Library", "Application Support", "tanagram", "lore", "plugin-state.json");
@@ -28582,9 +28582,6 @@ async function writePluginState(state, home) {
     throw err;
   }
 }
-function shouldShowWatcherTip(state) {
-  return state.share_count < 3 && !state.watcher_prompt_dismissed;
-}
 function isEnoent3(err) {
   return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
 }
@@ -28631,7 +28628,7 @@ async function shareSessionFromDisk(args, opts = {}) {
   let tipText = null;
   try {
     const state = await readPluginState(opts.home);
-    const showTip = shouldShowWatcherTip(state);
+    const showTip = state.share_count < 3;
     await writePluginState({ ...state, share_count: state.share_count + 1 }, opts.home);
     if (showTip) {
       tipText = WATCHER_TIP;
@@ -28843,391 +28840,6 @@ var listLocalSessionsTool = {
     return runListLocalSessions(detectSource());
   }
 };
-
-// server-src/lib/consentSurface.ts
-function buildAllowlistResult(opts) {
-  const { consent, document } = opts;
-  const include = document.uploadFilters.include;
-  let text;
-  if (consent === "capturing") {
-    text = [
-      "Lore background capture: now watching your allowlist.",
-      "",
-      "Lore will automatically capture and upload new sessions that match " + "the repos, directories, or skills you chose. Captured sessions are " + "never public by default \u2014 they stay visible only to you (or your " + "workspace).",
-      "",
-      ...describeWatched(include),
-      "",
-      "To change what's captured, call `lore_configure` again. To stop " + "entirely, call `lore_consent({ approve: false })`."
-    ].join(`
-`);
-  } else {
-    text = [
-      "Lore background capture: idle \u2014 nothing selected.",
-      "",
-      "Your allowlist is now empty, so no sessions are being captured. " + "Choose the repos, directories, or skills you want watched by " + "calling `lore_configure` with at least one entry."
-    ].join(`
-`);
-  }
-  return {
-    content: [{ type: "text", text }],
-    structuredContent: {
-      consent,
-      include: {
-        cwd: include.cwd,
-        repo: include.repo,
-        skills: include.skills
-      }
-    }
-  };
-}
-function describeWatched(include) {
-  const lines = ["Watching:"];
-  if (include.repo.length > 0)
-    lines.push(`- Repos: ${include.repo.join(", ")}`);
-  if (include.cwd.length > 0)
-    lines.push(`- Directories: ${include.cwd.join(", ")}`);
-  if (include.skills.length > 0)
-    lines.push(`- Skills: ${include.skills.join(", ")}`);
-  return lines;
-}
-
-// server-src/lib/uploadAllowlist.ts
-import { execFile as execFile2 } from "child_process";
-var FilterSetSchema = exports_external.object({
-  cwd: exports_external.array(exports_external.string()).default([]),
-  repo: exports_external.array(exports_external.string()).default([]),
-  skills: exports_external.array(exports_external.string()).default([])
-});
-var AllowlistDocumentSchema = exports_external.object({
-  version: exports_external.literal(1),
-  uploadFilters: exports_external.object({
-    include: FilterSetSchema,
-    exclude: FilterSetSchema
-  })
-});
-async function readCaptureAllowlist(runLore = defaultLoreRunner) {
-  const result = await runLore(["configure", "--json"]);
-  if (result.status !== 0) {
-    return { ok: false, message: commandError(result) };
-  }
-  return parseDocument(result.stdout, "lore configure --json");
-}
-async function writeCaptureAllowlist(document, runLore = defaultLoreRunner) {
-  const result = await runLore([
-    "configure",
-    "--json",
-    "--set",
-    JSON.stringify(document)
-  ]);
-  if (result.status !== 0) {
-    return { ok: false, message: commandError(result) };
-  }
-  return parseDocument(result.stdout, "lore configure --set");
-}
-function allowlistHasIncludeRules(document) {
-  const { cwd, repo, skills } = document.uploadFilters.include;
-  return cwd.length > 0 || repo.length > 0 || skills.length > 0;
-}
-function parseDocument(stdout, source) {
-  let parsed;
-  try {
-    parsed = JSON.parse(stdout);
-  } catch (error51) {
-    const message = error51 instanceof Error ? error51.message : String(error51);
-    return { ok: false, message: `invalid JSON from ${source}: ${message}` };
-  }
-  const result = AllowlistDocumentSchema.safeParse(parsed);
-  if (!result.success) {
-    return {
-      ok: false,
-      message: `unexpected document from ${source}: ${result.error.message}`
-    };
-  }
-  return { ok: true, document: result.data };
-}
-function defaultLoreRunner(args) {
-  return new Promise((resolve2) => {
-    execFile2("lore", args, { encoding: "utf8", maxBuffer: 1024 * 1024, timeout: 5000 }, (error51, stdout, stderr) => {
-      resolve2(commandResultFromExec(error51, stdout, stderr));
-    });
-  });
-}
-function commandResultFromExec(error51, stdout, stderr) {
-  const code = error51?.code;
-  const stderrText = typeof stderr === "string" ? stderr : "";
-  return {
-    status: typeof code === "number" ? code : error51 ? null : 0,
-    stdout: typeof stdout === "string" ? stdout : "",
-    stderr: error51 && !stderrText ? error51.message ?? String(error51) : stderrText
-  };
-}
-function commandError(result) {
-  return (result.stderr || result.stdout || `exit status ${result.status ?? "unknown"}`).trim();
-}
-
-// server-src/tools/lore_configure.ts
-async function runLoreConfigure(args, opts = {}) {
-  const state = await readPluginState(opts.home);
-  if (state.consent !== "installed" && state.consent !== "idle" && state.consent !== "capturing") {
-    return notInstalledResult(state.consent);
-  }
-  const repos = normalizeStringArray(args.repos, "repos");
-  const directories = normalizeStringArray(args.directories, "directories");
-  const skills = normalizeStringArray(args.skills, "skills");
-  if ("error" in repos)
-    return inputError(repos.error);
-  if ("error" in directories)
-    return inputError(directories.error);
-  if ("error" in skills)
-    return inputError(skills.error);
-  const mode = args.mode ?? "merge";
-  if (mode !== "merge" && mode !== "replace") {
-    return inputError(`mode must be "merge" or "replace", got ${JSON.stringify(args.mode)}`);
-  }
-  const read = await (opts.readAllowlist ?? readCaptureAllowlist)();
-  if (!read.ok) {
-    return cliError("read your current allowlist", read.message);
-  }
-  const current = read.document.uploadFilters.include;
-  const nextInclude = mode === "replace" ? { cwd: directories.values, repo: repos.values, skills: skills.values } : {
-    cwd: union2(current.cwd, directories.values),
-    repo: union2(current.repo, repos.values),
-    skills: union2(current.skills, skills.values)
-  };
-  const nextDocument = {
-    version: 1,
-    uploadFilters: {
-      include: nextInclude,
-      exclude: read.document.uploadFilters.exclude
-    }
-  };
-  const write = await (opts.writeAllowlist ?? writeCaptureAllowlist)(nextDocument);
-  if (!write.ok) {
-    return cliError("update your allowlist", write.message);
-  }
-  const consent = allowlistHasIncludeRules(write.document) ? "capturing" : "idle";
-  if (consent !== state.consent) {
-    await writePluginState({ ...state, consent }, opts.home);
-  }
-  return buildAllowlistResult({ consent, document: write.document });
-}
-var loreConfigureTool = {
-  name: "lore_configure",
-  description: "Choose what Lore background capture watches: the repos, directories, " + "or skills to auto-capture. Pass any of `repos` (owner/name), " + "`directories` (absolute paths), or `skills` (skill ids). " + 'Defaults to merging with the existing allowlist; pass `mode: "replace"` ' + "to overwrite it (replace with all-empty lists to stop capturing). " + "Requires background capture to be enabled first via `lore_consent({ approve: true })`.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      repos: {
-        type: "array",
-        items: { type: "string" },
-        description: "Repositories to capture, as owner/name or a git remote URL."
-      },
-      directories: {
-        type: "array",
-        items: { type: "string" },
-        description: "Absolute (or ~-relative) directories to capture sessions from."
-      },
-      skills: {
-        type: "array",
-        items: { type: "string" },
-        description: "Skill identifiers to capture (matching sessions are captured from any directory)."
-      },
-      mode: {
-        type: "string",
-        enum: ["merge", "replace"],
-        description: "merge (default) adds to the current allowlist; replace overwrites it."
-      }
-    },
-    additionalProperties: false
-  },
-  handler: async (args, opts) => {
-    return runLoreConfigure(args, { home: opts?.home });
-  }
-};
-function normalizeStringArray(value, field) {
-  if (value === undefined)
-    return { values: [] };
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    return { error: `${field} must be an array of strings` };
-  }
-  return { values: value };
-}
-function union2(existing, added) {
-  const seen = new Set(existing);
-  const result = [...existing];
-  for (const item of added) {
-    if (!seen.has(item)) {
-      seen.add(item);
-      result.push(item);
-    }
-  }
-  return result;
-}
-function notInstalledResult(consent) {
-  const prefix = consent === "consented" ? "Lore is finishing background-capture setup." : "Lore background capture is not set up yet.";
-  return {
-    content: [
-      {
-        type: "text",
-        text: `${prefix} Call \`lore_consent({ approve: true })\` ` + `to install the background agent before choosing an allowlist.`
-      }
-    ],
-    structuredContent: { consent }
-  };
-}
-function inputError(message) {
-  return {
-    content: [{ type: "text", text: `Could not update the allowlist: ${message}.` }],
-    isError: true
-  };
-}
-function cliError(action, message) {
-  const text = /not found|ENOENT|command not found/i.test(message) ? `Lore could not ${action} because the background agent CLI is not available. ` + `Call \`lore_consent({ approve: true })\` to (re)install it.` : `Lore could not ${action}: ${message}`;
-  return { content: [{ type: "text", text }], isError: true };
-}
-
-// server-src/tools/lore_consent.ts
-import { execFile as execFile3 } from "child_process";
-async function beginBackgroundAgentInstall(opts = {}) {
-  const platform = opts.platform ?? process.platform;
-  const runCommand = opts.runCommand ?? defaultRunCommand;
-  if (platform !== "darwin") {
-    return {
-      ok: false,
-      reason: "unsupported_platform",
-      message: "Automatic background capture is currently available on macOS only."
-    };
-  }
-  const existingLore = await runCommand("lore", ["--version"]);
-  if (existingLore.status !== 0) {
-    const npmAvailable = await runCommand("npm", ["--version"]);
-    if (npmAvailable.status !== 0) {
-      return {
-        ok: false,
-        reason: "install_failed",
-        message: "Could not install Lore automatically because npm was not found. Install Node.js/npm, then call `lore_consent({ approve: true })` again."
-      };
-    }
-    const install = await runCommand("npm", ["install", "-g", "@loredotlink/cli"]);
-    if (install.status !== 0) {
-      return {
-        ok: false,
-        reason: "install_failed",
-        message: `Could not install Lore CLI with npm: ${commandError2(install)}`
-      };
-    }
-  }
-  const enable = await runCommand("lore", ["enable"]);
-  if (enable.status !== 0) {
-    return {
-      ok: false,
-      reason: "install_failed",
-      message: `Lore CLI installed, but enabling background capture failed: ${commandError2(enable)}`
-    };
-  }
-  const status = await runCommand("lore", ["status", "--json"]);
-  const consent = consentFromStatusJson(status.stdout);
-  return {
-    ok: true,
-    consent,
-    message: messageForConsent(consent)
-  };
-}
-async function runLoreConsent(args, opts = {}) {
-  const state = await readPluginState(opts.home);
-  if (args.approve) {
-    if (state.consent === "installed" || state.consent === "idle" || state.consent === "capturing") {
-      return `Lore background capture is already ${state.consent}. Use \`lore_consent\` with \`approve: false\` to stop.`;
-    }
-    const platform = opts.platform ?? process.platform;
-    if (platform !== "darwin") {
-      return "Automatic background capture is unavailable on this platform today. " + "Manual `/lore:share` and `/lore:read` commands continue to work as usual.";
-    }
-    await writePluginState({ ...state, consent: "consented" }, opts.home);
-    const install = await (opts.installBackgroundAgent ?? beginBackgroundAgentInstall)({
-      home: opts.home
-    });
-    if (!install.ok) {
-      return `Consent recorded, but Lore could not finish background capture setup. ${install.message}`;
-    }
-    await writePluginState({ ...state, consent: install.consent }, opts.home);
-    return `Consent recorded. Background capture setup complete: ${install.message} ` + "Use `lore_consent` with `approve: false` at any time to stop.";
-  } else {
-    if (state.consent === "installed" || state.consent === "idle" || state.consent === "capturing") {
-      const disable = await (opts.disableBackgroundAgent ?? disableBackgroundAgent)({
-        home: opts.home
-      });
-      if (!disable.ok) {
-        return `Lore could not disable background capture. ${disable.message}`;
-      }
-      await writePluginState({ ...state, consent: "declined" }, opts.home);
-      return `Consent declined. ${disable.message} ` + "Manual `/lore:share` and `/lore:read` commands continue to work as usual. " + "Call `lore_consent({ approve: true })` to re-enable automatic capture later.";
-    }
-    await writePluginState({ ...state, consent: "declined" }, opts.home);
-    return "Consent declined. Manual `/lore:share` and `/lore:read` commands continue to work as usual. " + "Call `lore_consent({ approve: true })` to re-enable automatic capture later.";
-  }
-}
-var loreConsentTool = {
-  name: "lore_consent",
-  description: "Record the user's consent decision for automatic Lore session capture. " + 'Pass `approve: true` to enable background capture (consent state \u2192 "consented"); ' + 'pass `approve: false` to decline or disable it (consent state \u2192 "declined"). ' + "Manual share and read commands are unaffected by either choice.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      approve: {
-        type: "boolean",
-        description: "true to consent to automatic capture; false to decline or disable."
-      }
-    },
-    required: ["approve"],
-    additionalProperties: false
-  },
-  handler: async (args, opts) => {
-    return runLoreConsent(args, { home: opts?.home, platform: opts?.platform });
-  }
-};
-async function disableBackgroundAgent(opts = {}) {
-  const runCommand = opts.runCommand ?? defaultRunCommand;
-  const result = await runCommand("lore", ["disable"]);
-  if (result.status !== 0) {
-    return { ok: false, message: commandError2(result) };
-  }
-  return { ok: true, message: "Lore background capture has been disabled." };
-}
-function defaultRunCommand(cmd, args) {
-  return new Promise((resolve2) => {
-    execFile3(cmd, args, { encoding: "utf8", maxBuffer: 1024 * 1024 }, (error51, stdout, stderr) => {
-      const code = error51?.code;
-      resolve2({
-        status: typeof code === "number" ? code : error51 ? null : 0,
-        stdout: typeof stdout === "string" ? stdout : "",
-        stderr: typeof stderr === "string" ? stderr : ""
-      });
-    });
-  });
-}
-function consentFromStatusJson(stdout) {
-  try {
-    const parsed = JSON.parse(stdout);
-    if (parsed.status?.state === "running")
-      return "capturing";
-    if (parsed.status?.state === "idle")
-      return "idle";
-  } catch {}
-  return "installed";
-}
-function messageForConsent(consent) {
-  switch (consent) {
-    case "capturing":
-      return "Lore background capture is running.";
-    case "idle":
-      return "Lore background capture is idle.";
-    case "installed":
-      return "Lore background agent is installed.";
-  }
-}
-function commandError2(result) {
-  return (result.stderr || result.stdout || `exit status ${result.status ?? "unknown"}`).trim();
-}
 
 // server-src/tools/lore_login.ts
 import { spawnSync } from "child_process";
@@ -29525,8 +29137,6 @@ var tools = [
   readLocalSessionTool,
   loreLoginTool,
   loreLoginResumeTool,
-  loreConsentTool,
-  loreConfigureTool,
   shareSessionTool,
   ...cloudProxyTools
 ];

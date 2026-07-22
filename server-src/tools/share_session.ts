@@ -51,11 +51,7 @@ import { AuthRequiredError, authRequiredToMcpError } from '../lib/errors.js';
 import { detectSource, type SessionSource } from '../lib/session/index.js';
 import { runReadLocalSession } from './readLocalSession.js';
 import { copyToClipboard } from '../lib/clipboard.js';
-import {
-  readPluginState,
-  writePluginState,
-  shouldShowWatcherTip,
-} from '../lib/pluginState.js';
+import { readPluginState, writePluginState } from '../lib/pluginState.js';
 
 export const WATCHER_TIP =
   'Tip: install our macOS app (https://lore.link/docs/overview) to auto-share new sessions in the background.';
@@ -171,7 +167,7 @@ export async function shareSessionFromDisk(
   let tipText: string | null = null;
   try {
     const state = await readPluginState(opts.home);
-    const showTip = shouldShowWatcherTip(state);
+    const showTip = state.share_count < 3;
     await writePluginState({ ...state, share_count: state.share_count + 1 }, opts.home);
     if (showTip) {
       tipText = WATCHER_TIP;

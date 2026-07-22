@@ -20,8 +20,8 @@
  * confirm the empty-object-with-no-additionals contract round-trips.
  *
  * The `dispatchToolCall` integration tests use a temp home dir seeded via
- * `writePluginState` so all state is hermetic and no real network calls
- * are made.
+ * dispatch options so all state is hermetic and no real network calls are
+ * made.
  */
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import fsp from 'node:fs/promises';
@@ -31,7 +31,6 @@ import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { ToolInputSchema } from './lib/tool';
 import { listLocalSessionsTool } from './tools/listLocalSessions';
 import { validateAgainstSchema, dispatchToolCall } from './index';
-import { writePluginState, readPluginState } from './lib/pluginState';
 import { readTokens } from './lib/auth/store';
 import { __resetCloudBaseUrlForTests } from './lib/cloudBaseUrl';
 import { __resetInFlightForTests as __resetDiscoveryInFlightForTests } from './lib/auth/discovery';
@@ -165,12 +164,7 @@ describe('dispatchToolCall — end-to-end dispatch wiring', () => {
     __resetDiscoveryInFlightForTests();
   });
 
-  test('unconsented state does not intercept ordinary tool validation', async () => {
-    await writePluginState(
-      { share_count: 0, watcher_prompt_dismissed: false, consent: 'unconsented' },
-      tmpHome,
-    );
-
+  test('validates share_session arguments before invoking the handler', async () => {
     await expect(
       dispatchToolCall(
         { name: 'share_session', arguments: { __not_a_real_field: true } },
@@ -180,11 +174,6 @@ describe('dispatchToolCall — end-to-end dispatch wiring', () => {
   });
 
   test('unknown tool name → throws McpError with MethodNotFound', async () => {
-    await writePluginState(
-      { share_count: 0, watcher_prompt_dismissed: false, consent: 'unconsented' },
-      tmpHome,
-    );
-
     await expect(
       dispatchToolCall({ name: 'totally_unknown_tool' }, { home: tmpHome }),
     ).rejects.toMatchObject({
@@ -201,49 +190,6 @@ describe('dispatchToolCall — end-to-end dispatch wiring', () => {
     }
     expect(thrown).toBeInstanceOf(McpError);
     expect((thrown as McpError).message).toContain('no_such_tool');
-  });
-
-  test('lore_consent with approve:false runs handler → state transitions to declined', async () => {
-    await writePluginState(
-      { share_count: 0, watcher_prompt_dismissed: false, consent: 'unconsented' },
-      tmpHome,
-    );
-
-    const result = await dispatchToolCall(
-      { name: 'lore_consent', arguments: { approve: false } },
-      { home: tmpHome },
-    );
-
-    const text = result.content
-      .filter((b) => b.type === 'text')
-      .map((b) => (b as { type: string; text: string }).text)
-      .join('');
-    expect(text).toContain('declined');
-
-    // State on disk reflects the handler's write
-    const state = await readPluginState(tmpHome);
-    expect(state.consent).toBe('declined');
-  });
-
-  test('lore_consent with approve:true on non-macOS stays unconsented', async () => {
-    await writePluginState(
-      { share_count: 0, watcher_prompt_dismissed: false, consent: 'unconsented' },
-      tmpHome,
-    );
-
-    const result = await dispatchToolCall(
-      { name: 'lore_consent', arguments: { approve: true } },
-      { home: tmpHome, platform: 'linux' },
-    );
-
-    const text = result.content
-      .filter((b) => b.type === 'text')
-      .map((b) => (b as { type: string; text: string }).text)
-      .join('');
-    expect(text).toContain('unavailable');
-
-    const state = await readPluginState(tmpHome);
-    expect(state.consent).toBe('unconsented');
   });
 
   // The headless device-flow path. `lore_login_resume` never spawns a browser

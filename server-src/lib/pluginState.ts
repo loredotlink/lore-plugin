@@ -1,7 +1,7 @@
 /**
- * On-disk persistence for plugin-owned state (share counter, watcher tip).
+ * On-disk persistence for the plugin's share counter.
  *
- * Co-located with tokens.json under:
+ * Stored in the plugin's legacy Application Support location:
  *   ~/Library/Application Support/tanagram/lore/plugin-state.json
  *
  * Uses the same atomic-write pattern as lib/auth/store.ts (mkdir+0700,
@@ -9,10 +9,9 @@
  * the file. See store.ts for the full rationale.
  *
  * Schema rejects malformed files (throws). A missing file returns defaults
- * silently — nothing is written until the first successful share.
- *
- * `watcher_prompt_dismissed` exists for a future dismiss flow; today it is
- * always written as `false` on new state and has no setter exposed here.
+ * silently — nothing is written until the first successful share. Zod's
+ * default object behavior strips legacy consent and watcher-tip fields while
+ * preserving the share count.
  */
 
 import fsp from 'node:fs/promises';
@@ -20,25 +19,18 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 
-export const PluginStateSchema = z.object({
+const PluginStateSchema = z.object({
   share_count: z.number().int().nonnegative(),
-  watcher_prompt_dismissed: z.boolean(),
-  consent: z
-    .enum(['unconsented', 'consented', 'declined', 'installed', 'idle', 'capturing'])
-    .default('unconsented'),
 });
 
 export type PluginState = z.infer<typeof PluginStateSchema>;
-export type ConsentState = PluginState['consent'];
 
 const DEFAULT_STATE: PluginState = {
   share_count: 0,
-  watcher_prompt_dismissed: false,
-  consent: 'unconsented',
 };
 
 /**
- * Absolute path to plugin-state.json, co-located with tokens.json.
+ * Absolute path to plugin-state.json.
  */
 export function pluginStateFilePath(home: string = os.homedir()): string {
   return path.join(
@@ -111,15 +103,6 @@ export async function writePluginState(
     await fsp.unlink(tmp).catch(() => {});
     throw err;
   }
-}
-
-/**
- * Returns true if the watcher tip SHOULD be appended this time.
- * Evaluate BEFORE incrementing share_count (tip shows on shares 1, 2, 3;
- * suppressed on 4+).
- */
-export function shouldShowWatcherTip(state: PluginState): boolean {
-  return state.share_count < 3 && !state.watcher_prompt_dismissed;
 }
 
 function isEnoent(err: unknown): boolean {

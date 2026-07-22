@@ -17,6 +17,13 @@ Amp is intentionally different: the Amp adapter exports an explicitly resolved A
 - Reuse the Lore cloud MCP for thread storage and retrieval instead of reimplementing those APIs locally.
 - Keep share flows efficient by sending transcript bytes straight from the local host to Lore.
 - Keep Amp support thin: Amp owns command/tool registration and thread export; shared Lore code owns auth, upload, and cloud reads.
+- Keep background-capture configuration and lifecycle out of the plugin.
+
+## Capture ownership boundary
+
+The plugin is a discovery, manual-share, local-read, authentication, and cloud-consumption surface. It does not configure, install, enable, disable, inspect, or execute background capture.
+
+The Lore desktop app owns its embedded capture process and the **Configure Session Uploads** UI. The interactive CLI owns standalone upload configuration (`lore configure`) and background-agent lifecycle. Plugin code must not shell out to those CLI commands or maintain a parallel consent/configuration state machine. The only plugin state retained is a share counter used to show the desktop discovery tip after the first three successful manual shares; legacy consent and dismissal fields are ignored when older state files are read.
 
 ## Package layout
 

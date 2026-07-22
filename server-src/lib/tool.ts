@@ -55,14 +55,11 @@ export type ToolInputSchema = {
 
 /**
  * Per-call dispatch options forwarded from the top-level dispatcher.
- * Currently carries only `home` (for plugin-state reads/writes in tests),
- * but may grow as new cross-cutting concerns arise.
+ * Carries test overrides for filesystem and browser behavior.
  */
 export type ToolDispatchOpts = {
   /** Override for `os.homedir()` — used in tests to isolate state in a tmp dir. */
   home?: string;
-  /** Override for `process.platform` — used in tests to avoid platform-specific shell-outs. */
-  platform?: NodeJS.Platform | string;
   /** Override for opening the device-flow browser URL in tests. */
   openBrowser?: (url: string) => { status: number | null };
 };

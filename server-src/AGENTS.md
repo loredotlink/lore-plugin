@@ -1,5 +1,5 @@
 # Plugin server invariants
 
-- **Persistent capture requires recorded consent.** Persist `PluginState.consent = 'consented'` before installing/enabling the background agent. Disabling and post-install control-plane calls are exempt. Covered by `tools/lore_consent.test.ts`; write-before-install ordering remains review-enforced.
-- **Ordinary tools are install-free.** Do not route auth, cloud reads/search, local session reads, or manual `share_session` through the Lore CLI, and do not gate the MCP dispatcher on capture consent. `lore_consent`, `lore_configure`, and post-install capture controls are exempt. Covered in part by `index.test.ts`.
+- **The plugin has no capture control plane.** Do not configure, install, enable, disable, inspect, or otherwise manage background capture from plugin code. Do not shell out to the Lore CLI for capture behavior. Desktop owns embedded capture; the interactive CLI owns standalone configuration and background-agent lifecycle. See ADR-0015.
+- **Ordinary tools are install-free.** Do not route auth, cloud reads/search, local session reads, or manual `share_session` through the Lore CLI.
 - **Tool results contain no inline resources.** Do not return `CallToolResult.content[*].type === 'resource'`; tests/adapter fixtures may prove rejection or text conversion. Current focused tests cover known paths, not every future result boundary. See ADR-0012.
