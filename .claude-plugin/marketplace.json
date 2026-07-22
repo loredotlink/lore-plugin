@@ -11,7 +11,7 @@
       "source": "./",
       "description": "Share local sessions to Lore and read Lore threads back.",
       "homepage": "https://lore.link/share",
-      "license": "MIT",
+      "license": "FSL-1.1-ALv2",
       "category": "collaboration",
       "keywords": ["lore", "loredotlink", "share", "threads", "collaboration"]
     }
