@@ -20931,9 +20931,6 @@ var threadEventTypeSchema = exports_external.enum([
   "thread.block.appended",
   "thread.dock.turn_completed",
   "thread.dock.turn_cancel_requested",
-  "thread.comment.created",
-  "thread.comment.updated",
-  "thread.comment.deleted",
   "thread.participant.joined",
   "thread.participant.left",
   "user.followed",
@@ -21028,21 +21025,6 @@ var threadEventSchema = exports_external.discriminatedUnion("type", [
     type: exports_external.literal("thread.dock.turn_cancel_requested"),
     payload: exports_external.object({
       thread_id: exports_external.string().min(1)
-    })
-  }),
-  threadEventBase.extend({
-    type: exports_external.literal("thread.comment.created"),
-    payload: exports_external.object({ comment: exports_external.lazy(() => threadCommentSchema) })
-  }),
-  threadEventBase.extend({
-    type: exports_external.literal("thread.comment.updated"),
-    payload: exports_external.object({ comment: exports_external.lazy(() => threadCommentSchema) })
-  }),
-  threadEventBase.extend({
-    type: exports_external.literal("thread.comment.deleted"),
-    payload: exports_external.object({
-      thread_id: exports_external.string().min(1),
-      comment_id: exports_external.string().min(1)
     })
   }),
   threadEventBase.extend({
@@ -21869,22 +21851,6 @@ var planBlockSchema = threadBlockObjectSchema.extend({
   type: exports_external.literal("plan"),
   prosemirror_json: prosemirrorJsonSchema3,
   thread_file_id: exports_external.string().min(1)
-});
-var threadCommentAuthorSchema = exports_external.object({
-  id: exports_external.string().min(1),
-  display_name: exports_external.string().min(1),
-  avatar_url: exports_external.string().nullable()
-});
-var threadCommentSchema = exports_external.object({
-  id: exports_external.string().min(1),
-  thread_id: exports_external.string().min(1),
-  author_id: exports_external.string().min(1).nullable(),
-  author: threadCommentAuthorSchema.nullable(),
-  parent_comment_id: exports_external.string().min(1).nullable(),
-  content: exports_external.string(),
-  created_at: exports_external.string().datetime(),
-  updated_at: exports_external.string().datetime(),
-  deleted_at: exports_external.string().datetime().nullable()
 });
 var threadShareResponseSchema = exports_external.object({
   type: exports_external.literal("thread_share"),
