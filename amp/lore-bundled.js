@@ -1,12 +1,16 @@
 // @bun
 var __defProp = Object.defineProperty;
+var __returnValue = (v) => v;
+function __exportSetter(name, newValue) {
+  this[name] = __returnValue.bind(null, newValue);
+}
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, {
       get: all[name],
       enumerable: true,
       configurable: true,
-      set: (newValue) => all[name] = () => newValue
+      set: __exportSetter.bind(all, name)
     });
 };
 
@@ -11518,7 +11522,7 @@ function finalize(ctx, schema) {
     result.$schema = "http://json-schema.org/draft-07/schema#";
   } else if (ctx.target === "draft-04") {
     result.$schema = "http://json-schema.org/draft-04/schema#";
-  } else if (ctx.target === "openapi-3.0") {} else {}
+  } else if (ctx.target === "openapi-3.0") {}
   if (ctx.external?.uri) {
     const id = ctx.external.registry.get(schema)?.id;
     if (!id)
@@ -11762,7 +11766,7 @@ var literalProcessor = (schema, ctx, json, _params) => {
     if (val === undefined) {
       if (ctx.unrepresentable === "throw") {
         throw new Error("Literal `undefined` cannot be represented in JSON Schema");
-      } else {}
+      }
     } else if (typeof val === "bigint") {
       if (ctx.unrepresentable === "throw") {
         throw new Error("BigInt literals cannot be represented in JSON Schema");
@@ -18292,23 +18296,17 @@ var c = initContract();
 var errorSchema = exports_external.object({ message: exports_external.string() });
 var prosemirrorJsonSchema = exports_external.record(exports_external.string(), exports_external.unknown());
 var docIdSchema = exports_external.string().regex(/^doc_[0-9A-Za-z]{22}$/);
-var projectIdSchema = exports_external.string().regex(/^proj_[0-9A-Za-z]{22}$/);
 var docStatusValues = ["active", "archived"];
 var docStatusSchema = exports_external.enum(docStatusValues);
 var docAuthorSchema = exports_external.object({
   id: exports_external.string().min(1),
   display_name: exports_external.string().min(1)
 });
-var docProjectSchema = exports_external.object({
-  id: projectIdSchema,
-  name: exports_external.string().min(1)
-});
 var docListObjectSchema = exports_external.object({
   id: docIdSchema,
   title: exports_external.string().min(1),
   status: docStatusSchema,
   author: docAuthorSchema,
-  project: docProjectSchema.nullable(),
   created_at: exports_external.string().datetime(),
   updated_at: exports_external.string().datetime(),
   archived_at: exports_external.string().datetime().nullable()
@@ -18319,13 +18317,11 @@ var docListResponseSchema = exports_external.object({
   objects: exports_external.array(docListObjectSchema)
 });
 var listDocsQuerySchema = exports_external.object({
-  project_id: projectIdSchema.optional(),
   status: docStatusSchema.optional()
 });
 var createDocRequestSchema = exports_external.object({
   title: exports_external.string().trim().min(1).max(300).optional(),
-  prosemirror_json: prosemirrorJsonSchema.optional(),
-  project_id: projectIdSchema.nullable().optional()
+  prosemirror_json: prosemirrorJsonSchema.optional()
 });
 var createDocResponseSchema = exports_external.object({
   id: docIdSchema,
@@ -18334,7 +18330,6 @@ var createDocResponseSchema = exports_external.object({
 var updateDocRequestSchema = exports_external.object({
   title: exports_external.string().trim().min(1).max(300).optional(),
   prosemirror_json: prosemirrorJsonSchema.optional(),
-  project_id: projectIdSchema.nullable().optional(),
   status: docStatusSchema.optional()
 }).refine((body) => Object.keys(body).length > 0, {
   message: "At least one field must be provided"
@@ -18349,7 +18344,6 @@ var getDocResponseSchema = exports_external.object({
   prosemirror_json: prosemirrorJsonSchema,
   status: docStatusSchema,
   author: docAuthorSchema,
-  project: docProjectSchema.nullable(),
   created_at: exports_external.string().datetime(),
   updated_at: exports_external.string().datetime(),
   archived_at: exports_external.string().datetime().nullable()
@@ -18367,7 +18361,7 @@ var docsContract = c.router({
       401: errorSchema,
       403: errorSchema
     },
-    summary: "List docs in the authenticated user\u2019s organization. Optional project_id filter scopes to a single project."
+    summary: "List docs in the authenticated user\u2019s organization."
   },
   createDoc: {
     method: "POST",
@@ -18380,10 +18374,9 @@ var docsContract = c.router({
       201: createDocResponseSchema,
       401: errorSchema,
       403: errorSchema,
-      404: errorSchema,
       422: errorSchema
     },
-    summary: "Create a doc. If project_id is provided, the doc is scoped to that project; otherwise it lives at the workspace level."
+    summary: "Create a doc in the authenticated user\u2019s organization."
   },
   getDoc: {
     method: "GET",
@@ -18400,7 +18393,7 @@ var docsContract = c.router({
       403: errorSchema,
       404: errorSchema
     },
-    summary: "Get a doc by id with its rich-text body and parent project (if any)"
+    summary: "Get a doc by id with its rich-text body"
   },
   updateDoc: {
     method: "PATCH",
@@ -18419,7 +18412,7 @@ var docsContract = c.router({
       404: errorSchema,
       422: errorSchema
     },
-    summary: "Update a doc title, rich-text body, status, or parent project."
+    summary: "Update a doc title, rich-text body, or status."
   },
   deleteDoc: {
     method: "DELETE",
@@ -19052,280 +19045,9 @@ var referencesContract = c6.router({
   }
 });
 
-// ../contracts/src/projects.ts
+// ../contracts/src/quests.ts
 var c7 = initContract();
 var errorSchema7 = exports_external.object({ message: exports_external.string() });
-var prosemirrorJsonSchema2 = exports_external.record(exports_external.string(), exports_external.unknown());
-var projectIdSchema2 = exports_external.string().regex(/^proj_[0-9A-Za-z]{22}$/);
-var projectStatusValues = ["active", "archived"];
-var projectStatusSchema = exports_external.enum(projectStatusValues);
-var projectAuthorSchema = exports_external.object({
-  id: exports_external.string().min(1),
-  display_name: exports_external.string().min(1)
-});
-var projectThreadSchema = exports_external.object({
-  thread_id: exports_external.string().min(1),
-  title: exports_external.string().min(1),
-  added_at: exports_external.string().datetime(),
-  added_by: projectAuthorSchema
-});
-var projectListObjectSchema = exports_external.object({
-  id: projectIdSchema2,
-  name: exports_external.string().min(1),
-  status: projectStatusSchema,
-  author: projectAuthorSchema,
-  thread_count: exports_external.number().int().nonnegative(),
-  doc_count: exports_external.number().int().nonnegative(),
-  created_at: exports_external.string().datetime(),
-  updated_at: exports_external.string().datetime(),
-  archived_at: exports_external.string().datetime().nullable()
-});
-var projectListResponseSchema = exports_external.object({
-  type: exports_external.literal("list"),
-  list_type: exports_external.literal("project"),
-  objects: exports_external.array(projectListObjectSchema)
-});
-var listProjectsQuerySchema = exports_external.object({
-  status: projectStatusSchema.optional()
-});
-var createProjectRequestSchema = exports_external.object({
-  name: exports_external.string().trim().min(1).max(200),
-  prosemirror_json: prosemirrorJsonSchema2.optional()
-});
-var createProjectResponseSchema = exports_external.object({
-  id: projectIdSchema2,
-  created_at: exports_external.string().datetime()
-});
-var updateProjectRequestSchema = exports_external.object({
-  name: exports_external.string().trim().min(1).max(200).optional(),
-  prosemirror_json: prosemirrorJsonSchema2.optional()
-}).refine((body) => Object.keys(body).length > 0, {
-  message: "At least one field must be provided"
-});
-var updateProjectResponseSchema = exports_external.object({
-  id: projectIdSchema2,
-  updated_at: exports_external.string().datetime()
-});
-var archiveProjectRequestSchema = exports_external.object({
-  archived: exports_external.boolean()
-});
-var archiveProjectResponseSchema = exports_external.object({
-  id: projectIdSchema2,
-  status: projectStatusSchema,
-  archived_at: exports_external.string().datetime().nullable()
-});
-var getProjectResponseSchema = exports_external.object({
-  id: projectIdSchema2,
-  name: exports_external.string().min(1),
-  prosemirror_json: prosemirrorJsonSchema2,
-  status: projectStatusSchema,
-  author: projectAuthorSchema,
-  summary: exports_external.string().nullable(),
-  summary_at: exports_external.string().datetime().nullable(),
-  created_at: exports_external.string().datetime(),
-  updated_at: exports_external.string().datetime(),
-  archived_at: exports_external.string().datetime().nullable(),
-  threads: exports_external.array(projectThreadSchema),
-  docs: exports_external.array(docListObjectSchema)
-});
-var synthesizeProjectResponseSchema = exports_external.object({
-  id: projectIdSchema2,
-  summary: exports_external.string(),
-  summary_at: exports_external.string().datetime()
-});
-var addProjectThreadRequestSchema = exports_external.object({
-  thread_id: exports_external.string().min(1).max(64)
-});
-var addProjectThreadResponseSchema = projectThreadSchema;
-var threadProjectSchema = exports_external.object({
-  id: projectIdSchema2,
-  name: exports_external.string().min(1),
-  status: projectStatusSchema
-});
-var listThreadProjectsResponseSchema = exports_external.object({
-  type: exports_external.literal("list"),
-  list_type: exports_external.literal("thread_project"),
-  objects: exports_external.array(threadProjectSchema)
-});
-var projectsContract = c7.router({
-  listProjects: {
-    method: "GET",
-    path: "/projects",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    query: listProjectsQuerySchema,
-    responses: {
-      200: projectListResponseSchema,
-      401: errorSchema7
-    },
-    summary: "List projects in the authenticated user\u2019s organization"
-  },
-  createProject: {
-    method: "POST",
-    path: "/projects",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: createProjectRequestSchema,
-    responses: {
-      201: createProjectResponseSchema,
-      401: errorSchema7,
-      422: errorSchema7
-    },
-    summary: "Create a new project in the authenticated user\u2019s organization"
-  },
-  getProject: {
-    method: "GET",
-    path: "/projects/:projectId",
-    pathParams: exports_external.object({
-      projectId: projectIdSchema2
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    responses: {
-      200: getProjectResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
-    },
-    summary: "Get a project with its attached threads and child docs. The project description is the canonical mention source for project-scoped @-mentions."
-  },
-  updateProject: {
-    method: "PATCH",
-    path: "/projects/:projectId",
-    pathParams: exports_external.object({
-      projectId: projectIdSchema2
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: updateProjectRequestSchema,
-    responses: {
-      200: updateProjectResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      422: errorSchema7
-    },
-    summary: "Update a project\u2019s name or rich-text body."
-  },
-  archiveProject: {
-    method: "POST",
-    path: "/projects/:projectId/archive",
-    pathParams: exports_external.object({
-      projectId: projectIdSchema2
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: archiveProjectRequestSchema,
-    responses: {
-      200: archiveProjectResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
-    },
-    summary: "Archive (soft-delete) or unarchive a project"
-  },
-  synthesizeProject: {
-    method: "POST",
-    path: "/projects/:projectId/summary",
-    pathParams: exports_external.object({
-      projectId: projectIdSchema2
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: exports_external.object({}).optional(),
-    responses: {
-      200: synthesizeProjectResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      409: errorSchema7,
-      503: errorSchema7
-    },
-    summary: "Generate (or refresh) the project\u2019s one-paragraph summary from its pinned threads. Persists to projects.summary."
-  },
-  addProjectThread: {
-    method: "POST",
-    path: "/projects/:projectId/threads",
-    pathParams: exports_external.object({
-      projectId: projectIdSchema2
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: addProjectThreadRequestSchema,
-    responses: {
-      201: addProjectThreadResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      409: errorSchema7,
-      422: errorSchema7
-    },
-    summary: "Pin an existing visible thread to this project. Idempotent \u2014 re-adding returns the existing membership."
-  },
-  removeProjectThread: {
-    method: "DELETE",
-    path: "/projects/:projectId/threads/:threadId",
-    pathParams: exports_external.object({
-      projectId: projectIdSchema2,
-      threadId: exports_external.string().min(1).max(64)
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: exports_external.object({}).optional(),
-    responses: {
-      204: exports_external.object({}),
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
-    },
-    summary: "Remove a thread membership from a project"
-  },
-  listThreadProjects: {
-    method: "GET",
-    path: "/threads/:threadId/projects",
-    pathParams: exports_external.object({
-      threadId: exports_external.string().min(1).max(64)
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    responses: {
-      200: listThreadProjectsResponseSchema,
-      401: errorSchema7
-    },
-    summary: "List the projects a thread belongs to that are visible to the viewer (org/author scope). Returns an empty list when there are none."
-  },
-  deleteProject: {
-    method: "DELETE",
-    path: "/projects/:projectId",
-    pathParams: exports_external.object({
-      projectId: projectIdSchema2
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: exports_external.object({}).optional(),
-    responses: {
-      204: exports_external.object({}),
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
-    },
-    summary: "Permanently delete a project. Thread memberships and tasks are removed (FK cascade); child docs are detached (project_id set null)."
-  }
-});
-
-// ../contracts/src/quests.ts
-var c8 = initContract();
-var errorSchema8 = exports_external.object({ message: exports_external.string() });
 var questIdSchema = exports_external.string().regex(/^quest_[0-9A-Za-z]{22}$/);
 var questStatusValues = ["active", "archived"];
 var questStatusSchema = exports_external.enum(questStatusValues);
@@ -19416,7 +19138,7 @@ var questCaptureListResponseSchema = exports_external.object({
 var updateQuestCaptureRequestSchema = exports_external.object({
   thread_id: exports_external.string().min(1).nullable().describe("Reassign the capture to this thread; null unassigns it")
 });
-var questsContract = c8.router({
+var questsContract = c7.router({
   listQuests: {
     method: "GET",
     path: "/quests",
@@ -19426,7 +19148,7 @@ var questsContract = c8.router({
     query: listQuestsQuerySchema,
     responses: {
       200: questListResponseSchema,
-      401: errorSchema8
+      401: errorSchema7
     },
     summary: "List the authenticated user\u2019s quests"
   },
@@ -19439,10 +19161,10 @@ var questsContract = c8.router({
     body: createQuestRequestSchema,
     responses: {
       201: createQuestResponseSchema,
-      401: errorSchema8,
-      403: errorSchema8,
-      409: errorSchema8,
-      422: errorSchema8
+      401: errorSchema7,
+      403: errorSchema7,
+      409: errorSchema7,
+      422: errorSchema7
     },
     summary: "Create a quest owned by the authenticated user"
   },
@@ -19458,8 +19180,8 @@ var questsContract = c8.router({
     query: listQuestCapturesQuerySchema,
     responses: {
       200: questCaptureListResponseSchema,
-      401: errorSchema8,
-      404: errorSchema8
+      401: errorSchema7,
+      404: errorSchema7
     },
     summary: "List the background agent\u2019s captures for a quest (author-only), with fresh presigned download URLs"
   },
@@ -19475,17 +19197,17 @@ var questsContract = c8.router({
     body: updateQuestCaptureRequestSchema,
     responses: {
       200: questCaptureGroupSchema,
-      401: errorSchema8,
-      404: errorSchema8,
-      422: errorSchema8
+      401: errorSchema7,
+      404: errorSchema7,
+      422: errorSchema7
     },
     summary: "Reassign a capture to a different coding session (thread), or unassign it"
   }
 });
 
 // ../contracts/src/regions.ts
-var c9 = initContract();
-var errorSchema9 = exports_external.object({ message: exports_external.string() });
+var c8 = initContract();
+var errorSchema8 = exports_external.object({ message: exports_external.string() });
 var regionIdSchema = exports_external.string().regex(/^reg_[0-9A-Za-z]{22}$/);
 var threadIdSchema = exports_external.string().min(1).max(64);
 var regionStatusValues = ["active", "quiet", "dormant", "archived"];
@@ -19648,7 +19370,7 @@ var addRegionThreadRequestSchema = exports_external.object({
   thread_id: threadIdSchema
 });
 var addRegionThreadResponseSchema = regionThreadSchema;
-var regionsContract = c9.router({
+var regionsContract = c8.router({
   listRegions: {
     method: "GET",
     path: "/regions",
@@ -19658,8 +19380,8 @@ var regionsContract = c9.router({
     query: listRegionsQuerySchema,
     responses: {
       200: regionListResponseSchema,
-      401: errorSchema9,
-      403: errorSchema9
+      401: errorSchema8,
+      403: errorSchema8
     },
     summary: "List regions in the authenticated user\u2019s organization"
   },
@@ -19672,10 +19394,10 @@ var regionsContract = c9.router({
     body: createRegionRequestSchema,
     responses: {
       201: createRegionResponseSchema,
-      401: errorSchema9,
-      403: errorSchema9,
-      409: errorSchema9,
-      422: errorSchema9
+      401: errorSchema8,
+      403: errorSchema8,
+      409: errorSchema8,
+      422: errorSchema8
     },
     summary: "Create a new region in the authenticated user\u2019s organization"
   },
@@ -19690,9 +19412,9 @@ var regionsContract = c9.router({
     }),
     responses: {
       200: getRegionResponseSchema,
-      401: errorSchema9,
-      403: errorSchema9,
-      404: errorSchema9
+      401: errorSchema8,
+      403: errorSchema8,
+      404: errorSchema8
     },
     summary: "Get a region with its attached threads and rolled-up contributors"
   },
@@ -19708,11 +19430,11 @@ var regionsContract = c9.router({
     body: updateRegionRequestSchema,
     responses: {
       200: updateRegionResponseSchema,
-      401: errorSchema9,
-      403: errorSchema9,
-      404: errorSchema9,
-      409: errorSchema9,
-      422: errorSchema9
+      401: errorSchema8,
+      403: errorSchema8,
+      404: errorSchema8,
+      409: errorSchema8,
+      422: errorSchema8
     },
     summary: "Rename a region or update its blurb"
   },
@@ -19728,9 +19450,9 @@ var regionsContract = c9.router({
     body: archiveRegionRequestSchema,
     responses: {
       200: archiveRegionResponseSchema,
-      401: errorSchema9,
-      403: errorSchema9,
-      404: errorSchema9
+      401: errorSchema8,
+      403: errorSchema8,
+      404: errorSchema8
     },
     summary: "Archive or unarchive a region"
   },
@@ -19746,11 +19468,11 @@ var regionsContract = c9.router({
     body: addRegionThreadRequestSchema,
     responses: {
       201: addRegionThreadResponseSchema,
-      401: errorSchema9,
-      403: errorSchema9,
-      404: errorSchema9,
-      409: errorSchema9,
-      422: errorSchema9
+      401: errorSchema8,
+      403: errorSchema8,
+      404: errorSchema8,
+      409: errorSchema8,
+      422: errorSchema8
     },
     summary: "Attach an existing visible thread to this region. Primary if the thread has no other primary, otherwise secondary (up to 2). Idempotent."
   },
@@ -19763,9 +19485,9 @@ var regionsContract = c9.router({
     body: suggestRegionsForThreadsRequestSchema,
     responses: {
       200: suggestRegionsForThreadsResponseSchema,
-      401: errorSchema9,
-      403: errorSchema9,
-      422: errorSchema9
+      401: errorSchema8,
+      403: errorSchema8,
+      422: errorSchema8
     },
     summary: 'Batch lookup: for each thread id, return the highest-scoring active region in the viewer\u2019s workspace (or omit when no region clears the threshold). Used by the per-thread inline "Add to <region>" suggestion chip.'
   },
@@ -19780,8 +19502,8 @@ var regionsContract = c9.router({
     }),
     responses: {
       200: listUnfiledThreadsResponseSchema,
-      401: errorSchema9,
-      403: errorSchema9
+      401: errorSchema8,
+      403: errorSchema8
     },
     summary: "List threads in the authenticated user\u2019s scope that are not yet attached to any region (default last 30 days)."
   },
@@ -19794,8 +19516,8 @@ var regionsContract = c9.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: transitionRegionLifecycleResponseSchema,
-      401: errorSchema9,
-      403: errorSchema9
+      401: errorSchema8,
+      403: errorSchema8
     },
     summary: "Sweep regions and demote/promote between active/quiet/dormant based on last_active_at. Idempotent \u2014 safe to run on a cron or on-demand."
   },
@@ -19808,8 +19530,8 @@ var regionsContract = c9.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: refreshRegionsResponseSchema,
-      401: errorSchema9,
-      403: errorSchema9
+      401: errorSchema8,
+      403: errorSchema8
     },
     summary: "Run the clustering pipeline against unfiled threads and create regions from the resulting clusters. Deterministic pass is synchronous; LLM pass is dispatched as an async Inngest event and lands more regions ~30s later."
   },
@@ -19825,11 +19547,11 @@ var regionsContract = c9.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: synthesizeRegionResponseSchema,
-      401: errorSchema9,
-      403: errorSchema9,
-      404: errorSchema9,
-      409: errorSchema9,
-      503: errorSchema9
+      401: errorSchema8,
+      403: errorSchema8,
+      404: errorSchema8,
+      409: errorSchema8,
+      503: errorSchema8
     },
     summary: "Generate (or refresh) the region\u2019s synthesized status using recent decisions and threads. Persists to regions.synthesized_status."
   },
@@ -19846,17 +19568,17 @@ var regionsContract = c9.router({
     body: exports_external.object({}).optional(),
     responses: {
       204: exports_external.object({}),
-      401: errorSchema9,
-      403: errorSchema9,
-      404: errorSchema9
+      401: errorSchema8,
+      403: errorSchema8,
+      404: errorSchema8
     },
     summary: "Remove a thread membership from a region"
   }
 });
 
 // ../contracts/src/search.ts
-var c10 = initContract();
-var errorSchema10 = exports_external.object({ message: exports_external.string() });
+var c9 = initContract();
+var errorSchema9 = exports_external.object({ message: exports_external.string() });
 var globalSearchThreadResultSchema = exports_external.object({
   id: exports_external.string().min(1),
   title: exports_external.string(),
@@ -19885,7 +19607,7 @@ var globalSearchResponseSchema = exports_external.object({
 var globalSearchQuerySchema = exports_external.object({
   q: exports_external.string().trim().min(1).max(80)
 });
-var searchContract = c10.router({
+var searchContract = c9.router({
   globalSearch: {
     method: "GET",
     path: "/search",
@@ -19895,8 +19617,8 @@ var searchContract = c10.router({
     query: globalSearchQuerySchema,
     responses: {
       200: globalSearchResponseSchema,
-      401: errorSchema10,
-      422: errorSchema10
+      401: errorSchema9,
+      422: errorSchema9
     },
     summary: "Global navbar search. Threads and people are searched globally (subject to thread visibility); skills are scoped to the viewer workspace. Max 5 results per kind."
   }
@@ -19915,6 +19637,7 @@ var threadEventTypeSchema = exports_external.enum([
   "thread.listable",
   "thread.completed",
   "thread.block.appended",
+  "thread.detail.invalidated",
   "thread.dock.turn_completed",
   "thread.dock.turn_cancel_requested",
   "thread.participant.joined",
@@ -19996,6 +19719,12 @@ var threadEventSchema = exports_external.discriminatedUnion("type", [
       block_id: exports_external.string().min(1),
       block_type: threadBlockKindSchema,
       excerpt: exports_external.string().nullable()
+    })
+  }),
+  threadEventBase.extend({
+    type: exports_external.literal("thread.detail.invalidated"),
+    payload: exports_external.object({
+      thread_id: exports_external.string().min(1)
     })
   }),
   threadEventBase.extend({
@@ -20162,7 +19891,8 @@ var executorRequestSchema = exports_external.discriminatedUnion("op", [
   base.extend({ op: exports_external.literal("git.command"), args: exports_external.array(exports_external.string()).min(1) }),
   base.extend({ op: exports_external.literal("shell.exec"), command: exports_external.string().min(1), timeoutMs: exports_external.number().int().positive().max(600000).optional() }),
   base.extend({ op: exports_external.literal("uploadAsset"), path: exports_external.string().min(1), kind: exports_external.string().min(1) }),
-  base.extend({ op: exports_external.literal("browser.act"), action: exports_external.string().min(1), params: exports_external.record(exports_external.string(), exports_external.unknown()).optional() })
+  base.extend({ op: exports_external.literal("browser.act"), action: exports_external.string().min(1), params: exports_external.record(exports_external.string(), exports_external.unknown()).optional() }),
+  base.extend({ op: exports_external.literal("ui.progress"), phase: exports_external.enum(["thinking", "responding"]) })
 ]);
 var executorResponseSchema = exports_external.union([
   base.extend({ ok: exports_external.literal(true), output: exports_external.string() }),
@@ -20194,7 +19924,7 @@ var dockTurnRequestSchema = exports_external.object({
   tools: exports_external.array(dockTurnToolSchema).max(64),
   messages: exports_external.array(dockTurnMessageSchema).min(1).max(2000)
 });
-var c11 = initContract();
+var c10 = initContract();
 var publicEmailDomains = [
   "gmail.com",
   "googlemail.com",
@@ -20291,7 +20021,7 @@ var threadSummarySchema2 = exports_external.object({
 var threadDetailsSchema = threadSummarySchema2.extend({
   messages: exports_external.array(messageSchema)
 });
-var errorSchema11 = exports_external.object({
+var errorSchema10 = exports_external.object({
   message: exports_external.string()
 });
 var demoNotSeededResponseSchema = exports_external.object({
@@ -20425,7 +20155,8 @@ var userProfileResourceSchema = exports_external.object({
   visible_thread_count: exports_external.number().int().nonnegative(),
   follower_count: exports_external.number().int().nonnegative(),
   following_count: exports_external.number().int().nonnegative(),
-  published_project_count: exports_external.number().int().nonnegative(),
+  total_input_tokens: exports_external.number().int().nonnegative().optional(),
+  total_output_tokens: exports_external.number().int().nonnegative().optional(),
   is_following: exports_external.boolean(),
   is_self: exports_external.boolean()
 });
@@ -20566,17 +20297,17 @@ var updateThreadBlockCommentThreadResponseSchema = exports_external.object({
   id: exports_external.string().min(1),
   resolved_at: exports_external.string().datetime().nullable()
 });
-var prosemirrorJsonSchema3 = exports_external.record(exports_external.string(), exports_external.unknown());
+var prosemirrorJsonSchema2 = exports_external.record(exports_external.string(), exports_external.unknown());
 var planRevisionSchema = exports_external.object({
   id: planRevisionIdSchema,
   body: exports_external.string().nullable(),
   created_at: exports_external.string().datetime(),
-  prosemirror_json: prosemirrorJsonSchema3.nullable(),
+  prosemirror_json: prosemirrorJsonSchema2.nullable(),
   comment_threads: exports_external.array(planCommentThreadSchema)
 });
 var getPlanRevisionResponseSchema = planRevisionSchema.extend({
   body: exports_external.string(),
-  prosemirror_json: prosemirrorJsonSchema3
+  prosemirror_json: prosemirrorJsonSchema2
 });
 var getPlanResponseSchema = exports_external.object({
   id: planIdSchema,
@@ -20835,7 +20566,7 @@ var threadBlockListResponseSchema = exports_external.object({
 });
 var planBlockSchema = threadBlockObjectSchema.extend({
   type: exports_external.literal("plan"),
-  prosemirror_json: prosemirrorJsonSchema3,
+  prosemirror_json: prosemirrorJsonSchema2,
   thread_file_id: exports_external.string().min(1)
 });
 var threadShareResponseSchema = exports_external.object({
@@ -21053,7 +20784,9 @@ var askThreadsAbstainReasons = [
   "unsupported_entity_kind",
   "coverage_none",
   "empty_retrieval",
-  "retrieval_error"
+  "retrieval_error",
+  "capped",
+  "timed_out"
 ];
 var askThreadsOutcomeSchema = exports_external.object({
   class: exports_external.enum(askThreadsOutcomeClasses),
@@ -21157,7 +20890,7 @@ var askThreadsTraceStepSchema = exports_external.object({
   id: exports_external.string().min(1),
   kind: exports_external.enum(["agent", "tool", "retrieval", "answer", "sources"]),
   title: exports_external.string().min(1),
-  status: exports_external.enum(["completed"]),
+  status: exports_external.enum(["started", "completed", "failed"]),
   summary: exports_external.string().min(1),
   duration_ms: exports_external.number().nonnegative().optional(),
   metadata: exports_external.object({
@@ -21171,8 +20904,19 @@ var askThreadsTraceStepSchema = exports_external.object({
     thread_id: exports_external.string().min(1).optional(),
     thread_ids: exports_external.array(exports_external.string().min(1)).optional(),
     question: exports_external.string().min(1).optional(),
-    entity_target: askThreadsTraceEntityTargetSchema.optional().describe("Decision-tracer plan echo \u2014 the entity kinds/query the planner targeted."),
-    entity_coverage: exports_external.enum(["graph_match", "raw_evidence_only", "none"]).optional().describe("Decision-tracer coverage tier the composer resolved for entityTarget."),
+    phase: exports_external.enum(["tier0", "injected_search", "model_step", "tool_call", "finalization"]).optional(),
+    tier0_resolver: exports_external.enum(["identifier", "recency", "aggregate"]).optional(),
+    tier0_result: exports_external.enum(["claimed", "declined"]).optional(),
+    tool_name: exports_external.enum(["search_threads", "find_exact", "read_thread", "lookup_knowledge", "aggregate"]).optional(),
+    tool_call_id: exports_external.string().min(1).optional(),
+    model_step: exports_external.number().int().nonnegative().optional(),
+    parallel_fan_out: exports_external.number().int().positive().optional(),
+    origin: exports_external.enum(["tier0", "injected-search", "driver"]).optional(),
+    error_kind: exports_external.enum(["unknown_person", "visibility_rejection", "timeout", "retrieval_error"]).optional(),
+    termination_reason: exports_external.enum(["answered", "abstained", "capped", "timed_out", "tool_error"]).optional(),
+    registered_sources: exports_external.number().int().nonnegative().optional(),
+    entity_target: askThreadsTraceEntityTargetSchema.optional().describe("Historical decision-tracer plan echo retained for snapshot compatibility."),
+    entity_coverage: exports_external.enum(["graph_match", "raw_evidence_only", "none"]).optional().describe("Historical decision-tracer coverage tier retained for snapshot compatibility."),
     entity_anchors: exports_external.array(askThreadsTraceEntityAnchorSchema).optional().describe("Decision-tracer anchor ids + combined scores (ids/scores only, no payload text)."),
     entity_chain: askThreadsTraceDecisionChainSchema.optional().describe("Decision-tracer supersedes-chain summary for the top anchor, including cycleDetected."),
     entity_attribution: askThreadsTraceDecisionAttributionSchema.optional().describe("Decision-tracer attribution for the top anchor: person entity ids + edge kinds (no names).")
@@ -21332,6 +21076,8 @@ var threadResourceSchema = exports_external.object({
   last_activity_at: exports_external.string().datetime().nullable(),
   blocks: threadBlockListResponseSchema,
   user_message_count: exports_external.number().int().nonnegative(),
+  total_input_tokens: exports_external.number().int().nonnegative().optional(),
+  total_output_tokens: exports_external.number().int().nonnegative().optional(),
   files_touched: exports_external.array(exports_external.string()),
   skills_invoked: exports_external.array(exports_external.string()),
   slash_commands_invoked: exports_external.array(exports_external.string()),
@@ -21493,6 +21239,8 @@ var threadListObjectSchema = exports_external.object({
   last_activity_at: exports_external.string().datetime().nullable(),
   blocks: threadBlockListResponseSchema,
   user_message_count: exports_external.number().int().nonnegative(),
+  total_input_tokens: exports_external.number().int().nonnegative().optional(),
+  total_output_tokens: exports_external.number().int().nonnegative().optional(),
   files_touched: exports_external.array(exports_external.string()),
   skills_invoked: exports_external.array(exports_external.string()),
   harness: harnessSchema,
@@ -22566,15 +22314,6 @@ var userActivityCommentPostedSchema = exports_external.object({
     visibility: exports_external.enum(["private", "workspace", "public"])
   })
 });
-var userActivityProjectPublishedSchema = exports_external.object({
-  type: exports_external.literal("project_published"),
-  occurred_at: exports_external.string().datetime(),
-  id: exports_external.string().min(1),
-  project: exports_external.object({
-    id: exports_external.string().min(1),
-    name: exports_external.string().min(1)
-  })
-});
 var userActivityFollowedSchema = exports_external.object({
   type: exports_external.literal("user_followed"),
   occurred_at: exports_external.string().datetime(),
@@ -22585,29 +22324,12 @@ var userActivityEventSchema = exports_external.discriminatedUnion("type", [
   userActivityThreadCreatedSchema,
   userActivityThreadUpdatedSchema,
   userActivityCommentPostedSchema,
-  userActivityProjectPublishedSchema,
   userActivityFollowedSchema
 ]);
 var userActivityListResponseSchema = exports_external.object({
   type: exports_external.literal("list"),
   list_type: exports_external.literal("user_activity"),
   objects: exports_external.array(userActivityEventSchema)
-});
-var profilePublishedProjectSchema = exports_external.object({
-  id: exports_external.string().min(1),
-  name: exports_external.string().min(1),
-  excerpt: exports_external.string(),
-  published_at: exports_external.string().datetime(),
-  updated_at: exports_external.string().datetime()
-});
-var profilePublishedProjectListResponseSchema = exports_external.object({
-  type: exports_external.literal("list"),
-  list_type: exports_external.literal("profile_published_project"),
-  objects: exports_external.array(profilePublishedProjectSchema)
-});
-var publishProjectResponseSchema = exports_external.object({
-  id: exports_external.string().min(1),
-  published_at: exports_external.string().datetime().nullable()
 });
 var profileImageKindSchema = exports_external.enum(["avatar", "banner"]);
 var profileImageContentTypeSchema = exports_external.enum([
@@ -22636,7 +22358,7 @@ var threadCoverUploadResponseSchema = exports_external.object({
   cover_generated_at: exports_external.string().min(1)
 });
 var profileByHandleResponseSchema = userProfileResourceSchema;
-var apiContract = c11.router({
+var apiContract = c10.router({
   health: {
     method: "GET",
     path: "/health",
@@ -22693,9 +22415,9 @@ var apiContract = c11.router({
     }),
     responses: {
       200: whoAmIResponseSchema,
-      401: errorSchema11,
-      500: errorSchema11,
-      502: errorSchema11,
+      401: errorSchema10,
+      500: errorSchema10,
+      502: errorSchema10,
       503: demoNotSeededResponseSchema
     },
     summary: "Validate a WorkOS Bearer token and return member plus user fields"
@@ -22705,7 +22427,7 @@ var apiContract = c11.router({
     path: "/cli-auth/config",
     responses: {
       200: cliAuthConfigResponseSchema,
-      503: errorSchema11
+      503: errorSchema10
     },
     summary: "Return public WorkOS CLI Auth configuration for the Lore CLI"
   },
@@ -22714,7 +22436,7 @@ var apiContract = c11.router({
     path: "/desktop-auth/config",
     responses: {
       200: cliAuthConfigResponseSchema,
-      503: errorSchema11
+      503: errorSchema10
     },
     summary: "Return public WorkOS configuration for the Lore desktop app (dedicated native client, separate from the web/CLI client)"
   },
@@ -22726,7 +22448,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: cliStatusResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "Return whether the viewer has connected the Lore CLI (i.e., uploaded any thread under a non-unspecified harness), plus the latest upload timestamp and the desktop app equivalent (installed/connected/last upload)."
   },
@@ -22739,10 +22461,10 @@ var apiContract = c11.router({
     body: recordHeartbeatRequestSchema,
     responses: {
       200: recordHeartbeatResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11,
-      422: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      422: errorSchema10
     },
     summary: "Record (or refresh) a presence heartbeat for the authenticated user against one of their own threads. Idempotent; the daemon should call this every ~30s while a session is open."
   },
@@ -22755,7 +22477,7 @@ var apiContract = c11.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: recordProductPresenceResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "Record (or refresh) an authenticated Lore web-app presence heartbeat for the current user. Browser clients call this while the product is open."
   },
@@ -22768,7 +22490,7 @@ var apiContract = c11.router({
     body: recordUploadHeartbeatRequestSchema,
     responses: {
       200: recordUploadHeartbeatResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "Record a liveness heartbeat for the authenticated user's upload watch daemon (standalone CLI or the desktop app's embedded import loop). Idempotent; the daemon calls this ~every 60s and on each completed upload (upload_completed:true). Daemon-internal \u2014 not a `lore` subcommand."
   },
@@ -22782,7 +22504,7 @@ var apiContract = c11.router({
     body: recordUploadHeartbeatRequestSchema,
     responses: {
       200: recordUploadHeartbeatResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "Deprecated alias of recordUploadHeartbeat for pre-rename CLI/desktop builds."
   },
@@ -22794,8 +22516,8 @@ var apiContract = c11.router({
     }),
     responses: {
       200: liveThreadListResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "List people with user-block activity in the last 10 minutes. Includes the viewer\u2019s workspace and followed authors, deduped per author, max 10."
   },
@@ -22808,7 +22530,7 @@ var apiContract = c11.router({
     query: listThreadsQuerySchema,
     responses: {
       200: threadListResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "List threads visible to the authenticated user"
   },
@@ -22821,7 +22543,7 @@ var apiContract = c11.router({
     body: createThreadRequestSchema,
     responses: {
       201: createThreadResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "Create an empty Lore-native thread for the authenticated user"
   },
@@ -22836,7 +22558,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: threadResourceSchema,
-      404: errorSchema11
+      404: errorSchema10
     },
     summary: "Load a visible thread by id"
   },
@@ -22851,7 +22573,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: threadParseStatusResponseSchema,
-      404: errorSchema11
+      404: errorSchema10
     },
     summary: "Load only the transcript parsing status for a visible thread"
   },
@@ -22867,9 +22589,9 @@ var apiContract = c11.router({
     body: resolveThreadShareHighlightRequestSchema,
     responses: {
       200: resolveThreadShareHighlightResponseSchema,
-      401: errorSchema11,
-      404: errorSchema11,
-      409: errorSchema11
+      401: errorSchema10,
+      404: errorSchema10,
+      409: errorSchema10
     },
     summary: "Resolve a natural-language share highlight to a canonical /thread URL with block anchors"
   },
@@ -22885,7 +22607,7 @@ var apiContract = c11.router({
     body: exports_external.object({}),
     responses: {
       202: requestThreadAccessResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "Notify a thread owner that a signed-in viewer is requesting access"
   },
@@ -22898,7 +22620,7 @@ var apiContract = c11.router({
     body: askThreadsRequestSchema,
     responses: {
       200: askThreadsResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "Answer a question from the top 20 visible decision matches, grouped back into threads"
   },
@@ -22914,8 +22636,8 @@ var apiContract = c11.router({
     body: forkThreadRequestSchema,
     responses: {
       200: forkSummarySchema,
-      403: errorSchema11,
-      404: errorSchema11
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Generate a distilled source handoff for continuing a visible coding-assistant session"
   },
@@ -22931,7 +22653,7 @@ var apiContract = c11.router({
     query: threadBlockListQuerySchema,
     responses: {
       200: threadBlockListResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "List blocks for a visible thread"
   },
@@ -22948,8 +22670,8 @@ var apiContract = c11.router({
     body: createThreadBlockCommentThreadRequestSchema,
     responses: {
       201: createThreadBlockCommentThreadResponseSchema,
-      401: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      404: errorSchema10
     },
     summary: "Create a new block-level comment thread on a visible thread block"
   },
@@ -22967,9 +22689,9 @@ var apiContract = c11.router({
     body: createThreadBlockCommentRequestSchema,
     responses: {
       201: createThreadBlockCommentResponseSchema,
-      401: errorSchema11,
-      404: errorSchema11,
-      409: errorSchema11
+      401: errorSchema10,
+      404: errorSchema10,
+      409: errorSchema10
     },
     summary: "Reply to a block-level comment thread on a visible thread block"
   },
@@ -22987,8 +22709,8 @@ var apiContract = c11.router({
     body: updateThreadBlockCommentThreadRequestSchema,
     responses: {
       200: updateThreadBlockCommentThreadResponseSchema,
-      401: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      404: errorSchema10
     },
     summary: "Resolve or reopen a block-level comment thread on a visible thread block"
   },
@@ -23001,7 +22723,7 @@ var apiContract = c11.router({
     query: listSkillsQuerySchema,
     responses: {
       200: skillIndexResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "List visible workspace skills"
   },
@@ -23014,7 +22736,7 @@ var apiContract = c11.router({
     query: reconcileLocalSkillsQuerySchema,
     responses: {
       200: localSkillReconciliationResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "Reconcile scanned local skills with visible server-side skills by ID or content hash"
   },
@@ -23026,7 +22748,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: sharedSkillsResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "List public skills the viewer installed or copied (Shared with you)"
   },
@@ -23044,8 +22766,8 @@ var apiContract = c11.router({
     }),
     responses: {
       200: skillDetailResponseSchema,
-      401: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      404: errorSchema10
     },
     summary: "Get visible skill details by stable skill ID"
   },
@@ -23060,7 +22782,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: exports_external.union([sharedSkillTemplateSchema, sharedSkillPreviewSchema]),
-      404: errorSchema11
+      404: errorSchema10
     },
     summary: "Public no-login preview of a skill shared by link (install requires auth)"
   },
@@ -23075,7 +22797,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: sharedSkillPreviewSchema,
-      404: errorSchema11
+      404: errorSchema10
     },
     summary: "Public no-login metadata preview of a skill by id (install requires auth)"
   },
@@ -23093,12 +22815,12 @@ var apiContract = c11.router({
     }),
     responses: {
       200: skillShareTemplateDraftResponseSchema,
-      401: errorSchema11,
+      401: errorSchema10,
       402: creditsExhaustedErrorSchema,
-      403: errorSchema11,
-      404: errorSchema11,
-      409: errorSchema11,
-      502: errorSchema11
+      403: errorSchema10,
+      404: errorSchema10,
+      409: errorSchema10,
+      502: errorSchema10
     },
     summary: "Generate (or regenerate) the anonymized share-template draft for a skill (owner only)"
   },
@@ -23114,9 +22836,9 @@ var apiContract = c11.router({
     body: publishSkillShareTemplateRequestSchema,
     responses: {
       200: skillShareTemplatePublishedResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11,
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
       409: skillShareTemplateSecretsBlockedSchema
     },
     summary: "Publish a share template, making the public share link serve the anonymized body (owner only)"
@@ -23134,11 +22856,11 @@ var apiContract = c11.router({
     body: updateSkillShareTemplateSlotsRequestSchema,
     responses: {
       200: skillShareTemplateDraftResponseSchema,
-      400: errorSchema11,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11,
-      409: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      409: errorSchema10
     },
     summary: "Edit a draft share template's slot values before publishing (owner only)"
   },
@@ -23154,9 +22876,9 @@ var apiContract = c11.router({
     body: setSkillVisibilityRequestSchema,
     responses: {
       200: skillDetailResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Set a skill's visibility (owner only); minting a share link when set to public"
   },
@@ -23169,7 +22891,7 @@ var apiContract = c11.router({
     query: listArtifactsQuerySchema,
     responses: {
       200: artifactIndexResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "List visible artifacts (files produced by Cowork or native threads)"
   },
@@ -23184,8 +22906,8 @@ var apiContract = c11.router({
     }),
     responses: {
       200: artifactDetailResponseSchema,
-      401: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      404: errorSchema10
     },
     summary: "Get a visible artifact with a presigned download URL"
   },
@@ -23198,8 +22920,8 @@ var apiContract = c11.router({
     body: presignBackfillArtifactsRequestSchema,
     responses: {
       200: presignBackfillArtifactsResponseSchema,
-      401: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      404: errorSchema10
     },
     summary: "Presign artifact-byte uploads for an existing session thread (backfill)"
   },
@@ -23212,8 +22934,8 @@ var apiContract = c11.router({
     body: commitBackfillArtifactsRequestSchema,
     responses: {
       200: commitBackfillArtifactsResponseSchema,
-      401: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      404: errorSchema10
     },
     summary: "Promote backfilled artifact bytes into artifact rows"
   },
@@ -23226,10 +22948,10 @@ var apiContract = c11.router({
     body: shareArtifactRequestSchema,
     responses: {
       200: shareArtifactResponseSchema,
-      400: errorSchema11,
-      401: errorSchema11,
-      404: errorSchema11,
-      413: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10,
+      404: errorSchema10,
+      413: errorSchema10
     },
     summary: "Publish a live local artifact to its session thread and get a shareable web URL"
   },
@@ -23249,9 +22971,9 @@ var apiContract = c11.router({
     }),
     responses: {
       200: skillPackageDownloadResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Download metadata for an accepted skill package or visible proposal package"
   },
@@ -23267,9 +22989,9 @@ var apiContract = c11.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: skillInstallationResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Register the current user as an installer of a visible skill"
   },
@@ -23285,7 +23007,7 @@ var apiContract = c11.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: skillInstallationSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "Unregister the current user installation for a skill (idempotent)"
   },
@@ -23301,9 +23023,9 @@ var apiContract = c11.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: unpublishSkillResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Unpublish an owned workspace skill and remove it from the team catalog"
   },
@@ -23319,11 +23041,11 @@ var apiContract = c11.router({
     body: createSkillShareRequestSchema,
     responses: {
       200: skillShareResponseSchema,
-      400: errorSchema11,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11,
-      422: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      422: errorSchema10
     },
     summary: "Grant a person view access to a skill by Lore user id or email (owner only). Re-adding a revoked grantee un-revokes; capped at 50 active grants per skill."
   },
@@ -23338,9 +23060,9 @@ var apiContract = c11.router({
     }),
     responses: {
       200: skillSharesListResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "List the active per-person grants on a skill with pending/active status (owner only)."
   },
@@ -23357,9 +23079,9 @@ var apiContract = c11.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: skillShareResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Soft-revoke a per-person grant on a skill (owner only)."
   },
@@ -23375,9 +23097,9 @@ var apiContract = c11.router({
     body: updateSkillInstallationRequestSchema,
     responses: {
       200: skillInstallationSchema,
-      401: errorSchema11,
-      404: errorSchema11,
-      422: errorSchema11
+      401: errorSchema10,
+      404: errorSchema10,
+      422: errorSchema10
     },
     summary: "Record the accepted skill version installed by the current user"
   },
@@ -23389,7 +23111,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: skillInstallationSyncResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "List installed skills with latest accepted version metadata"
   },
@@ -23405,8 +23127,8 @@ var apiContract = c11.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: skillCopyResponseSchema,
-      401: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      404: errorSchema10
     },
     summary: "Record that the viewer copied a public skill (for the Shared with you tab)"
   },
@@ -23417,9 +23139,9 @@ var apiContract = c11.router({
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
     responses: {
       200: skillProposalListResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "List package proposals visible to the current user for a skill"
   },
@@ -23434,11 +23156,11 @@ var apiContract = c11.router({
     body: approveSkillProposalRequestSchema,
     responses: {
       200: skillPackageVersionResourceSchema,
-      400: errorSchema11,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11,
-      409: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      409: errorSchema10
     },
     summary: "Approve a package proposal by proposal ID"
   },
@@ -23453,10 +23175,10 @@ var apiContract = c11.router({
     body: rejectSkillProposalRequestSchema.optional(),
     responses: {
       200: skillProposalResourceSchema,
-      400: errorSchema11,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Reject a package proposal by proposal ID"
   },
@@ -23471,8 +23193,8 @@ var apiContract = c11.router({
     }),
     responses: {
       200: threadDecisionListResponseSchema,
-      401: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      404: errorSchema10
     },
     summary: "List AI-extracted user decisions for a thread, in chronological order"
   },
@@ -23485,7 +23207,7 @@ var apiContract = c11.router({
     query: decisionGraphQuerySchema,
     responses: {
       200: decisionGraphResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "Visible threads active in a date range with their extracted decisions, grouped by thread author"
   },
@@ -23501,9 +23223,9 @@ var apiContract = c11.router({
     body: updateThreadRequestSchema,
     responses: {
       200: threadResourceSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Update thread visibility (author only)"
   },
@@ -23519,9 +23241,9 @@ var apiContract = c11.router({
     body: exports_external.object({}).optional(),
     responses: {
       204: exports_external.null(),
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Soft-delete a thread (author only)"
   },
@@ -23540,10 +23262,10 @@ var apiContract = c11.router({
         cover_status: threadCoverStatusSchema,
         how_to_status: threadHowToStatusSchema
       }),
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11,
-      429: errorSchema11.extend({
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      429: errorSchema10.extend({
         retry_after_seconds: exports_external.number().int().nonnegative()
       })
     },
@@ -23561,11 +23283,11 @@ var apiContract = c11.router({
     body: threadCoverUploadRequestSchema,
     responses: {
       200: threadCoverUploadResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11,
-      413: errorSchema11,
-      422: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      413: errorSchema10,
+      422: errorSchema10
     },
     summary: "Upload a custom cover image for a thread. Author or Tanagram admin only. Bytes go to the same storage substrate the AI cover uses (S3 in prod, filesystem in dev), and the threads row is updated atomically with the new cover_storage_url, cover_status='ready', cover_generated_at=now, cover_model='user-uploaded' so subsequent re-rolls / how-to fan-outs treat the upload like any other ready cover."
   },
@@ -23581,11 +23303,11 @@ var apiContract = c11.router({
     body: createThreadShareRequestSchema,
     responses: {
       200: threadShareResponseSchema,
-      400: errorSchema11,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11,
-      422: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      422: errorSchema10
     },
     summary: "Grant a person view access to a thread by Lore user id or email (author only). Re-adding a revoked grantee un-revokes; capped at 50 active grants per thread."
   },
@@ -23600,9 +23322,9 @@ var apiContract = c11.router({
     }),
     responses: {
       200: threadSharesListResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "List the active per-person grants on a thread with pending/active status (author only)."
   },
@@ -23619,9 +23341,9 @@ var apiContract = c11.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: threadShareResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Soft-revoke a per-person grant on a thread (author only)."
   },
@@ -23636,7 +23358,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: threadPreviewResponseSchema,
-      404: errorSchema11
+      404: errorSchema10
     },
     summary: "Visibility-redacted metadata for OG / social preview consumers. Optional auth: a viewer to whom the thread is visible (including via a share) gets the full preview; others get the private/workspace stub."
   },
@@ -23651,7 +23373,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: userProfileResourceSchema,
-      404: errorSchema11
+      404: errorSchema10
     },
     summary: "Public profile for a user. Optional auth \u2014 unauthenticated viewers see only public thread metadata; signed-in viewers see counts scoped to the threads they'd normally be able to access."
   },
@@ -23664,9 +23386,9 @@ var apiContract = c11.router({
     body: updateCurrentUserRequestSchema,
     responses: {
       200: userSchema,
-      401: errorSchema11,
-      409: errorSchema11,
-      422: errorSchema11
+      401: errorSchema10,
+      409: errorSchema10,
+      422: errorSchema10
     },
     summary: "Update the authenticated user profile"
   },
@@ -23679,7 +23401,7 @@ var apiContract = c11.router({
     body: exports_external.object({}),
     responses: {
       202: deleteMyThreadDataResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "Queue deletion of the authenticated user\u2019s Lore threads, parsed thread content, and related uploaded thread storage objects."
   },
@@ -23692,7 +23414,7 @@ var apiContract = c11.router({
     body: exports_external.object({}),
     responses: {
       200: reenableMyThreadUploadsResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "Clear the authenticated user\u2019s thread upload disable marker."
   },
@@ -23705,7 +23427,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: profileByHandleResponseSchema,
-      404: errorSchema11
+      404: errorSchema10
     },
     summary: "Resolve a public profile by handle \u2014 same shape as GET /users/:id but keyed on the user's chosen handle."
   },
@@ -23717,7 +23439,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: referralListResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "Total count plus the most-recent referees the authenticated user has attributed via `/?invited_by=\u2026` invite links. Mirrors the inviter side of users.referred_by_user_id."
   },
@@ -23733,7 +23455,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: userActivityListResponseSchema,
-      404: errorSchema11
+      404: errorSchema10
     },
     summary: "Reverse-chronological activity feed for a user, scoped to what the viewer can see (same visibility rules as listThreads)."
   },
@@ -23746,7 +23468,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: userContributionsResponseSchema,
-      404: errorSchema11
+      404: errorSchema10
     },
     summary: "Daily contribution counts for the trailing 365 days \u2014 counts thread blocks the user authored on threads visible to the viewer."
   },
@@ -23759,7 +23481,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: userFollowListResponseSchema,
-      404: errorSchema11
+      404: errorSchema10
     },
     summary: "List the users following a given user."
   },
@@ -23772,7 +23494,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: userFollowListResponseSchema,
-      404: errorSchema11
+      404: errorSchema10
     },
     summary: "List the users a given user is following."
   },
@@ -23785,7 +23507,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: followSuggestionListResponseSchema,
-      404: errorSchema11
+      404: errorSchema10
     },
     summary: "Mutual-follow suggestions for a viewer: walks the viewer's followees one hop further and ranks candidates by mutual count. Replaces a 1 \u2192 24 client-side fan-out across `/users/:seed/following`."
   },
@@ -23799,10 +23521,10 @@ var apiContract = c11.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: followUserResponseSchema,
-      401: errorSchema11,
-      404: errorSchema11,
-      409: errorSchema11,
-      422: errorSchema11
+      401: errorSchema10,
+      404: errorSchema10,
+      409: errorSchema10,
+      422: errorSchema10
     },
     summary: "Follow another user. Idempotent \u2014 repeating the call is a no-op."
   },
@@ -23816,55 +23538,10 @@ var apiContract = c11.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: unfollowUserResponseSchema,
-      401: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      404: errorSchema10
     },
     summary: "Unfollow a user. Idempotent \u2014 repeating the call is a no-op."
-  },
-  listProfilePublishedProjects: {
-    method: "GET",
-    path: "/users/:id/projects",
-    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    responses: {
-      200: profilePublishedProjectListResponseSchema,
-      404: errorSchema11
-    },
-    summary: "Projects the user has published to their public profile."
-  },
-  publishProject: {
-    method: "POST",
-    path: "/projects/:id/publish",
-    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: exports_external.object({}).optional(),
-    responses: {
-      200: publishProjectResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
-    },
-    summary: "Publish a project to the author's public profile. Stamps published_at with `now()`. Author-only."
-  },
-  unpublishProject: {
-    method: "DELETE",
-    path: "/projects/:id/publish",
-    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: exports_external.object({}).optional(),
-    responses: {
-      200: publishProjectResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
-    },
-    summary: "Remove a project from the author's public profile."
   },
   uploadProfileImage: {
     method: "POST",
@@ -23875,9 +23552,9 @@ var apiContract = c11.router({
     body: profileImageUploadRequestSchema,
     responses: {
       200: profileImageUploadResponseSchema,
-      401: errorSchema11,
-      413: errorSchema11,
-      422: errorSchema11
+      401: errorSchema10,
+      413: errorSchema10,
+      422: errorSchema10
     },
     summary: "Upload an avatar or banner image (base64-encoded JSON body). The API streams the bytes to its configured storage substrate using its own credentials and returns the canonical storage URL the client passes to PATCH /users/me."
   },
@@ -23889,7 +23566,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: organizationMemberListResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "List members of the authenticated user\u2019s organization"
   },
@@ -23902,10 +23579,10 @@ var apiContract = c11.router({
     body: createOrganizationInviteRequestSchema,
     responses: {
       201: createOrganizationInviteResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      409: errorSchema11,
-      422: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      409: errorSchema10,
+      422: errorSchema10
     },
     summary: "Invite a teammate to the authenticated user\u2019s workspace via WorkOS AuthKit"
   },
@@ -23918,9 +23595,9 @@ var apiContract = c11.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: ensureWorkOSOrganizationResponseSchema,
-      401: errorSchema11,
-      422: errorSchema11,
-      503: errorSchema11
+      401: errorSchema10,
+      422: errorSchema10,
+      503: errorSchema10
     },
     summary: "Create or reuse a WorkOS organization for the authenticated user\u2019s non-public email domain and add the user as a member."
   },
@@ -23932,8 +23609,8 @@ var apiContract = c11.router({
     }),
     responses: {
       200: repositoryListResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "List repositories known to the authenticated user\u2019s organization across threads and building blocks"
   },
@@ -23946,8 +23623,8 @@ var apiContract = c11.router({
     body: createBuildingBlockSnapshotsRequestSchema,
     responses: {
       201: createBuildingBlockSnapshotsResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "Create building block snapshots for the authenticated user\u2019s organization"
   },
@@ -23962,9 +23639,9 @@ var apiContract = c11.router({
     }),
     responses: {
       200: getPlanResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Load a thread-backed plan container visible to the authenticated user, including all visible plan revisions in that thread (only the latest revision carries body + prosemirror_json; older revisions are metadata-only and load on demand via getPlanRevision)"
   },
@@ -23980,9 +23657,9 @@ var apiContract = c11.router({
     }),
     responses: {
       200: getPlanRevisionResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Load a single revision body + prosemirror_json + comment threads for a thread-backed plan container. Used to fetch non-latest revisions on demand without paying for every revision when the plan is first opened"
   },
@@ -23998,10 +23675,10 @@ var apiContract = c11.router({
     body: createPlanCommentThreadRequestSchema,
     responses: {
       201: createPlanCommentThreadResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11,
-      422: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      422: errorSchema10
     },
     summary: "Create a new inline comment thread on a specific revision inside a thread-backed plan container"
   },
@@ -24018,10 +23695,10 @@ var apiContract = c11.router({
     body: createPlanCommentRequestSchema,
     responses: {
       201: createPlanCommentResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11,
-      409: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      409: errorSchema10
     },
     summary: "Reply to an inline comment thread on a thread-backed plan container"
   },
@@ -24038,9 +23715,9 @@ var apiContract = c11.router({
     body: updatePlanCommentThreadRequestSchema,
     responses: {
       200: updatePlanCommentThreadResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Resolve or reopen an inline comment thread on a thread-backed plan container"
   },
@@ -24053,8 +23730,8 @@ var apiContract = c11.router({
     query: listPlansQuerySchema,
     responses: {
       200: planListResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "List thread-backed plan containers visible to the authenticated user in their organization, ordered by latest visible revision and optionally filtered by author or repository"
   },
@@ -24067,8 +23744,8 @@ var apiContract = c11.router({
     query: listBuildingBlockSnapshotsQuerySchema,
     responses: {
       200: buildingBlockSnapshotListResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "List building block snapshots for the authenticated user\u2019s organization and repo origin path"
   },
@@ -24080,7 +23757,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: uploadSessionListResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "List recent upload sessions for the authenticated user"
   },
@@ -24093,8 +23770,8 @@ var apiContract = c11.router({
     query: listUploadApiKeysQuerySchema,
     responses: {
       200: uploadApiKeyListResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "List Upload API keys owned by the authenticated user in a workspace"
   },
@@ -24107,9 +23784,9 @@ var apiContract = c11.router({
     body: createUploadApiKeyRequestSchema,
     responses: {
       201: createUploadApiKeyResponseSchema,
-      400: errorSchema11,
-      401: errorSchema11,
-      403: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "Create an Upload API key and return the raw key exactly once"
   },
@@ -24125,9 +23802,9 @@ var apiContract = c11.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: uploadApiKeyResourceSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Revoke an Upload API key owned by the authenticated user"
   },
@@ -24140,9 +23817,9 @@ var apiContract = c11.router({
     query: listWorkosUserApiKeysQuerySchema,
     responses: {
       200: workosUserApiKeyListResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      502: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      502: errorSchema10
     },
     summary: "List WorkOS user API keys owned by the authenticated user in a workspace"
   },
@@ -24155,10 +23832,10 @@ var apiContract = c11.router({
     body: createWorkosUserApiKeyRequestSchema,
     responses: {
       201: createWorkosUserApiKeyResponseSchema,
-      400: errorSchema11,
-      401: errorSchema11,
-      403: errorSchema11,
-      502: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10,
+      403: errorSchema10,
+      502: errorSchema10
     },
     summary: "Create a WorkOS user API key and return the raw key exactly once"
   },
@@ -24174,10 +23851,10 @@ var apiContract = c11.router({
     body: expireWorkosUserApiKeyRequestSchema.optional(),
     responses: {
       200: workosUserApiKeyResourceSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11,
-      502: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      502: errorSchema10
     },
     summary: "Expire a WorkOS user API key owned by the authenticated user"
   },
@@ -24193,10 +23870,10 @@ var apiContract = c11.router({
     body: deleteWorkosUserApiKeyRequestSchema.optional(),
     responses: {
       204: exports_external.undefined(),
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11,
-      502: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      502: errorSchema10
     },
     summary: "Delete a WorkOS user API key owned by the authenticated user"
   },
@@ -24214,9 +23891,9 @@ var apiContract = c11.router({
     }),
     responses: {
       201: uploadSessionResponseSchema,
-      400: errorSchema11,
-      401: errorSchema11,
-      409: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10,
+      409: errorSchema10
     },
     summary: "Create an upload session with presigned URLs for file uploads"
   },
@@ -24236,12 +23913,12 @@ var apiContract = c11.router({
     }),
     responses: {
       200: completeUploadSessionResponseSchema,
-      400: errorSchema11,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11,
-      409: errorSchema11,
-      422: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      409: errorSchema10,
+      422: errorSchema10
     },
     summary: "Complete an upload session after files have been uploaded to storage"
   },
@@ -24254,8 +23931,8 @@ var apiContract = c11.router({
     body: claudeCodeSyncStatusRequestSchema,
     responses: {
       200: claudeCodeSyncStatusResponseSchema,
-      400: errorSchema11,
-      401: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10
     },
     summary: "Return server-side Claude Code block sync status for Spanner JSONL replay"
   },
@@ -24267,8 +23944,8 @@ var apiContract = c11.router({
     }),
     responses: {
       200: adminStatsSchema,
-      401: errorSchema11,
-      403: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "Cross-org operational counts. Tanagram admins only."
   },
@@ -24280,8 +23957,8 @@ var apiContract = c11.router({
     }),
     responses: {
       200: adminOrganizationListResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "List every organization with member and thread counts. Tanagram admins only."
   },
@@ -24295,9 +23972,9 @@ var apiContract = c11.router({
     }),
     responses: {
       200: adminEntityGraphResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Entity graph (persons, foot guns, decisions, and optionally threads) for one organization. Tanagram admins only."
   },
@@ -24310,8 +23987,8 @@ var apiContract = c11.router({
     }),
     responses: {
       200: adminUserListResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "List every user with their org memberships and thread count. Tanagram admins only."
   },
@@ -24324,8 +24001,8 @@ var apiContract = c11.router({
     query: adminListThreadsQuerySchema,
     responses: {
       200: adminThreadListResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "List live threads across every organization. Tanagram admins only."
   },
@@ -24337,8 +24014,8 @@ var apiContract = c11.router({
     }),
     responses: {
       200: adminTweetLeadListResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "List unreplied tweet leads from the last 24h, ranked by relevance. Tanagram admins only."
   },
@@ -24352,9 +24029,9 @@ var apiContract = c11.router({
     body: adminUpdateTweetLeadRequestSchema,
     responses: {
       200: tweetLeadSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Update a tweet lead status (replied/dismissed/new). Tanagram admins only."
   },
@@ -24367,10 +24044,10 @@ var apiContract = c11.router({
     query: adminLookupThreadQuerySchema,
     responses: {
       200: adminThreadLookupResponseSchema,
-      400: errorSchema11,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Look up a thread by thread id, thread file id, or harness session id. Tanagram admins only."
   },
@@ -24381,10 +24058,10 @@ var apiContract = c11.router({
     body: adminForceFollowRequestSchema,
     responses: {
       200: adminForceFollowResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11,
-      422: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      422: errorSchema10
     },
     summary: "Force follower->followee edge. Admin-only and non-destructive."
   },
@@ -24400,9 +24077,9 @@ var apiContract = c11.router({
     body: exports_external.object({}).optional(),
     responses: {
       204: exports_external.null(),
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Permanently remove a thread. Tanagram admins only."
   },
@@ -24418,9 +24095,9 @@ var apiContract = c11.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: adminDeleteSkillResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Permanently remove a skill and its sync records. Tanagram admins only."
   },
@@ -24436,9 +24113,9 @@ var apiContract = c11.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: adminReparseThreadFileResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Re-enqueue parsing for a thread file. Tanagram admins only."
   },
@@ -24454,11 +24131,11 @@ var apiContract = c11.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: adminReprojectThreadResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11,
-      409: errorSchema11,
-      500: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      409: errorSchema10,
+      500: errorSchema10
     },
     summary: "Re-project a thread from its current uploaded transcript or OTEL session. Tanagram admins only."
   },
@@ -24474,9 +24151,9 @@ var apiContract = c11.router({
     query: adminThreadReprojectionStatusQuerySchema,
     responses: {
       200: adminThreadReprojectionStatusResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Get the outcome of an admin-triggered thread re-projection."
   },
@@ -24517,7 +24194,7 @@ var apiContract = c11.router({
     body: createWaitlistEntryRequestSchema,
     responses: {
       201: waitlistEntrySchema,
-      409: errorSchema11
+      409: errorSchema10
     },
     summary: "Create an unauthenticated waitlist entry keyed by (location, contact)."
   },
@@ -24527,8 +24204,8 @@ var apiContract = c11.router({
     body: submitContactMessageRequestSchema,
     responses: {
       200: submitContactMessageResponseSchema,
-      429: errorSchema11,
-      503: errorSchema11
+      429: errorSchema10,
+      503: errorSchema10
     },
     summary: "Submit a contact-form message from the marketing site; emails the Lore team."
   },
@@ -24541,9 +24218,9 @@ var apiContract = c11.router({
     body: createFeedbackRequestSchema,
     responses: {
       201: feedbackEntrySchema,
-      401: errorSchema11,
-      422: errorSchema11,
-      429: errorSchema11
+      401: errorSchema10,
+      422: errorSchema10,
+      429: errorSchema10
     },
     summary: "Submit in-app feedback. Persists to lore.feedback_entries and best-effort posts to the #lore-feedback Slack channel. Rate-limited to 30 submissions/hour per user."
   },
@@ -24559,10 +24236,10 @@ var apiContract = c11.router({
     body: exports_external.object({}).optional(),
     responses: {
       201: shareTokenResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11,
-      409: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      409: errorSchema10
     },
     summary: "Mint a short share-link token for a public thread. Author only. The token powers `/s/:token` short URLs and enables k-factor attribution."
   },
@@ -24578,7 +24255,7 @@ var apiContract = c11.router({
     query: resolveShareTokenQuerySchema,
     responses: {
       200: shareTokenResponseSchema,
-      404: errorSchema11
+      404: errorSchema10
     },
     summary: "Resolve a share-link token to its thread and record the view. Works for signed-out viewers; if a bearer token is present we attribute the view to that Lore user for analytics."
   },
@@ -24590,8 +24267,8 @@ var apiContract = c11.router({
     }),
     responses: {
       200: adminGrowthResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "Share-link k-factor, funnel, sparkline, and top sharers by window. Tanagram admins only."
   },
@@ -24603,8 +24280,8 @@ var apiContract = c11.router({
     }),
     responses: {
       200: adminActiveUsersResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "DAU/WAU/MAU/all-time active-user buckets \u2014 distinct users with product usage: CLI/plugin publishes and web writes + presence on the thread-event spine, plus desktop-app daily activity touches (user_activity_daily); auth/token issuance excluded. Tanagram admins only."
   },
@@ -24619,9 +24296,9 @@ var apiContract = c11.router({
     }),
     responses: {
       200: adminUserPipelineResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Per-user upload-pipeline health drilldown: heartbeat/web presence, 14-day OTEL ingest + rejections, projection ledger, upload sessions, thread parsing, and a computed verdict. Tanagram admins only."
   },
@@ -24633,8 +24310,8 @@ var apiContract = c11.router({
     }),
     responses: {
       200: adminReferralsAnalyticsResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "Cross-organization invite-link funnel: lifetime + 30-day counts, 60-day daily timeseries, top inviters, recent attributions. Tanagram admins only."
   },
@@ -24646,8 +24323,8 @@ var apiContract = c11.router({
     }),
     responses: {
       200: adminOnboardingSourcesResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "Signed-up persons grouped by PostHog `initial_source` first-touch attribution. Powers bucket 1 of /admin's Onboarding flow tab; sourced via HogQL."
   },
@@ -24659,8 +24336,8 @@ var apiContract = c11.router({
     }),
     responses: {
       200: adminEmailTemplateListResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "List transactional email templates and their editable preview fields. Tanagram admins only."
   },
@@ -24676,10 +24353,10 @@ var apiContract = c11.router({
     body: adminEmailTemplatePreviewRequestSchema,
     responses: {
       200: renderedEmailSchema,
-      400: errorSchema11,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Render a transactional email template with supplied values. Tanagram admins only."
   },
@@ -24695,11 +24372,11 @@ var apiContract = c11.router({
     body: adminEmailTemplateSendRequestSchema,
     responses: {
       200: adminEmailTemplateSendResponseSchema,
-      400: errorSchema11,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11,
-      503: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      503: errorSchema10
     },
     summary: "Send a transactional email template through Resend. Tanagram admins only."
   },
@@ -24711,7 +24388,7 @@ var apiContract = c11.router({
     }),
     responses: {
       200: billingStateResponseSchema,
-      401: errorSchema11
+      401: errorSchema10
     },
     summary: "Resolve the caller's plan, features, seat count, and any admin override."
   },
@@ -24724,10 +24401,10 @@ var apiContract = c11.router({
     body: createCheckoutSessionRequestSchema,
     responses: {
       200: createCheckoutSessionResponseSchema,
-      400: errorSchema11,
-      401: errorSchema11,
-      403: errorSchema11,
-      503: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10,
+      403: errorSchema10,
+      503: errorSchema10
     },
     summary: "Start a Stripe Checkout session for Team ($20/seat/mo, min 2)."
   },
@@ -24742,9 +24419,9 @@ var apiContract = c11.router({
     }).optional(),
     responses: {
       200: createBillingPortalResponseSchema,
-      401: errorSchema11,
-      404: errorSchema11,
-      503: errorSchema11
+      401: errorSchema10,
+      404: errorSchema10,
+      503: errorSchema10
     },
     summary: "Open the Stripe customer portal so the subject can manage their subscription."
   },
@@ -24757,11 +24434,11 @@ var apiContract = c11.router({
     body: updateTeamSeatsRequestSchema,
     responses: {
       200: billingSubjectSummarySchema,
-      400: errorSchema11,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11,
-      503: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      503: errorSchema10
     },
     summary: "Adjust the caller-organization's Team seat quantity (admin of that org only)."
   },
@@ -24773,10 +24450,10 @@ var apiContract = c11.router({
     }),
     responses: {
       200: creditSettingsResponseSchema,
-      400: errorSchema11,
-      401: errorSchema11,
-      403: errorSchema11,
-      503: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10,
+      403: errorSchema10,
+      503: errorSchema10
     },
     summary: "Get the caller-organization's credit pool balance + auto-recharge settings."
   },
@@ -24789,10 +24466,10 @@ var apiContract = c11.router({
     body: updateCreditSettingsRequestSchema,
     responses: {
       200: creditSettingsResponseSchema,
-      400: errorSchema11,
-      401: errorSchema11,
-      403: errorSchema11,
-      503: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10,
+      403: errorSchema10,
+      503: errorSchema10
     },
     summary: "Update the caller-organization's auto-recharge settings (billing admin only)."
   },
@@ -24805,10 +24482,10 @@ var apiContract = c11.router({
     body: createCreditTopUpRequestSchema,
     responses: {
       200: createCreditTopUpResponseSchema,
-      400: errorSchema11,
-      401: errorSchema11,
-      403: errorSchema11,
-      503: errorSchema11
+      400: errorSchema10,
+      401: errorSchema10,
+      403: errorSchema10,
+      503: errorSchema10
     },
     summary: "Manually top up the caller-organization's credit pool by charging the saved card."
   },
@@ -24820,8 +24497,8 @@ var apiContract = c11.router({
     }),
     responses: {
       200: adminBillingOverviewResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "List every user and org with current plan + override for the admin panel."
   },
@@ -24833,8 +24510,8 @@ var apiContract = c11.router({
     }),
     responses: {
       200: adminCreditPoolsResponseSchema,
-      401: errorSchema11,
-      403: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10
     },
     summary: "Per-team credit-pool utilization, blended margin, breakage, and overage."
   },
@@ -24850,9 +24527,9 @@ var apiContract = c11.router({
     body: adminPlanOverrideRequestSchema,
     responses: {
       200: adminBillingSubjectSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Admin override for a user's plan tier. Null clears the override."
   },
@@ -24868,13 +24545,12 @@ var apiContract = c11.router({
     body: adminPlanOverrideRequestSchema,
     responses: {
       200: adminBillingSubjectSchema,
-      401: errorSchema11,
-      403: errorSchema11,
-      404: errorSchema11
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
     },
     summary: "Admin override for an organization's plan tier. Null clears the override."
   },
-  projects: projectsContract,
   quests: questsContract,
   regions: regionsContract,
   entities: entitiesContract,
