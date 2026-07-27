@@ -11522,7 +11522,7 @@ function finalize(ctx, schema) {
     result.$schema = "http://json-schema.org/draft-07/schema#";
   } else if (ctx.target === "draft-04") {
     result.$schema = "http://json-schema.org/draft-04/schema#";
-  } else if (ctx.target === "openapi-3.0") {}
+  } else if (ctx.target === "openapi-3.0") {} else {}
   if (ctx.external?.uri) {
     const id = ctx.external.registry.get(schema)?.id;
     if (!id)
@@ -11766,7 +11766,7 @@ var literalProcessor = (schema, ctx, json, _params) => {
     if (val === undefined) {
       if (ctx.unrepresentable === "throw") {
         throw new Error("Literal `undefined` cannot be represented in JSON Schema");
-      }
+      } else {}
     } else if (typeof val === "bigint") {
       if (ctx.unrepresentable === "throw") {
         throw new Error("BigInt literals cannot be represented in JSON Schema");
@@ -20056,6 +20056,7 @@ var userSchema = exports_external.object({
   banner_url: exports_external.string().nullable(),
   share_new_threads_to_workspace: exports_external.boolean(),
   experimental_features_enabled: exports_external.boolean(),
+  allow_skill_content_for_evaluation: exports_external.boolean().optional(),
   onboarded_at: exports_external.string().nullable(),
   thread_data_deletion_requested_at: exports_external.string().nullable(),
   attribution_source: userAttributionSourceSchema.nullable(),
@@ -20117,6 +20118,7 @@ var cliAuthConfigResponseSchema = exports_external.object({
 var updateCurrentUserRequestSchema = exports_external.object({
   share_new_threads_to_workspace: exports_external.boolean().optional(),
   experimental_features_enabled: exports_external.boolean().optional(),
+  allow_skill_content_for_evaluation: exports_external.boolean().optional(),
   onboarded_at: exports_external.union([exports_external.literal("now"), exports_external.null()]).optional(),
   attribution_source: userAttributionSourceSchema.nullable().optional(),
   attribution_source_detail: exports_external.string().max(280).nullable().optional(),
@@ -20905,14 +20907,14 @@ var askThreadsTraceStepSchema = exports_external.object({
     thread_ids: exports_external.array(exports_external.string().min(1)).optional(),
     question: exports_external.string().min(1).optional(),
     phase: exports_external.enum(["tier0", "injected_search", "model_step", "tool_call", "finalization"]).optional(),
-    tier0_resolver: exports_external.enum(["identifier", "recency", "aggregate"]).optional(),
+    tier0_resolver: exports_external.enum(["roster", "identifier", "recency", "aggregate"]).optional(),
     tier0_result: exports_external.enum(["claimed", "declined"]).optional(),
-    tool_name: exports_external.enum(["search_threads", "find_exact", "read_thread", "lookup_knowledge", "aggregate"]).optional(),
+    tool_name: exports_external.enum(["search_threads", "find_exact", "read_thread", "lookup_knowledge", "aggregate", "list_people"]).optional(),
     tool_call_id: exports_external.string().min(1).optional(),
     model_step: exports_external.number().int().nonnegative().optional(),
     parallel_fan_out: exports_external.number().int().positive().optional(),
     origin: exports_external.enum(["tier0", "injected-search", "driver"]).optional(),
-    error_kind: exports_external.enum(["unknown_person", "visibility_rejection", "timeout", "retrieval_error"]).optional(),
+    error_kind: exports_external.enum(["unknown_person", "ambiguous_person", "visibility_rejection", "timeout", "retrieval_error"]).optional(),
     termination_reason: exports_external.enum(["answered", "abstained", "capped", "timed_out", "tool_error"]).optional(),
     registered_sources: exports_external.number().int().nonnegative().optional(),
     entity_target: askThreadsTraceEntityTargetSchema.optional().describe("Historical decision-tracer plan echo retained for snapshot compatibility."),
@@ -21381,6 +21383,7 @@ var skillDetailThreadSchema = exports_external.object({
   skills_invoked: exports_external.array(exports_external.string())
 });
 var skillDetailVersionSchema = exports_external.object({
+  version_id: exports_external.string().nullable().describe("Stable accepted skill version ID; null only for optimistic client-side entries"),
   version: exports_external.number().int().positive().describe("Version timestamp for this SKILL.md body"),
   content_hash: exports_external.string().describe("Content-addressed skill body hash, prefixed by hash type"),
   status: skillVersionStatusSchema.describe("Review status for this skill version"),
@@ -21388,7 +21391,10 @@ var skillDetailVersionSchema = exports_external.object({
   created_by: skillAuthorSchema.nullable().describe("User who uploaded/proposed this version, when known"),
   reviewed_at: exports_external.string().nullable().describe("ISO-8601 timestamp when the owner reviewed this version"),
   reviewed_by: skillAuthorSchema.nullable().describe("Owner who approved or rejected this version"),
-  rejection_reason: exports_external.string().nullable().describe("Owner-provided rejection reason for rejected versions")
+  rejection_reason: exports_external.string().nullable().describe("Owner-provided rejection reason for rejected versions"),
+  is_templatized: exports_external.boolean().optional(),
+  template_variable_count: exports_external.number().int().nonnegative().optional(),
+  template_mapped_location_count: exports_external.number().int().nonnegative().optional()
 });
 var skillDetailResponseSchema = exports_external.object({
   id: exports_external.string(),
@@ -21425,66 +21431,132 @@ var sharedSkillPreviewSchema = exports_external.object({
   has_content: exports_external.boolean(),
   viewer_can_install: exports_external.boolean()
 });
-var skillShareTemplateSlotCategorySchema = exports_external.enum([
+var skillTemplateVariableTypeSchema = exports_external.enum([
+  "text",
   "path",
-  "memory_ref",
-  "save_destination",
-  "org_tool",
-  "person",
-  "id_or_url",
-  "voice",
-  "other"
+  "url",
+  "number",
+  "email"
 ]);
-var skillShareTemplateSlotSchema = exports_external.object({
-  id: exports_external.string().describe('Stable slot id, e.g. "slot_save_destination".'),
-  token: exports_external.string().describe('The literal "{{SLOT_N}}" token as it appears in the template body.'),
-  question: exports_external.string().describe("Recipient-facing interview question for filling this slot."),
-  help: exports_external.string().nullable().describe("Optional guidance shown with the question."),
-  default: exports_external.string().nullable().describe("Safe default value, or null when there is none."),
-  targetLines: exports_external.array(exports_external.number().int().min(1)).describe("1-based line references into the template body, for the redline UI."),
-  required: exports_external.boolean().describe("Whether the recipient must fill this slot."),
-  omittable: exports_external.boolean().describe("Whether the recipient may drop this slot entirely."),
-  fallbackBehavior: exports_external.string().nullable().describe("What the skill does without this slot (free-text; guides the recipient's own AI when customizing)."),
-  category: skillShareTemplateSlotCategorySchema.describe("What kind of personal content the slot replaced.")
+var skillTemplateMappingSchema = exports_external.object({
+  start_byte: exports_external.number().int().nonnegative(),
+  end_byte: exports_external.number().int().positive(),
+  original_text_hash: exports_external.string().min(1)
 });
-var skillShareTemplateSecretFlagSchema = exports_external.object({
-  id: exports_external.string().describe('Stable flag id within the report, e.g. "flag_1".'),
-  pattern: exports_external.string().describe('Which secret pattern matched, e.g. "github_token".'),
-  excerpt: exports_external.string().describe("Short excerpt of the match, for the author redline."),
-  resolved: exports_external.boolean().describe("True once the author confirmed the hit is a false positive.")
+var skillTemplateVariableSchema = exports_external.object({
+  id: exports_external.string().min(1).describe("Stable hidden variable id. Never render this value."),
+  name: exports_external.string().trim().min(1).max(100),
+  description: exports_external.string().trim().max(2000).nullable(),
+  type: skillTemplateVariableTypeSchema,
+  default: exports_external.string().nullable().describe("Initially null for every generated or manual variable."),
+  mappings: exports_external.array(skillTemplateMappingSchema).min(1)
 });
-var skillShareTemplateReportSchema = exports_external.object({
-  strippedByCategory: exports_external.record(exports_external.string(), exports_external.number().int().nonnegative()).describe("Count of slots per category, summarizing what the anonymize pass stripped."),
-  secretFlags: exports_external.array(skillShareTemplateSecretFlagSchema),
-  model: exports_external.string().nullable().describe("Model that ran the anonymize pass, or null when injected."),
-  generatedAt: exports_external.string().describe("ISO timestamp of the anonymize pass.")
+var skillTemplateGenerationProvenanceSchema = exports_external.object({
+  prompt_revision: exports_external.string(),
+  schema_revision: exports_external.string(),
+  resolver_revision: exports_external.string(),
+  model: exports_external.string().nullable(),
+  generated_at: exports_external.string()
 });
-var skillShareTemplateStatusSchema = exports_external.enum(["draft", "published", "revoked"]);
-var skillShareTemplateDraftResponseSchema = exports_external.object({
-  type: exports_external.literal("skill_share_template"),
+var skillVersionTemplateSpecSchema = exports_external.object({
+  schema_version: exports_external.literal(1),
+  source: exports_external.object({
+    path: exports_external.literal("SKILL.md"),
+    sha256: exports_external.string(),
+    byte_length: exports_external.number().int().nonnegative(),
+    encoding: exports_external.literal("utf-8")
+  }),
+  variables: exports_external.array(skillTemplateVariableSchema),
+  provenance: skillTemplateGenerationProvenanceSchema
+});
+var skillVersionDraftStatusSchema = exports_external.enum([
+  "analyzing",
+  "ready",
+  "stale",
+  "rebasing",
+  "publishing",
+  "published"
+]);
+var skillTemplatizationAnalysisOutcomeSchema = exports_external.enum([
+  "generated",
+  "failed",
+  "skipped_size_limit"
+]);
+var skillTemplatizationAnalysisStageSchema = exports_external.enum([
+  "preparing_skill_md",
+  "finding_setup_values",
+  "preparing_template_draft",
+  "saving_draft"
+]);
+var skillVersionDraftResponseSchema = exports_external.object({
+  type: exports_external.literal("skill_version_draft"),
   id: exports_external.string(),
-  status: exports_external.literal("draft"),
-  slots: exports_external.array(skillShareTemplateSlotSchema),
-  report: skillShareTemplateReportSchema,
-  template_preview: exports_external.string().describe("The full anonymized template body, for the author redline."),
-  has_unresolved_secrets: exports_external.boolean()
+  skill_id: exports_external.string(),
+  status: skillVersionDraftStatusSchema,
+  analysis_outcome: skillTemplatizationAnalysisOutcomeSchema.nullable(),
+  analysis_stage: skillTemplatizationAnalysisStageSchema.nullable(),
+  analysis_error: exports_external.string().nullable(),
+  base_version_id: exports_external.string(),
+  base_version: exports_external.number().int().positive(),
+  current_version_id: exports_external.string(),
+  current_version: exports_external.number().int().positive(),
+  source_hash: exports_external.string(),
+  local_source_hash: exports_external.string(),
+  source_snapshot: exports_external.string(),
+  variables: exports_external.array(skillTemplateVariableSchema),
+  revision: exports_external.number().int().nonnegative(),
+  generated_result_retained: exports_external.boolean(),
+  published_version_id: exports_external.string().nullable(),
+  submission_action: exports_external.enum(["publish", "propose"])
+});
+var startSkillTemplatizationRequestSchema = exports_external.object({
+  source_markdown: exports_external.string().max(25 * 1024 * 1024).optional(),
+  reanalyze: exports_external.boolean().optional(),
+  manual: exports_external.boolean().optional(),
+  reconcile_source: exports_external.boolean().optional(),
+  restore_version_id: exports_external.string().min(1).optional()
+}).refine((request) => [
+  request.reanalyze === true,
+  request.manual === true,
+  request.reconcile_source === true,
+  request.restore_version_id !== undefined
+].filter(Boolean).length <= 1, { message: "Choose only one templatization recovery action" }).refine((request) => !request.reconcile_source || request.source_markdown !== undefined, { message: "Local-source reconciliation requires the current SKILL.md" });
+var updateSkillVersionDraftRequestSchema = exports_external.object({
+  revision: exports_external.number().int().nonnegative(),
+  source_hash: exports_external.string().min(1),
+  variables: exports_external.array(skillTemplateVariableSchema)
 });
 var publishSkillShareTemplateRequestSchema = exports_external.object({
-  template_id: exports_external.string().min(1).describe("Draft template to publish, e.g. skt_..."),
-  resolved_flag_ids: exports_external.array(exports_external.string()).optional().describe("Secret-flag ids the author confirms as false positives before the publish gate runs.")
-});
-var updateSkillShareTemplateSlotsRequestSchema = exports_external.object({
-  slots: exports_external.array(skillShareTemplateSlotSchema).describe("Full slot list with edited values; ids and tokens must match the draft.")
+  draft_id: exports_external.string().min(1),
+  revision: exports_external.number().int().nonnegative(),
+  local_source_hash: exports_external.string().min(1).optional()
 });
 var skillShareTemplatePublishedResponseSchema = exports_external.object({
-  type: exports_external.literal("skill_share_template"),
-  id: exports_external.string(),
+  type: exports_external.literal("templatized_skill_version"),
+  draft_id: exports_external.string(),
   status: exports_external.literal("published"),
-  share_url: exports_external.string().describe("Public share link, `${origin}/skills/s/${share_token}`.")
+  version_id: exports_external.string(),
+  version: exports_external.number().int().positive(),
+  stable_url: exports_external.string(),
+  variable_count: exports_external.number().int().nonnegative(),
+  mapped_location_count: exports_external.number().int().nonnegative()
 });
-var skillShareTemplateSecretsBlockedSchema = exports_external.object({
+var skillShareTemplateProposedResponseSchema = exports_external.object({
+  type: exports_external.literal("templatized_skill_proposal"),
+  draft_id: exports_external.string(),
+  status: exports_external.literal("proposed"),
+  proposal_id: exports_external.string(),
+  base_version_id: exports_external.string(),
+  variable_count: exports_external.number().int().nonnegative(),
+  mapped_location_count: exports_external.number().int().nonnegative()
+});
+var skillShareTemplateSubmissionResponseSchema = exports_external.union([
+  skillShareTemplatePublishedResponseSchema,
+  skillShareTemplateProposedResponseSchema
+]);
+var skillVersionDraftConflictSchema = exports_external.object({
   message: exports_external.string(),
-  secret_flags: exports_external.array(skillShareTemplateSecretFlagSchema).optional()
+  current_draft: skillVersionDraftResponseSchema.optional()
 });
 var creditsExhaustedErrorSchema = exports_external.object({
   code: exports_external.literal("credits_exhausted"),
@@ -21501,9 +21573,10 @@ var sharedSkillTemplateSchema = exports_external.object({
   current_version_id: exports_external.string().nullable().optional(),
   has_content: exports_external.boolean(),
   viewer_can_install: exports_external.boolean(),
-  template_body: exports_external.string().describe("The published anonymized SKILL.md body."),
-  slots: exports_external.array(skillShareTemplateSlotSchema),
-  is_customizable: exports_external.literal(true)
+  served_version_id: exports_external.string(),
+  served_version: exports_external.number().int().positive(),
+  variables: exports_external.array(skillTemplateVariableSchema.omit({ id: true, mappings: true })),
+  is_templatized: exports_external.literal(true)
 });
 var artifactSourceSchema = exports_external.enum(["cowork", "native"]);
 var artifactKindSchema = exports_external.enum(["upload", "output"]);
@@ -22810,19 +22883,29 @@ var apiContract = c10.router({
     headers: exports_external.object({
       authorization: exports_external.string().min(1).optional()
     }),
-    body: exports_external.object({
-      regenerate: exports_external.boolean().optional().describe("Force a fresh (billed) anonymize pass instead of reusing the current draft.")
-    }),
+    body: startSkillTemplatizationRequestSchema,
     responses: {
-      200: skillShareTemplateDraftResponseSchema,
+      200: skillVersionDraftResponseSchema,
+      202: skillVersionDraftResponseSchema,
       401: errorSchema10,
-      402: creditsExhaustedErrorSchema,
       403: errorSchema10,
       404: errorSchema10,
-      409: errorSchema10,
-      502: errorSchema10
+      409: errorSchema10
     },
-    summary: "Generate (or regenerate) the anonymized share-template draft for a skill (owner only)"
+    summary: "Start or resume background templatization of a shared skill"
+  },
+  getSkillShareTemplateDraft: {
+    method: "GET",
+    path: "/skills/:id/share-template",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    responses: {
+      200: skillVersionDraftResponseSchema,
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10
+    },
+    summary: "Get the current viewer's templatization draft for a skill"
   },
   publishSkillShareTemplate: {
     method: "POST",
@@ -22835,34 +22918,66 @@ var apiContract = c10.router({
     }),
     body: publishSkillShareTemplateRequestSchema,
     responses: {
-      200: skillShareTemplatePublishedResponseSchema,
+      200: skillShareTemplateSubmissionResponseSchema,
       401: errorSchema10,
       403: errorSchema10,
       404: errorSchema10,
-      409: skillShareTemplateSecretsBlockedSchema
+      409: skillVersionDraftConflictSchema
     },
-    summary: "Publish a share template, making the public share link serve the anonymized body (owner only)"
+    summary: "Publish an immutable templatized skill version"
   },
-  updateSkillShareTemplateSlots: {
+  updateSkillShareTemplateDraft: {
     method: "PATCH",
-    path: "/skills/:id/share-template/:templateId/slots",
+    path: "/skills/:id/share-template/:draftId",
     pathParams: exports_external.object({
       id: exports_external.string().min(1).describe("Stable skill ID, e.g. sk_..."),
-      templateId: exports_external.string().min(1).describe("Draft template ID, e.g. skt_...")
+      draftId: exports_external.string().min(1)
     }),
     headers: exports_external.object({
       authorization: exports_external.string().min(1).optional()
     }),
-    body: updateSkillShareTemplateSlotsRequestSchema,
+    body: updateSkillVersionDraftRequestSchema,
     responses: {
-      200: skillShareTemplateDraftResponseSchema,
+      200: skillVersionDraftResponseSchema,
       400: errorSchema10,
       401: errorSchema10,
       403: errorSchema10,
       404: errorSchema10,
-      409: errorSchema10
+      409: skillVersionDraftConflictSchema
     },
-    summary: "Edit a draft share template's slot values before publishing (owner only)"
+    summary: "Autosave a templatization draft with optimistic concurrency"
+  },
+  rebaseSkillShareTemplateDraft: {
+    method: "POST",
+    path: "/skills/:id/share-template/:draftId/rebase",
+    pathParams: exports_external.object({ id: exports_external.string().min(1), draftId: exports_external.string().min(1) }),
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    body: exports_external.object({
+      revision: exports_external.number().int().nonnegative()
+    }),
+    responses: {
+      200: skillVersionDraftResponseSchema,
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      409: skillVersionDraftConflictSchema
+    },
+    summary: "Atomically rebase a templatization draft onto the current skill version"
+  },
+  retrySaveSkillShareTemplateDraft: {
+    method: "POST",
+    path: "/skills/:id/share-template/:draftId/retry-save",
+    pathParams: exports_external.object({ id: exports_external.string().min(1), draftId: exports_external.string().min(1) }),
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    body: exports_external.object({}),
+    responses: {
+      200: skillVersionDraftResponseSchema,
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      409: skillVersionDraftConflictSchema
+    },
+    summary: "Retry persistence of a retained generated result without rerunning the model"
   },
   setSkillVisibility: {
     method: "PATCH",
@@ -22973,7 +23088,8 @@ var apiContract = c10.router({
       200: skillPackageDownloadResponseSchema,
       401: errorSchema10,
       403: errorSchema10,
-      404: errorSchema10
+      404: errorSchema10,
+      409: errorSchema10
     },
     summary: "Download metadata for an accepted skill package or visible proposal package"
   },
