@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import type { PluginAPI, PluginCommandContext } from '@ampcode/plugin';
 
+import { installPassiveAmpThreadMirror as installReusablePassiveAmpThreadMirror } from './passiveMirror.js';
 import { toAmpToolDefinition } from '../server-src/amp/ampToolAdapter.js';
 import {
   createShareCurrentAmpThreadTool,
@@ -140,7 +141,24 @@ export function configureLoreStateDirForInstalledAmpPlugin(importMetaUrl: string
 configureLoreStateDirForInstalledAmpPlugin(import.meta.url);
 
 export default function loreAmpPlugin(amp: PluginAPI): void {
-  installPassiveAmpThreadMirror(amp);
+  installReusablePassiveAmpThreadMirror(amp, {
+    exportThread: async (threadId, ctx) => {
+      const shell = (ctx as { $?: PluginAPI['$'] }).$ ?? amp.$;
+      const result = await shell`amp threads export ${threadId}`;
+      if (result.exitCode !== 0) throw new Error('thread_export_failed');
+      return JSON.parse(result.stdout);
+    },
+    getToken: () => getValidAccessToken(),
+    upload: async ({ token, body }, signal) => {
+      const response = await fetch(`${otelApiOrigin()}/api/otel/v1/logs`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-lore-harness': 'Amp' },
+        body: JSON.stringify(body),
+        signal,
+      });
+      if (!response.ok) throw Object.assign(new Error('http_request_failed'), { status: response.status });
+    },
+  });
 
   amp.registerCommand(
     SHARE_COMMAND_ID,

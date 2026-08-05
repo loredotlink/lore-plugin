@@ -19,6 +19,196 @@ import fs7 from "fs";
 import path13 from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 
+// amp/passiveMirror.ts
+var PASSIVE_EVENTS = ["session.start", "message_added", "message_updated", "agent.end"];
+function installPassiveAmpThreadMirror(amp, deps) {
+  const eventApi = amp;
+  if (typeof eventApi.on !== "function") {
+    amp.logger.log("[lore] passive mirror status=disabled category=events_unavailable");
+    return;
+  }
+  const queues = new Map;
+  for (const eventName of PASSIVE_EVENTS) {
+    eventApi.on(eventName, async (event, ctx) => {
+      const threadId = resolveThreadId(event, ctx);
+      if (!threadId)
+        return;
+      const completion = enqueue(queues, threadId, {
+        full: eventName === "session.start" || eventName === "agent.end",
+        ctx,
+        trigger: eventName,
+        settle: () => {
+          return;
+        }
+      }, amp, deps);
+      await withDeadline(completion, deps.deadlineMs ?? 15000).catch((error) => {
+        logStatus(amp, eventName, threadId, "failed", retryCategory(error));
+      });
+    });
+  }
+}
+function enqueue(queues, threadId, work, amp, deps) {
+  const queue = queues.get(threadId) ?? { running: false, pending: [] };
+  queues.set(threadId, queue);
+  return new Promise((resolve) => {
+    work.settle = resolve;
+    const last = queue.pending.at(-1);
+    if (work.trigger !== "session.start" && last?.trigger !== "session.start") {
+      if (last?.full && !work.full) {
+        resolve();
+        return;
+      }
+      if (work.full) {
+        while (queue.pending.length && queue.pending.at(-1)?.trigger !== "session.start") {
+          queue.pending.pop()?.settle();
+        }
+      }
+    }
+    queue.pending.push(work);
+    if (!queue.running)
+      drain(queues, threadId, queue, amp, deps);
+  });
+}
+async function drain(queues, threadId, queue, amp, deps) {
+  queue.running = true;
+  while (queue.pending.length) {
+    const work = queue.pending.shift();
+    try {
+      await mirrorOnce(threadId, work, amp, deps);
+    } catch (error) {
+      logStatus(amp, work.trigger, threadId, "failed", retryCategory(error));
+    } finally {
+      work.settle();
+    }
+  }
+  queue.running = false;
+  queues.delete(threadId);
+}
+async function mirrorOnce(threadId, work, amp, deps) {
+  if (work.trigger === "session.start" && deps.beforeSessionStart) {
+    const signal = AbortSignal.timeout(deps.deadlineMs ?? 15000);
+    await deps.beforeSessionStart(threadId, work.ctx, signal);
+  }
+  const thread = await deps.exportThread(threadId, work.ctx);
+  if (stringOrNull(thread.id) !== threadId) {
+    logStatus(amp, work.trigger, threadId, "rejected", "thread_mismatch");
+    return;
+  }
+  const body = buildFullSnapshot(thread);
+  const attempts = Math.max(1, deps.maxAttempts ?? 3);
+  for (let attempt = 1;attempt <= attempts; attempt += 1) {
+    try {
+      const token = await deps.getToken(threadId, work.ctx);
+      await deps.upload({ threadId, token, body }, AbortSignal.timeout(deps.deadlineMs ?? 15000));
+      logStatus(amp, work.trigger, threadId, "uploaded", attempt > 1 ? "retried" : "none");
+      return;
+    } catch (error) {
+      if (!isRetryable(error) || attempt === attempts)
+        throw error;
+      logStatus(amp, work.trigger, threadId, "retry", retryCategory(error));
+      await (deps.sleep ?? delay)(100 * 2 ** (attempt - 1));
+    }
+  }
+}
+function buildFullSnapshot(thread) {
+  const threadId = stringOrNull(thread.id);
+  if (!threadId)
+    return { resourceLogs: [] };
+  const messages = Array.isArray(thread.messages) ? thread.messages.filter(isRecord) : [];
+  const fallback = isoTimestamp(thread.updatedAt) ?? isoTimestamp(thread.created) ?? new Date(0).toISOString();
+  const records = [{
+    timeUnixNano: toUnixNano(fallback),
+    attributes: attributes({ "event.name": "amp.export.thread", "event.sequence": 0, "session.id": threadId, "amp.export.kind": "thread" }),
+    body: anyValue({ ...thread, messages: undefined, messageCount: messages.length })
+  }];
+  messages.forEach((message, index) => {
+    const role = stringOrNull(message.role) ?? "";
+    const timestamp = isoTimestamp(isRecord(message.meta) ? message.meta.sentAt : undefined) ?? fallback;
+    const promptId = stringOrNull(message.messageId) ?? `amp-msg-${index}`;
+    records.push({
+      timeUnixNano: toUnixNano(timestamp),
+      attributes: attributes({
+        "event.name": role === "user" ? "claude_code.user_prompt" : role === "assistant" ? "claude_code.api_response_body" : "amp.export.message",
+        "event.sequence": index + 1,
+        "session.id": threadId,
+        "prompt.id": promptId,
+        "amp.export.kind": "message",
+        "amp.message.index": index,
+        "amp.message.role": role
+      }),
+      body: anyValue(message)
+    });
+  });
+  return { resourceLogs: [{
+    resource: { attributes: attributes({ "service.name": "amp", "service.namespace": "lore.amp-plugin" }) },
+    scopeLogs: [{ scope: { name: "lore.amp-plugin.passive-thread-upload" }, logRecords: records }]
+  }] };
+}
+function resolveThreadId(event, ctx) {
+  if (isRecord(event)) {
+    const direct = stringOrNull(event.threadId) ?? stringOrNull(event.thread_id);
+    if (direct)
+      return direct;
+    if (isRecord(event.thread))
+      return stringOrNull(event.thread.id);
+  }
+  return isRecord(ctx) && isRecord(ctx.thread) ? stringOrNull(ctx.thread.id) : null;
+}
+function attributes(record) {
+  return Object.entries(record).map(([key, value]) => ({ key, value: anyValue(value) }));
+}
+function anyValue(value) {
+  if (typeof value === "string")
+    return { stringValue: value };
+  if (typeof value === "boolean")
+    return { boolValue: value };
+  if (typeof value === "number")
+    return Number.isInteger(value) ? { intValue: String(value) } : { doubleValue: value };
+  if (Array.isArray(value))
+    return { arrayValue: { values: value.map(anyValue) } };
+  if (isRecord(value))
+    return { kvlistValue: { values: Object.entries(value).filter(([, item]) => item !== undefined).map(([key, item]) => ({ key, value: anyValue(item) })) } };
+  return { stringValue: value == null ? "" : String(value) };
+}
+function toUnixNano(timestamp) {
+  return (BigInt(Date.parse(timestamp)) * 1000000n).toString();
+}
+function isoTimestamp(value) {
+  if (typeof value !== "string" && typeof value !== "number")
+    return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+function stringOrNull(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function statusOf(error) {
+  return isRecord(error) && typeof error.status === "number" ? error.status : null;
+}
+function isRetryable(error) {
+  const status = statusOf(error);
+  return status === null || status === 429 || status >= 500;
+}
+function retryCategory(error) {
+  const status = statusOf(error);
+  return status === 429 ? "rate_limited" : status && status >= 500 ? "server" : status && status >= 400 ? "terminal" : "network";
+}
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+function withDeadline(promise, milliseconds) {
+  let timer;
+  return Promise.race([promise, new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("deadline")), milliseconds);
+  })]).finally(() => clearTimeout(timer));
+}
+function logStatus(amp, trigger, threadId, status, category) {
+  amp.logger.log(`[lore] passive mirror trigger=${trigger} thread=${threadId} status=${status} retry=${category}`);
+}
+
 // server-src/amp/ampToolAdapter.ts
 function toAmpToolDefinition(tool) {
   return {
@@ -19205,380 +19395,9 @@ var questsContract = c7.router({
   }
 });
 
-// ../contracts/src/regions.ts
+// ../contracts/src/search.ts
 var c8 = initContract();
 var errorSchema8 = exports_external.object({ message: exports_external.string() });
-var regionIdSchema = exports_external.string().regex(/^reg_[0-9A-Za-z]{22}$/);
-var threadIdSchema = exports_external.string().min(1).max(64);
-var regionStatusValues = ["active", "quiet", "dormant", "archived"];
-var regionStatusSchema = exports_external.enum(regionStatusValues);
-var regionAuthorSchema = exports_external.object({
-  id: exports_external.string().min(1),
-  display_name: exports_external.string().min(1),
-  avatar_url: exports_external.string().nullable().optional()
-});
-var regionContributorSchema = exports_external.object({
-  id: exports_external.string().min(1),
-  display_name: exports_external.string().min(1),
-  thread_count: exports_external.number().int().positive()
-});
-var regionDecisionKindValues = [
-  "asked",
-  "requested",
-  "decided",
-  "corrected",
-  "shared",
-  "requirement"
-];
-var regionDecisionKindSchema = exports_external.enum(regionDecisionKindValues);
-var regionDecisionSchema = exports_external.object({
-  id: exports_external.string().min(1),
-  kind: regionDecisionKindSchema,
-  summary: exports_external.string(),
-  thread_id: exports_external.string().min(1),
-  thread_title: exports_external.string(),
-  created_at: exports_external.string().datetime()
-});
-var regionVelocitySchema = exports_external.object({
-  decided_14d: exports_external.number().int().nonnegative(),
-  asked_14d: exports_external.number().int().nonnegative()
-});
-var regionCitedBySchema = exports_external.object({
-  id: regionIdSchema,
-  name: exports_external.string().min(1),
-  overlap_score: exports_external.number().min(0).max(1)
-});
-var regionThreadSchema = exports_external.object({
-  thread_id: exports_external.string().min(1),
-  title: exports_external.string().min(1),
-  is_primary: exports_external.boolean(),
-  added_at: exports_external.string().datetime(),
-  added_by: regionAuthorSchema
-});
-var regionListObjectSchema = exports_external.object({
-  id: regionIdSchema,
-  name: exports_external.string().min(1),
-  blurb: exports_external.string().nullable(),
-  status: regionStatusSchema,
-  thread_count: exports_external.number().int().nonnegative(),
-  contributor_count: exports_external.number().int().nonnegative(),
-  contributors_preview: exports_external.array(regionAuthorSchema).max(3),
-  top_filepath: exports_external.string().nullable(),
-  last_active_at: exports_external.string().datetime(),
-  created_at: exports_external.string().datetime(),
-  updated_at: exports_external.string().datetime(),
-  archived_at: exports_external.string().datetime().nullable()
-});
-var regionListResponseSchema = exports_external.object({
-  type: exports_external.literal("list"),
-  list_type: exports_external.literal("region"),
-  objects: exports_external.array(regionListObjectSchema)
-});
-var listRegionsQuerySchema = exports_external.object({
-  status: regionStatusSchema.optional()
-});
-var createRegionRequestSchema = exports_external.object({
-  name: exports_external.string().trim().min(1).max(200),
-  blurb: exports_external.string().trim().max(2000).optional()
-});
-var createRegionResponseSchema = exports_external.object({
-  id: regionIdSchema,
-  created_at: exports_external.string().datetime()
-});
-var updateRegionRequestSchema = exports_external.object({
-  name: exports_external.string().trim().min(1).max(200).optional(),
-  blurb: exports_external.string().trim().max(2000).nullable().optional()
-}).refine((body) => Object.keys(body).length > 0, {
-  message: "At least one field must be provided"
-});
-var updateRegionResponseSchema = exports_external.object({
-  id: regionIdSchema,
-  updated_at: exports_external.string().datetime()
-});
-var archiveRegionRequestSchema = exports_external.object({
-  archived: exports_external.boolean()
-});
-var archiveRegionResponseSchema = exports_external.object({
-  id: regionIdSchema,
-  status: regionStatusSchema,
-  archived_at: exports_external.string().datetime().nullable()
-});
-var getRegionResponseSchema = exports_external.object({
-  id: regionIdSchema,
-  name: exports_external.string().min(1),
-  blurb: exports_external.string().nullable(),
-  status: regionStatusSchema,
-  created_by: regionAuthorSchema,
-  thread_count: exports_external.number().int().nonnegative(),
-  last_active_at: exports_external.string().datetime(),
-  created_at: exports_external.string().datetime(),
-  updated_at: exports_external.string().datetime(),
-  archived_at: exports_external.string().datetime().nullable(),
-  synthesized_status: exports_external.string().nullable(),
-  synthesized_status_at: exports_external.string().datetime().nullable(),
-  threads: exports_external.array(regionThreadSchema),
-  contributors: exports_external.array(regionContributorSchema),
-  decisions: exports_external.object({
-    decided: exports_external.array(regionDecisionSchema),
-    open: exports_external.array(regionDecisionSchema)
-  }),
-  velocity: regionVelocitySchema,
-  cited_by_active_regions: exports_external.array(regionCitedBySchema)
-});
-var synthesizeRegionResponseSchema = exports_external.object({
-  id: regionIdSchema,
-  synthesized_status: exports_external.string(),
-  synthesized_status_at: exports_external.string().datetime()
-});
-var refreshRegionsResponseSchema = exports_external.object({
-  regions_created: exports_external.number().int().nonnegative(),
-  llm_dispatched: exports_external.boolean()
-});
-var transitionRegionLifecycleResponseSchema = exports_external.object({
-  promoted_to_active: exports_external.number().int().nonnegative(),
-  demoted_to_quiet: exports_external.number().int().nonnegative(),
-  demoted_to_dormant: exports_external.number().int().nonnegative()
-});
-var regionSuggestionSchema = exports_external.object({
-  thread_id: exports_external.string().min(1),
-  region_id: regionIdSchema,
-  region_name: exports_external.string().min(1),
-  score: exports_external.number().min(0).max(1),
-  signal: exports_external.enum(["file", "embedding", "combined"])
-});
-var suggestRegionsForThreadsRequestSchema = exports_external.object({
-  thread_ids: exports_external.array(exports_external.string().min(1)).min(1).max(50)
-});
-var suggestRegionsForThreadsResponseSchema = exports_external.object({
-  type: exports_external.literal("list"),
-  list_type: exports_external.literal("region_suggestion"),
-  objects: exports_external.array(regionSuggestionSchema)
-});
-var unfiledThreadSchema = exports_external.object({
-  thread_id: exports_external.string().min(1),
-  title: exports_external.string(),
-  created_at: exports_external.string().datetime(),
-  author: regionAuthorSchema,
-  user_message_count: exports_external.number().int().nonnegative()
-});
-var listUnfiledThreadsResponseSchema = exports_external.object({
-  type: exports_external.literal("list"),
-  list_type: exports_external.literal("unfiled_thread"),
-  objects: exports_external.array(unfiledThreadSchema)
-});
-var addRegionThreadRequestSchema = exports_external.object({
-  thread_id: threadIdSchema
-});
-var addRegionThreadResponseSchema = regionThreadSchema;
-var regionsContract = c8.router({
-  listRegions: {
-    method: "GET",
-    path: "/regions",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    query: listRegionsQuerySchema,
-    responses: {
-      200: regionListResponseSchema,
-      401: errorSchema8,
-      403: errorSchema8
-    },
-    summary: "List regions in the authenticated user\u2019s organization"
-  },
-  createRegion: {
-    method: "POST",
-    path: "/regions",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: createRegionRequestSchema,
-    responses: {
-      201: createRegionResponseSchema,
-      401: errorSchema8,
-      403: errorSchema8,
-      409: errorSchema8,
-      422: errorSchema8
-    },
-    summary: "Create a new region in the authenticated user\u2019s organization"
-  },
-  getRegion: {
-    method: "GET",
-    path: "/regions/:regionId",
-    pathParams: exports_external.object({
-      regionId: regionIdSchema
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    responses: {
-      200: getRegionResponseSchema,
-      401: errorSchema8,
-      403: errorSchema8,
-      404: errorSchema8
-    },
-    summary: "Get a region with its attached threads and rolled-up contributors"
-  },
-  updateRegion: {
-    method: "PATCH",
-    path: "/regions/:regionId",
-    pathParams: exports_external.object({
-      regionId: regionIdSchema
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: updateRegionRequestSchema,
-    responses: {
-      200: updateRegionResponseSchema,
-      401: errorSchema8,
-      403: errorSchema8,
-      404: errorSchema8,
-      409: errorSchema8,
-      422: errorSchema8
-    },
-    summary: "Rename a region or update its blurb"
-  },
-  archiveRegion: {
-    method: "POST",
-    path: "/regions/:regionId/archive",
-    pathParams: exports_external.object({
-      regionId: regionIdSchema
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: archiveRegionRequestSchema,
-    responses: {
-      200: archiveRegionResponseSchema,
-      401: errorSchema8,
-      403: errorSchema8,
-      404: errorSchema8
-    },
-    summary: "Archive or unarchive a region"
-  },
-  addRegionThread: {
-    method: "POST",
-    path: "/regions/:regionId/threads",
-    pathParams: exports_external.object({
-      regionId: regionIdSchema
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: addRegionThreadRequestSchema,
-    responses: {
-      201: addRegionThreadResponseSchema,
-      401: errorSchema8,
-      403: errorSchema8,
-      404: errorSchema8,
-      409: errorSchema8,
-      422: errorSchema8
-    },
-    summary: "Attach an existing visible thread to this region. Primary if the thread has no other primary, otherwise secondary (up to 2). Idempotent."
-  },
-  suggestRegionsForThreads: {
-    method: "POST",
-    path: "/regions/suggest-for-threads",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: suggestRegionsForThreadsRequestSchema,
-    responses: {
-      200: suggestRegionsForThreadsResponseSchema,
-      401: errorSchema8,
-      403: errorSchema8,
-      422: errorSchema8
-    },
-    summary: 'Batch lookup: for each thread id, return the highest-scoring active region in the viewer\u2019s workspace (or omit when no region clears the threshold). Used by the per-thread inline "Add to <region>" suggestion chip.'
-  },
-  listUnfiledThreads: {
-    method: "GET",
-    path: "/regions/unfiled",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    query: exports_external.object({
-      days: exports_external.coerce.number().int().positive().max(180).optional()
-    }),
-    responses: {
-      200: listUnfiledThreadsResponseSchema,
-      401: errorSchema8,
-      403: errorSchema8
-    },
-    summary: "List threads in the authenticated user\u2019s scope that are not yet attached to any region (default last 30 days)."
-  },
-  transitionRegionLifecycle: {
-    method: "POST",
-    path: "/regions/lifecycle/transition",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: exports_external.object({}).optional(),
-    responses: {
-      200: transitionRegionLifecycleResponseSchema,
-      401: errorSchema8,
-      403: errorSchema8
-    },
-    summary: "Sweep regions and demote/promote between active/quiet/dormant based on last_active_at. Idempotent \u2014 safe to run on a cron or on-demand."
-  },
-  refreshRegions: {
-    method: "POST",
-    path: "/regions/refresh",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: exports_external.object({}).optional(),
-    responses: {
-      200: refreshRegionsResponseSchema,
-      401: errorSchema8,
-      403: errorSchema8
-    },
-    summary: "Run the clustering pipeline against unfiled threads and create regions from the resulting clusters. Deterministic pass is synchronous; LLM pass is dispatched as an async Inngest event and lands more regions ~30s later."
-  },
-  synthesizeRegion: {
-    method: "POST",
-    path: "/regions/:regionId/synthesize",
-    pathParams: exports_external.object({
-      regionId: regionIdSchema
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: exports_external.object({}).optional(),
-    responses: {
-      200: synthesizeRegionResponseSchema,
-      401: errorSchema8,
-      403: errorSchema8,
-      404: errorSchema8,
-      409: errorSchema8,
-      503: errorSchema8
-    },
-    summary: "Generate (or refresh) the region\u2019s synthesized status using recent decisions and threads. Persists to regions.synthesized_status."
-  },
-  removeRegionThread: {
-    method: "DELETE",
-    path: "/regions/:regionId/threads/:threadId",
-    pathParams: exports_external.object({
-      regionId: regionIdSchema,
-      threadId: threadIdSchema
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: exports_external.object({}).optional(),
-    responses: {
-      204: exports_external.object({}),
-      401: errorSchema8,
-      403: errorSchema8,
-      404: errorSchema8
-    },
-    summary: "Remove a thread membership from a region"
-  }
-});
-
-// ../contracts/src/search.ts
-var c9 = initContract();
-var errorSchema9 = exports_external.object({ message: exports_external.string() });
 var globalSearchThreadResultSchema = exports_external.object({
   id: exports_external.string().min(1),
   title: exports_external.string(),
@@ -19607,7 +19426,7 @@ var globalSearchResponseSchema = exports_external.object({
 var globalSearchQuerySchema = exports_external.object({
   q: exports_external.string().trim().min(1).max(80)
 });
-var searchContract = c9.router({
+var searchContract = c8.router({
   globalSearch: {
     method: "GET",
     path: "/search",
@@ -19617,13 +19436,149 @@ var searchContract = c9.router({
     query: globalSearchQuerySchema,
     responses: {
       200: globalSearchResponseSchema,
-      401: errorSchema9,
-      422: errorSchema9
+      401: errorSchema8,
+      422: errorSchema8
     },
     summary: "Global navbar search. Threads and people are searched globally (subject to thread visibility); skills are scoped to the viewer workspace. Max 5 results per kind."
   }
 });
 
+// ../contracts/src/evidence.ts
+var id = exports_external.string().min(1);
+var timestamp = exports_external.iso.datetime();
+var visibility = exports_external.enum(["private", "organization"]);
+var verification = exports_external.object({
+  status: exports_external.enum(["passed", "failed", "unchecked", "unknown"]),
+  policy: exports_external.string().min(1),
+  policyVersion: exports_external.number().int().nonnegative(),
+  expectedDigest: exports_external.string().nullable(),
+  observedDigest: exports_external.string().nullable(),
+  verifiedAt: timestamp
+}).strict();
+var authorityBase = {
+  authorizationId: exports_external.string().min(1),
+  requirement: exports_external.object({
+    tier: exports_external.enum(["whole_file_replacement", "deletion", "non_allowlisted_shell", "submit_class_browser"]),
+    scope: exports_external.string(),
+    policyVersion: exports_external.string()
+  }).strict().nullable()
+};
+var authority = exports_external.discriminatedUnion("source", [
+  exports_external.object({ ...authorityBase, source: exports_external.literal("approval"), approvalId: id, standingPolicyId: exports_external.null() }).strict(),
+  exports_external.object({ ...authorityBase, source: exports_external.literal("standing_policy"), approvalId: exports_external.null(), standingPolicyId: id }).strict(),
+  exports_external.object({ ...authorityBase, source: exports_external.literal("none"), approvalId: exports_external.null(), standingPolicyId: exports_external.null() }).strict()
+]);
+var base = {
+  bundleId: id,
+  authorUserId: id,
+  organizationId: id.nullable(),
+  visibility,
+  createdAt: timestamp,
+  promotedAt: timestamp.nullable(),
+  copyUrl: exports_external.url().nullable()
+};
+var evidenceEffectDetailSchema = exports_external.object({
+  ...base,
+  kind: exports_external.literal("dock_effect"),
+  effectId: id,
+  toolCallId: exports_external.string().min(1),
+  action: exports_external.string().min(1),
+  scope: exports_external.string().nullable(),
+  settlement: exports_external.enum(["not_dispatched", "in_flight", "committed", "failed_before_commit", "aborted", "unknown"]),
+  retryClass: exports_external.enum(["read_only", "byte_idempotent", "reconcile_first", "never"]),
+  attempts: exports_external.array(exports_external.object({
+    ordinal: exports_external.number().int().positive(),
+    status: exports_external.enum(["not_dispatched", "in_flight", "committed", "failed_before_commit", "aborted", "unknown"]),
+    receiptPresent: exports_external.boolean(),
+    dispatchedAt: timestamp,
+    respondedAt: timestamp.nullable()
+  }).strict()),
+  verifications: exports_external.array(verification),
+  authority
+}).strict();
+var evidenceOutcomeDetailSchema = exports_external.object({
+  ...base,
+  kind: exports_external.literal("dock_turn_outcome"),
+  promptBlockId: id,
+  outcome: exports_external.enum(["verified_success", "unverified_completion", "partial_success", "blocked", "exhausted", "cancelled", "failed", "unknown"]),
+  stopReason: exports_external.enum(["end_turn", "aborted", "error"]),
+  iterations: exports_external.number().int().nonnegative().nullable(),
+  settledAt: timestamp,
+  verificationConclusions: exports_external.array(exports_external.object({ status: exports_external.enum(["passed", "failed", "unchecked", "unknown"]) }).strict())
+}).strict();
+var evidenceDetailSchema = exports_external.discriminatedUnion("kind", [evidenceEffectDetailSchema, evidenceOutcomeDetailSchema]);
+var evidenceWorkbenchSummarySchema = exports_external.object({
+  bundleId: id,
+  kind: exports_external.enum(["dock_effect", "dock_turn_outcome"]),
+  toolCallId: exports_external.string().nullable(),
+  status: exports_external.string().min(1),
+  createdAt: timestamp
+}).strict();
+var evidenceWorkbenchResponseSchema = exports_external.object({ evidence: exports_external.array(evidenceWorkbenchSummarySchema).max(50) }).strict();
+var evidenceSharingDefaultSchema = exports_external.object({ organizationId: id, shareNewEvidence: exports_external.boolean() }).strict();
+var setEvidenceSharingDefaultSchema = exports_external.object({ shareNewEvidence: exports_external.boolean() }).strict();
+var promoteEvidenceRequestSchema = exports_external.object({ organizationId: id }).strict();
+var promoteEvidenceResponseSchema = exports_external.object({
+  bundleId: id,
+  visibility: exports_external.literal("organization"),
+  organizationId: id,
+  copyUrl: exports_external.url()
+}).strict();
+var evidenceErrorSchema = exports_external.object({
+  error: exports_external.enum(["not_found", "forbidden", "invalid_request", "conflict", "unavailable"]),
+  retryable: exports_external.boolean().optional()
+}).strict();
+// ../contracts/src/sourceDocuments.ts
+var SUPPORTED_SOURCE_DOCUMENT_EXTENSIONS = Object.freeze([
+  ".md",
+  ".markdown",
+  ".txt",
+  ".html",
+  ".htm",
+  ".json",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".csv",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".py",
+  ".go",
+  ".rs",
+  ".sql",
+  ".sh"
+]);
+var SUPPORTED_EXTENSION_SET = new Set(SUPPORTED_SOURCE_DOCUMENT_EXTENSIONS);
+var CONVERTIBLE_SOURCE_DOCUMENT_EXTENSIONS = Object.freeze([
+  ".pdf",
+  ".docx"
+]);
+var CONVERTIBLE_EXTENSION_SET = new Set(CONVERTIBLE_SOURCE_DOCUMENT_EXTENSIONS);
+var BINDABLE_SOURCE_DOCUMENT_EXTENSIONS = Object.freeze([
+  ...SUPPORTED_SOURCE_DOCUMENT_EXTENSIONS,
+  ...CONVERTIBLE_SOURCE_DOCUMENT_EXTENSIONS
+]);
+var registerSourceDocumentRequestSchema = exports_external.object({
+  kind: exports_external.literal("document"),
+  relativePath: exports_external.string().min(1),
+  title: exports_external.string().min(1)
+}).strict();
+var dockThreadSourceSchema = exports_external.object({
+  id: exports_external.string(),
+  dockThreadId: exports_external.string(),
+  kind: exports_external.enum(["document", "lore_thread", "artifact"]),
+  relativePath: exports_external.string(),
+  title: exports_external.string(),
+  loreThreadId: exports_external.string().nullable(),
+  boundAt: exports_external.string().datetime(),
+  boundByUserId: exports_external.string(),
+  setAsideAt: exports_external.string().datetime().nullable()
+}).strict();
+var dockThreadSourcesResponseSchema = exports_external.object({
+  sources: exports_external.array(dockThreadSourceSchema)
+}).strict();
 // ../contracts/src/events/types.ts
 var subjectKindSchema = exports_external.enum(["thread", "org", "user", "public"]);
 var subjectSchema = exports_external.discriminatedUnion("kind", [
@@ -19632,6 +19587,19 @@ var subjectSchema = exports_external.discriminatedUnion("kind", [
   exports_external.object({ kind: exports_external.literal("user"), id: exports_external.string().min(1) }),
   exports_external.object({ kind: exports_external.literal("public"), id: exports_external.string().min(1) })
 ]);
+var DOCK_OUTCOMES = [
+  "verified_success",
+  "unverified_completion",
+  "partial_success",
+  "blocked",
+  "exhausted",
+  "cancelled",
+  "failed",
+  "unknown"
+];
+var dockOutcomeSchema = exports_external.enum(DOCK_OUTCOMES);
+var DOCK_WIRE_STOP_REASONS = ["end_turn", "aborted", "error"];
+var dockWireStopReasonSchema = exports_external.enum(DOCK_WIRE_STOP_REASONS);
 var threadEventTypeSchema = exports_external.enum([
   "thread.created",
   "thread.listable",
@@ -19639,6 +19607,7 @@ var threadEventTypeSchema = exports_external.enum([
   "thread.block.appended",
   "thread.detail.invalidated",
   "thread.dock.turn_completed",
+  "thread.dock.turn_review_updated",
   "thread.dock.turn_cancel_requested",
   "thread.participant.joined",
   "thread.participant.left",
@@ -19732,8 +19701,17 @@ var threadEventSchema = exports_external.discriminatedUnion("type", [
     payload: exports_external.object({
       thread_id: exports_external.string().min(1),
       prompt_block_id: exports_external.string().min(1),
-      stop_reason: exports_external.enum(["end_turn", "aborted", "error"]),
-      error: exports_external.string().nullable()
+      stop_reason: dockWireStopReasonSchema,
+      error: exports_external.string().nullable(),
+      outcome: dockOutcomeSchema.optional(),
+      outcome_detail: exports_external.string().min(1).optional()
+    })
+  }),
+  threadEventBase.extend({
+    type: exports_external.literal("thread.dock.turn_review_updated"),
+    payload: exports_external.object({
+      thread_id: exports_external.string().min(1),
+      prompt_block_id: exports_external.string().min(1)
     })
   }),
   threadEventBase.extend({
@@ -19880,34 +19858,813 @@ var RESERVED_PAYLOAD_KEYS = new Set([
   "retry",
   "data"
 ]);
+// ../contracts/src/dockTurnReview.ts
+var DIFF_SNAPSHOT_MAX_BASELINE_FILE_BYTES = 5 * 1024 * 1024;
+var DIFF_SNAPSHOT_MAX_BASELINE_TOTAL_BYTES = 50 * 1024 * 1024;
+var DIFF_SNAPSHOT_MAX_CHANGED_PATHS = 200;
+var DIFF_SNAPSHOT_MAX_PATCH_CHARS = 50000;
+var DIFF_SNAPSHOT_MAX_TOTAL_PATCH_CHARS = 500000;
+var DIFF_SNAPSHOT_MAX_STRUCTURED_RESPONSE_BYTES = 1024 * 1024;
+var DOCK_TURN_REVIEW_MAX_RESULT_CHARS = 20000;
+var dockTurnReviewModeSchema = exports_external.enum(["git", "file", "ledger_only"]);
+var dockTurnReviewStatusSchema = exports_external.enum(["complete", "partial", "unavailable"]);
+var dockTurnReviewReconciliationSchema = exports_external.enum(["not_required", "pending", "attempted", "installed", "exhausted"]);
+var dockTurnReviewLimitationSchema = exports_external.enum([
+  "baseline_file_too_large",
+  "baseline_budget_exhausted",
+  "baseline_raced",
+  "baseline_path_unavailable",
+  "path_limit",
+  "patch_truncated",
+  "git_finalize_unavailable",
+  "ignored_shell_changes_unobservable",
+  "repository_changed",
+  "path_unavailable",
+  "command_unavailable",
+  "executor_unavailable",
+  "structured_result_budget"
+]);
+var diffSnapshotPathSchema = exports_external.string().min(1).refine((path) => !path.startsWith("/") && !path.startsWith("\\") && !/^[A-Za-z]:[\\/]/.test(path) && !path.split(/[\\/]/).some((part) => part === "" || part === "." || part === ".."), { message: "path must be a normalized repository-relative path" });
+var id2 = exports_external.string().min(1);
+var digest = exports_external.string().regex(/^[0-9a-f]{64}$/);
+var change = exports_external.enum(["created", "modified", "deleted", "renamed"]);
+var effectIds = exports_external.array(id2).max(1000);
+var dockTurnReviewEffectReferenceSchema = exports_external.object({ effectId: id2, toolCallId: id2 }).strict();
+var dockTurnReviewPatchEntrySchema = exports_external.object({
+  kind: exports_external.literal("patch"),
+  path: diffSnapshotPathSchema,
+  change,
+  beforeMode: exports_external.string().min(1).nullable(),
+  afterMode: exports_external.string().min(1).nullable(),
+  patch: exports_external.string().max(DIFF_SNAPSHOT_MAX_PATCH_CHARS),
+  effectIds
+}).strict();
+var dockTurnReviewBinaryEntrySchema = exports_external.object({
+  kind: exports_external.literal("binary"),
+  path: diffSnapshotPathSchema,
+  change,
+  beforeMode: exports_external.string().min(1).nullable(),
+  afterMode: exports_external.string().min(1).nullable(),
+  beforeDigest: digest.nullable(),
+  afterDigest: digest.nullable(),
+  beforeLength: exports_external.number().int().nonnegative().nullable(),
+  afterLength: exports_external.number().int().nonnegative().nullable(),
+  effectIds
+}).strict();
+var dockTurnReviewOmissionEntrySchema = exports_external.object({
+  kind: exports_external.literal("omission"),
+  path: diffSnapshotPathSchema.optional(),
+  change: change.optional(),
+  reason: dockTurnReviewLimitationSchema,
+  effectIds
+}).strict();
+var dockTurnReviewComparisonEntrySchema = exports_external.discriminatedUnion("kind", [
+  dockTurnReviewPatchEntrySchema,
+  dockTurnReviewBinaryEntrySchema,
+  dockTurnReviewOmissionEntrySchema
+]);
+var dockTurnReviewComparisonSchema = exports_external.object({
+  entries: exports_external.array(dockTurnReviewComparisonEntrySchema).max(DIFF_SNAPSHOT_MAX_CHANGED_PATHS),
+  omittedCount: exports_external.number().int().nonnegative(),
+  limitations: exports_external.array(dockTurnReviewLimitationSchema).max(100)
+}).strict().superRefine(({ entries }, ctx) => {
+  const paths = entries.flatMap((entry) => entry.path === undefined ? [] : [entry.path]);
+  if (new Set(paths).size !== paths.length)
+    ctx.addIssue({ code: "custom", path: ["entries"], message: "comparison paths must be unique" });
+  const patchChars = entries.reduce((sum, entry) => sum + (entry.kind === "patch" ? entry.patch.length : 0), 0);
+  if (patchChars > DIFF_SNAPSHOT_MAX_TOTAL_PATCH_CHARS)
+    ctx.addIssue({ code: "custom", path: ["entries"], message: "aggregate patch character budget exceeded" });
+});
+var dockTurnReviewDocumentSchema = exports_external.object({
+  version: exports_external.literal(1),
+  status: dockTurnReviewStatusSchema,
+  mode: dockTurnReviewModeSchema,
+  promptBlockId: id2,
+  workItemRef: id2.nullable(),
+  outcomeId: id2,
+  entries: exports_external.array(dockTurnReviewComparisonEntrySchema).max(DIFF_SNAPSHOT_MAX_CHANGED_PATHS),
+  commandEffects: exports_external.array(dockTurnReviewEffectReferenceSchema).max(1000),
+  attemptedEffects: exports_external.array(dockTurnReviewEffectReferenceSchema).max(1000),
+  omittedCount: exports_external.number().int().nonnegative(),
+  limitations: exports_external.array(dockTurnReviewLimitationSchema).max(100)
+}).strict().superRefine((document, ctx) => {
+  const result = dockTurnReviewComparisonSchema.safeParse({ entries: document.entries, omittedCount: document.omittedCount, limitations: document.limitations });
+  if (!result.success)
+    for (const issue2 of result.error.issues)
+      ctx.addIssue({ ...issue2, path: issue2.path[0] === "entries" ? issue2.path : ["entries", ...issue2.path] });
+});
+var settlement = exports_external.enum(["not_dispatched", "in_flight", "committed", "failed_before_commit", "aborted", "unknown"]);
+var verification2 = exports_external.enum(["passed", "failed", "unchecked", "unknown", "unavailable"]);
+var outcome = exports_external.enum(["verified_success", "unverified_completion", "partial_success", "blocked", "exhausted", "cancelled", "failed", "unknown"]);
+var fileDetail = exports_external.object({
+  path: diffSnapshotPathSchema,
+  association: exports_external.enum(["workbench_effect", "shell_observed_unresolved", "unresolved"]),
+  effectIds,
+  settlement: settlement.nullable(),
+  verification: verification2,
+  comparisonKind: exports_external.enum(["patch", "binary", "omission"]),
+  limitation: dockTurnReviewLimitationSchema.nullable()
+}).strict();
+var reportedCommandResult = exports_external.object({
+  state: exports_external.enum(["success", "error", "unavailable"]),
+  text: exports_external.string().max(DOCK_TURN_REVIEW_MAX_RESULT_CHARS).nullable(),
+  truncated: exports_external.boolean()
+}).strict();
+var commandDetailFields = {
+  effectId: id2,
+  toolCallId: id2,
+  state: exports_external.enum(["run", "requested_not_run"]),
+  settlement,
+  receiptPresent: exports_external.boolean(),
+  reportedResult: reportedCommandResult,
+  verification: verification2
+};
+var commandDetail = exports_external.discriminatedUnion("availability", [
+  exports_external.object({ ...commandDetailFields, availability: exports_external.literal("available"), command: exports_external.string().min(1) }).strict(),
+  exports_external.object({ ...commandDetailFields, availability: exports_external.literal("command_unavailable"), command: exports_external.null() }).strict()
+]);
+var needsReviewDetail = exports_external.object({
+  effectId: id2,
+  toolCallId: id2,
+  primitive: exports_external.enum(["fs.writeFile", "fs.editFile", "shell.exec"]),
+  path: diffSnapshotPathSchema.nullable(),
+  reason: exports_external.enum(["path_unavailable", "not_compared", "non_committed"]),
+  settlement,
+  verification: verification2
+}).strict();
+var dockTurnReviewDetailSchema = exports_external.object({
+  reviewId: id2,
+  reconciliation: dockTurnReviewReconciliationSchema,
+  document: dockTurnReviewDocumentSchema,
+  outcome,
+  files: exports_external.array(fileDetail).max(DIFF_SNAPSHOT_MAX_CHANGED_PATHS),
+  commands: exports_external.array(commandDetail).max(1000),
+  needsReview: exports_external.array(needsReviewDetail).max(1000)
+}).strict();
 // ../contracts/src/dockExecutor.ts
-var base = exports_external.object({ callId: exports_external.string().min(1) });
-var executorRequestSchema = exports_external.discriminatedUnion("op", [
-  base.extend({ op: exports_external.literal("fs.readFile"), path: exports_external.string().min(1) }),
-  base.extend({ op: exports_external.literal("fs.writeFile"), path: exports_external.string().min(1), content: exports_external.string() }),
-  base.extend({ op: exports_external.literal("fs.readDirectory"), path: exports_external.string().min(1) }),
-  base.extend({ op: exports_external.literal("fs.delete"), path: exports_external.string().min(1) }),
-  base.extend({ op: exports_external.literal("git.diffSnapshot"), path: exports_external.string().optional() }),
-  base.extend({ op: exports_external.literal("git.command"), args: exports_external.array(exports_external.string()).min(1) }),
-  base.extend({ op: exports_external.literal("shell.exec"), command: exports_external.string().min(1), timeoutMs: exports_external.number().int().positive().max(600000).optional() }),
-  base.extend({ op: exports_external.literal("uploadAsset"), path: exports_external.string().min(1), kind: exports_external.string().min(1) }),
-  base.extend({ op: exports_external.literal("browser.act"), action: exports_external.string().min(1), params: exports_external.record(exports_external.string(), exports_external.unknown()).optional() }),
-  base.extend({ op: exports_external.literal("ui.progress"), phase: exports_external.enum(["thinking", "responding"]) })
+var EFFECT_JOURNAL_CAPABILITY = "effect.journal";
+var EFFECT_JOURNAL_FS_EDIT_FILE_CAPABILITY = "effect.journal.fs.editFile";
+var EFFECT_JOURNAL_SHELL_EXEC_CAPABILITY = "effect.journal.shell.exec";
+var isEffectJournalCapability = (capability) => capability === EFFECT_JOURNAL_CAPABILITY || capability === EFFECT_JOURNAL_FS_EDIT_FILE_CAPABILITY || capability === EFFECT_JOURNAL_SHELL_EXEC_CAPABILITY;
+var EFFECT_CANCELLATION_CAPABILITY = "effect.cancel";
+var executorContractVersionRangeSchema = exports_external.object({
+  min: exports_external.number().int().positive(),
+  max: exports_external.number().int().positive()
+}).refine(({ min, max }) => min <= max, {
+  message: "min must be less than or equal to max",
+  path: ["max"]
+});
+var base2 = exports_external.object({
+  callId: exports_external.string().min(1),
+  effectId: exports_external.string().min(1).optional(),
+  attemptOrdinal: exports_external.number().int().positive().optional()
+});
+function checkEffectIdentity(value, ctx) {
+  const hasEffectId = value.effectId !== undefined;
+  const hasAttemptOrdinal = value.attemptOrdinal !== undefined;
+  if (hasEffectId !== hasAttemptOrdinal) {
+    ctx.addIssue({
+      code: "custom",
+      message: "effectId and attemptOrdinal must both be present or both be absent",
+      path: [hasEffectId ? "attemptOrdinal" : "effectId"]
+    });
+  }
+}
+var legacyDiffSnapshotRequestSchema = base2.extend({
+  op: exports_external.literal("git.diffSnapshot"),
+  path: exports_external.string().optional(),
+  action: exports_external.never().optional()
+});
+var lifecycleDiffSnapshotRequestSchema = base2.extend({
+  op: exports_external.literal("git.diffSnapshot"),
+  action: exports_external.enum(["begin", "finalize", "retrieve_materialized", "discard"]),
+  turnId: exports_external.string().min(1),
+  snapshotId: exports_external.string().min(1),
+  effectPaths: exports_external.array(diffSnapshotPathSchema).max(DIFF_SNAPSHOT_MAX_CHANGED_PATHS).optional(),
+  includeUnscoped: exports_external.boolean().optional()
+}).strict().superRefine((request, ctx) => {
+  const isFinalize = request.action === "finalize";
+  if (isFinalize !== (request.effectPaths !== undefined))
+    ctx.addIssue({ code: "custom", path: ["effectPaths"], message: "effectPaths is required only for finalize" });
+  if (isFinalize !== (request.includeUnscoped !== undefined))
+    ctx.addIssue({ code: "custom", path: ["includeUnscoped"], message: "includeUnscoped is required only for finalize" });
+  if (request.effectPaths && new Set(request.effectPaths).size !== request.effectPaths.length)
+    ctx.addIssue({ code: "custom", path: ["effectPaths"], message: "effectPaths must be unique" });
+});
+var executorRequestVariantSchemas = {
+  "effect.lookupReceipt": base2.extend({
+    op: exports_external.literal("effect.lookupReceipt"),
+    queryEffectId: exports_external.string().min(1),
+    expectedArgumentDigest: exports_external.string().regex(/^[0-9a-f]{64}$/)
+  }),
+  "fs.readFile": base2.extend({ op: exports_external.literal("fs.readFile"), path: exports_external.string().min(1) }),
+  "fs.writeFile": base2.extend({ op: exports_external.literal("fs.writeFile"), path: exports_external.string().min(1), content: exports_external.string() }),
+  "fs.editFile": base2.extend({
+    op: exports_external.literal("fs.editFile"),
+    path: exports_external.string().min(1),
+    oldText: exports_external.string(),
+    newText: exports_external.string()
+  }),
+  "fs.readDirectory": base2.extend({ op: exports_external.literal("fs.readDirectory"), path: exports_external.string().min(1) }),
+  "fs.delete": base2.extend({ op: exports_external.literal("fs.delete"), path: exports_external.string().min(1) }),
+  "git.diffSnapshot": lifecycleDiffSnapshotRequestSchema,
+  "git.command": base2.extend({ op: exports_external.literal("git.command"), args: exports_external.array(exports_external.string()).min(1) }),
+  "shell.exec": base2.extend({ op: exports_external.literal("shell.exec"), command: exports_external.string().min(1), timeoutMs: exports_external.number().int().positive().max(600000).optional() }),
+  uploadAsset: base2.extend({ op: exports_external.literal("uploadAsset"), path: exports_external.string().min(1), kind: exports_external.string().min(1) }),
+  "browser.act": base2.extend({ op: exports_external.literal("browser.act"), action: exports_external.string().min(1), params: exports_external.record(exports_external.string(), exports_external.unknown()).optional() }),
+  "browser.capture": base2.extend({
+    op: exports_external.literal("browser.capture"),
+    sessionId: exports_external.string().min(1),
+    pageId: exports_external.string().min(1).optional()
+  }),
+  "ui.progress": base2.extend({ op: exports_external.literal("ui.progress"), phase: exports_external.enum(["thinking", "responding"]) }),
+  "ui.textDelta": base2.extend({
+    op: exports_external.literal("ui.textDelta"),
+    turnId: exports_external.string().min(1),
+    modelStepId: exports_external.string().min(1),
+    previousModelStepId: exports_external.string().min(1).nullable().optional(),
+    sequence: exports_external.number().int().nonnegative(),
+    delta: exports_external.string()
+  })
+};
+var EXECUTOR_PRIMITIVES = Object.freeze(Object.keys(executorRequestVariantSchemas));
+var executorRequestVariants = Object.values(executorRequestVariantSchemas);
+var executorRequestUnion = exports_external.discriminatedUnion("op", executorRequestVariants);
+var executorRequestSchema = exports_external.union([
+  legacyDiffSnapshotRequestSchema,
+  executorRequestUnion
+]).superRefine((value, ctx) => {
+  checkEffectIdentity(value, ctx);
+  if (value.op === "effect.lookupReceipt" && value.effectId !== undefined) {
+    ctx.addIssue({ code: "custom", message: "effect.lookupReceipt must not carry generic Effect identity", path: ["effectId"] });
+  }
+  if (value.op === "git.diffSnapshot" && value.effectId !== undefined) {
+    ctx.addIssue({ code: "custom", message: "git.diffSnapshot must not carry generic Effect identity", path: ["effectId"] });
+  }
+});
+Object.defineProperty(executorRequestSchema, "options", {
+  value: executorRequestUnion.options
+});
+var executorTerminationSchema = exports_external.object({
+  trigger: exports_external.enum(["cancelled", "primitive_timeout"]),
+  requestedSignal: exports_external.literal("SIGTERM"),
+  escalatedToSigkill: exports_external.boolean(),
+  observed: exports_external.discriminatedUnion("kind", [
+    exports_external.object({ kind: exports_external.literal("exit"), code: exports_external.number() }),
+    exports_external.object({ kind: exports_external.literal("signal"), signal: exports_external.string().min(1) }),
+    exports_external.object({ kind: exports_external.literal("unconfirmed") })
+  ])
+});
+var executorReceiptSchema = exports_external.object({
+  receiptId: exports_external.string().min(1),
+  committedAt: exports_external.string().datetime(),
+  resultDigest: exports_external.string().regex(/^[0-9a-f]{64}$/, "resultDigest must be a hex SHA-256 digest"),
+  termination: executorTerminationSchema.optional()
+});
+var effectReceiptLookupResultSchema = exports_external.discriminatedUnion("status", [
+  exports_external.object({
+    status: exports_external.literal("found"),
+    attemptOrdinal: exports_external.number().int().positive(),
+    receipt: executorReceiptSchema
+  }).strict(),
+  exports_external.object({ status: exports_external.literal("not_found") }).strict(),
+  exports_external.object({ status: exports_external.literal("argument_mismatch") }).strict()
+]);
+var EXECUTOR_IMAGE_CAPABILITY = "toolResult.image";
+var EXECUTOR_MAX_IMAGE_BYTES = 5000000;
+var EXECUTOR_MAX_IMAGES_PER_RESPONSE = 4;
+var executorImageSchema = exports_external.object({
+  mediaType: exports_external.enum(["image/png", "image/jpeg", "image/webp"]),
+  data: exports_external.string().min(1),
+  digest: exports_external.string().regex(/^[0-9a-f]{64}$/, "digest must be a lowercase hex SHA-256 digest"),
+  byteLength: exports_external.number().int().positive(),
+  width: exports_external.number().int().positive(),
+  height: exports_external.number().int().positive(),
+  artifactRef: exports_external.string().min(1).nullable()
+});
+function checkImageByteBudget(value, ctx) {
+  if (value.images === undefined)
+    return;
+  const totalBytes = value.images.reduce((sum, image) => sum + image.byteLength, 0);
+  if (totalBytes > EXECUTOR_MAX_IMAGE_BYTES) {
+    ctx.addIssue({
+      code: "custom",
+      message: `total decoded image bytes (${totalBytes}) exceed EXECUTOR_MAX_IMAGE_BYTES (${EXECUTOR_MAX_IMAGE_BYTES})`,
+      path: ["images"]
+    });
+  }
+}
+var diffSnapshotResultSchema = exports_external.discriminatedUnion("action", [
+  exports_external.object({
+    action: exports_external.literal("begin"),
+    snapshotId: exports_external.string().min(1),
+    mode: exports_external.enum(["git", "file"]),
+    repositoryIdentity: exports_external.string().regex(/^[0-9a-f]{64}$/),
+    limitations: exports_external.array(dockTurnReviewLimitationSchema).max(100)
+  }).strict(),
+  exports_external.object({ action: exports_external.literal("finalize"), snapshotId: exports_external.string().min(1), comparison: dockTurnReviewComparisonSchema }).strict()
 ]);
 var executorResponseSchema = exports_external.union([
-  base.extend({ ok: exports_external.literal(true), output: exports_external.string() }),
-  base.extend({ ok: exports_external.literal(false), error: exports_external.object({ code: exports_external.string().min(1), message: exports_external.string() }) })
+  base2.extend({
+    ok: exports_external.literal(true),
+    output: exports_external.string(),
+    receipt: executorReceiptSchema.optional(),
+    images: exports_external.array(executorImageSchema).max(EXECUTOR_MAX_IMAGES_PER_RESPONSE).optional(),
+    diffSnapshot: diffSnapshotResultSchema.optional()
+  }),
+  base2.extend({
+    ok: exports_external.literal(false),
+    error: exports_external.object({
+      code: exports_external.string().min(1),
+      message: exports_external.string(),
+      contractReason: exports_external.enum(["version_metadata_missing", "version_no_overlap"]).optional()
+    }),
+    commitStatus: exports_external.enum(["failed_before_commit", "aborted"]).optional(),
+    receipt: executorReceiptSchema.optional()
+  })
+]).superRefine(checkEffectIdentity).superRefine(checkImageByteBudget).superRefine((response, ctx) => {
+  if (response.ok && response.diffSnapshot !== undefined) {
+    if (response.output !== "")
+      ctx.addIssue({ code: "custom", path: ["output"], message: "snapshot output must be empty" });
+    if (response.effectId !== undefined)
+      ctx.addIssue({ code: "custom", path: ["effectId"], message: "snapshot responses must not carry generic Effect identity" });
+    if (response.receipt !== undefined)
+      ctx.addIssue({ code: "custom", path: ["receipt"], message: "snapshot responses must not carry receipts" });
+    if (response.images !== undefined)
+      ctx.addIssue({ code: "custom", path: ["images"], message: "snapshot responses must not carry images" });
+    if (new TextEncoder().encode(JSON.stringify(response.diffSnapshot)).byteLength > DIFF_SNAPSHOT_MAX_STRUCTURED_RESPONSE_BYTES) {
+      ctx.addIssue({ code: "custom", path: ["diffSnapshot"], message: "encoded snapshot result budget exceeded" });
+    }
+  }
+});
+var executorContractNegotiationSchema = exports_external.discriminatedUnion("status", [
+  exports_external.object({
+    status: exports_external.literal("negotiated"),
+    version: exports_external.number().int().positive(),
+    apiRange: executorContractVersionRangeSchema,
+    executorRange: executorContractVersionRangeSchema
+  }),
+  exports_external.object({
+    status: exports_external.literal("degraded"),
+    reason: exports_external.enum(["version_metadata_missing", "version_no_overlap"]),
+    apiRange: executorContractVersionRangeSchema,
+    executorRange: executorContractVersionRangeSchema.optional()
+  })
 ]);
 var executorFrameSchema = exports_external.discriminatedUnion("kind", [
   exports_external.object({
     kind: exports_external.literal("hello"),
     capabilities: exports_external.array(exports_external.string()),
     threadId: exports_external.string().min(1),
+    contractVersions: executorContractVersionRangeSchema.optional(),
     timeZone: exports_external.string().min(1).optional()
   }),
   exports_external.object({ kind: exports_external.literal("request"), request: executorRequestSchema }),
   exports_external.object({ kind: exports_external.literal("response"), response: executorResponseSchema }),
+  exports_external.object({
+    kind: exports_external.literal("cancel"),
+    callId: exports_external.string().min(1),
+    effectId: exports_external.string().min(1).optional()
+  }),
+  exports_external.object({ kind: exports_external.literal("hello_ack"), contract: executorContractNegotiationSchema }),
   exports_external.object({ kind: exports_external.literal("ping") })
+]);
+// ../contracts/src/mcpZodSchema.ts
+var zodDef = (schema) => {
+  const schemaLike = schema;
+  return schemaLike._def ?? schemaLike.def ?? {};
+};
+var zodKind = (schema) => {
+  const def = zodDef(schema);
+  if (typeof def.typeName === "string")
+    return def.typeName;
+  return typeof def.type === "string" ? def.type : undefined;
+};
+var isZodKind = (schema, v3Kind, v4Kind) => {
+  const kind = zodKind(schema);
+  return kind === v3Kind || kind === v4Kind;
+};
+var asZodType = (value) => value;
+var maximumLength = (schema) => {
+  const checks3 = zodDef(schema).checks;
+  if (!Array.isArray(checks3))
+    return;
+  for (const check2 of checks3) {
+    const def = check2._zod?.def ?? check2._def ?? check2;
+    if (def.check === "max_length" && typeof def.maximum === "number") {
+      return def.maximum;
+    }
+    if (def.kind === "max" && typeof def.value === "number") {
+      return def.value;
+    }
+  }
+  return;
+};
+var zodObjectShape = (schema) => {
+  if (!schema || !isZodKind(schema, "ZodObject", "object"))
+    return;
+  const schemaShape = schema.shape;
+  if (typeof schemaShape === "function") {
+    return schemaShape();
+  }
+  if (schemaShape && typeof schemaShape === "object") {
+    return schemaShape;
+  }
+  const defShape = zodDef(schema).shape;
+  if (typeof defShape === "function") {
+    return defShape();
+  }
+  if (defShape && typeof defShape === "object") {
+    return defShape;
+  }
+  return;
+};
+var arrayElement = (schema) => {
+  const def = zodDef(schema);
+  if (def.element)
+    return asZodType(def.element);
+  if (typeof def.type === "object" && def.type !== null) {
+    return asZodType(def.type);
+  }
+  return;
+};
+var unionOptions = (schema) => {
+  const schemaOptions = schema.options;
+  if (Array.isArray(schemaOptions))
+    return schemaOptions.map(asZodType);
+  const defOptions = zodDef(schema).options;
+  return Array.isArray(defOptions) ? defOptions.map(asZodType) : [];
+};
+var enumOptions = (schema) => {
+  const schemaOptions = schema.options;
+  if (Array.isArray(schemaOptions))
+    return [...schemaOptions];
+  const def = zodDef(schema);
+  if (Array.isArray(def.values))
+    return [...def.values];
+  if (def.entries && typeof def.entries === "object") {
+    return Object.values(def.entries);
+  }
+  return [];
+};
+var unwrapField = (schema) => {
+  let current = schema;
+  let required2 = true;
+  while (true) {
+    const def = zodDef(current);
+    if (isZodKind(current, "ZodOptional", "optional")) {
+      required2 = false;
+      current = asZodType(def.innerType);
+    } else if (isZodKind(current, "ZodNullable", "nullable")) {
+      required2 = false;
+      current = asZodType(def.innerType);
+    } else if (isZodKind(current, "ZodDefault", "default")) {
+      required2 = false;
+      current = asZodType(def.innerType);
+    } else if (isZodKind(current, "ZodEffects", "effects")) {
+      current = asZodType(def.schema);
+    } else if (isZodKind(current, "ZodPipeline", "pipe")) {
+      current = asZodType(def.in);
+    } else {
+      break;
+    }
+  }
+  return { schema: current, required: required2 };
+};
+var applyDescription = (schema, zodSchema) => {
+  if (zodSchema.description) {
+    return { ...schema, description: zodSchema.description };
+  }
+  return schema;
+};
+var fieldToJsonSchema = (fieldSchema) => {
+  const { schema } = unwrapField(fieldSchema);
+  if (isZodKind(schema, "ZodString", "string")) {
+    const maxLength = maximumLength(schema);
+    return applyDescription({ type: "string", ...maxLength === undefined ? {} : { maxLength } }, fieldSchema);
+  }
+  if (isZodKind(schema, "ZodNumber", "number")) {
+    return applyDescription({ type: "number" }, fieldSchema);
+  }
+  if (isZodKind(schema, "ZodBoolean", "boolean")) {
+    return applyDescription({ type: "boolean" }, fieldSchema);
+  }
+  if (isZodKind(schema, "ZodEnum", "enum")) {
+    return applyDescription({ type: "string", enum: enumOptions(schema) }, fieldSchema);
+  }
+  if (isZodKind(schema, "ZodArray", "array")) {
+    const element = arrayElement(schema);
+    const maxItems = maximumLength(schema);
+    return applyDescription({
+      type: "array",
+      ...maxItems === undefined ? {} : { maxItems },
+      items: element ? fieldToJsonSchema(element) : {}
+    }, fieldSchema);
+  }
+  if (isZodKind(schema, "ZodUnion", "union")) {
+    return applyDescription({ anyOf: unionOptions(schema).map((option) => fieldToJsonSchema(option)) }, fieldSchema);
+  }
+  if (isZodKind(schema, "ZodObject", "object")) {
+    return applyDescription(zodObjectToMcpJsonSchema(schema), fieldSchema);
+  }
+  if (isZodKind(schema, "ZodRecord", "record")) {
+    const valueType = zodDef(schema).valueType;
+    return applyDescription({
+      type: "object",
+      additionalProperties: valueType ? fieldToJsonSchema(asZodType(valueType)) : {}
+    }, fieldSchema);
+  }
+  return applyDescription({}, fieldSchema);
+};
+var zodShapeToMcpJsonSchema = (shape) => {
+  const properties = {};
+  const required2 = [];
+  for (const [key, fieldSchema] of Object.entries(shape)) {
+    properties[key] = fieldToJsonSchema(fieldSchema);
+    if (unwrapField(fieldSchema).required)
+      required2.push(key);
+  }
+  return {
+    type: "object",
+    properties,
+    ...required2.length > 0 ? { required: required2 } : {},
+    additionalProperties: false
+  };
+};
+var zodObjectToMcpJsonSchema = (schema) => {
+  const shape = zodObjectShape(schema);
+  return zodShapeToMcpJsonSchema(shape ?? {});
+};
+
+// ../contracts/src/dockExecutorTools.ts
+var text = (description) => exports_external.string().describe(description);
+var SHOW_ARTIFACT_PROVENANCE_MAX_ANNOTATIONS = 8;
+var SHOW_ARTIFACT_PROVENANCE_MAX_ANNOTATION_LENGTH = 280;
+var SHOW_ARTIFACT_PROVENANCE_MAX_FINDING_LENGTH = 160;
+var showArtifactProvenanceAnnotationSchema = exports_external.string().trim().min(1).max(SHOW_ARTIFACT_PROVENANCE_MAX_ANNOTATION_LENGTH);
+var showArtifactProvenanceAnnotationListSchema = exports_external.array(showArtifactProvenanceAnnotationSchema).max(SHOW_ARTIFACT_PROVENANCE_MAX_ANNOTATIONS);
+var showArtifactProvenanceFindingSchema = exports_external.string().trim().min(1).max(SHOW_ARTIFACT_PROVENANCE_MAX_FINDING_LENGTH);
+var showArtifactProvenanceSchema = exports_external.strictObject({
+  inferences: showArtifactProvenanceAnnotationListSchema,
+  uncertainties: showArtifactProvenanceAnnotationListSchema,
+  derived_from: exports_external.array(exports_external.strictObject({
+    path: exports_external.string().trim().min(1),
+    finding: showArtifactProvenanceFindingSchema.optional()
+  })).max(SHOW_ARTIFACT_PROVENANCE_MAX_ANNOTATIONS)
+});
+var browserRoute = (action) => ({
+  primitive: "browser.act",
+  requiredCapabilities: ["browser.act", EFFECT_CANCELLATION_CAPABILITY],
+  map: (input, callId) => ({ op: "browser.act", callId, action, params: input })
+});
+var EXECUTOR_TOOL_CONTRACTS = {
+  list_files: {
+    version: 1,
+    description: "List the files and folders at a path inside the session folder. Call this first when you need to understand what is in the folder before reading or changing anything.",
+    inputSchema: exports_external.object({ path: text("Folder path relative to the session folder. Defaults to the folder root.").optional() }).strict(),
+    routes: [{ primitive: "fs.readDirectory", requiredCapabilities: ["fs.readDirectory"], map: (input, callId) => ({ op: "fs.readDirectory", callId, path: input.path === undefined || input.path === "" ? "." : input.path }) }]
+  },
+  read_file: {
+    version: 1,
+    description: "Read a file's contents. Call this before editing a file, and whenever the answer depends on what a file actually contains rather than what you assume it contains.",
+    inputSchema: exports_external.object({ path: text("File path relative to the session folder.") }).strict(),
+    routes: [{ primitive: "fs.readFile", requiredCapabilities: ["fs.readFile"], map: (input, callId) => ({ op: "fs.readFile", callId, path: input.path }) }]
+  },
+  edit_file: {
+    version: 1,
+    description: "Replace an exact snippet of text in a file with new text. Prefer this over write_file for changing part of an existing file. The old text must appear exactly once \u2014 include surrounding lines to make it unique. Pass an empty old_text to create a new file.",
+    inputSchema: exports_external.object({ path: text("File path relative to the session folder."), old_text: text("Exact text to replace. Empty string creates the file."), new_text: text("Text to put in its place.") }).strict(),
+    routes: [{ primitive: "fs.editFile", requiredCapabilities: ["fs.editFile", EFFECT_JOURNAL_FS_EDIT_FILE_CAPABILITY, EFFECT_CANCELLATION_CAPABILITY], map: (input, callId) => ({ op: "fs.editFile", callId, path: input.path, oldText: input.old_text, newText: input.new_text }) }]
+  },
+  write_file: {
+    version: 1,
+    description: "Write a file, replacing it entirely if it exists. Use this for brand-new files or full rewrites; use edit_file to change part of an existing file.",
+    inputSchema: exports_external.object({ path: text("File path relative to the session folder."), content: text("The full contents of the file.") }).strict(),
+    routes: [{ primitive: "fs.writeFile", requiredCapabilities: ["fs.writeFile", EFFECT_JOURNAL_CAPABILITY, EFFECT_CANCELLATION_CAPABILITY], map: (input, callId) => ({ op: "fs.writeFile", callId, path: input.path, content: input.content }) }]
+  },
+  run_command: {
+    version: 1,
+    description: "Run a shell command inside the session folder and return its output. Call this when the task needs something only a real command can do \u2014 running tests, installing packages, checking git status, building the project. Commands time out after 60 seconds.",
+    inputSchema: exports_external.object({ command: text("The shell command to run.") }).strict(),
+    routes: [{ primitive: "shell.exec", requiredCapabilities: ["shell.exec", EFFECT_JOURNAL_SHELL_EXEC_CAPABILITY, EFFECT_CANCELLATION_CAPABILITY], map: (input, callId) => ({ op: "shell.exec", callId, command: input.command }) }]
+  },
+  show_artifact: {
+    version: 1,
+    description: "Show a finished result to the user in the Artifact pane beside the conversation. Call this whenever you create or update something the user will read or look at: a document or plan (markdown), a dashboard, game, or page (self-contained HTML), or an image. The pane also refreshes automatically when you edit the shown file.",
+    inputSchema: exports_external.object({
+      path: text("Path (relative to the session folder) of the HTML, markdown, text, or image file to display."),
+      title: text('A short human title for the artifact, e.g. "Team dashboard".'),
+      provenance: showArtifactProvenanceSchema.optional()
+    }).strict(),
+    routes: [
+      { primitive: "uploadAsset", requiredCapabilities: ["uploadAsset", EFFECT_CANCELLATION_CAPABILITY], map: (input, callId) => ({ op: "uploadAsset", callId, path: input.path, kind: "artifact" }) },
+      { primitive: "fs.readFile", requiredCapabilities: ["fs.readFile"], map: (input, callId) => ({ op: "fs.readFile", callId, path: input.path }) }
+    ]
+  },
+  browser_open: {
+    version: 1,
+    description: "Start a new browser session on the user\u2019s computer, optionally opening a URL. Returns a sessionId to pass to the other browser tools. Prefer reusing an open session over opening a new one.",
+    inputSchema: exports_external.object({ url: text("Optional full https:// URL to open after the session starts. Omit to start blank.").optional() }).strict(),
+    routes: [browserRoute("browser_open")]
+  },
+  browser_snapshot: {
+    version: 1,
+    description: "Read the current page in an open browser session as a text accessibility tree \u2014 the fastest way to see what is on the page. Each element is listed with a [ref=eN] handle identifying it, valid only until the page changes.",
+    inputSchema: exports_external.object({ sessionId: text("Session ID from browser_open."), pageId: text("Optional page ID from browser_status. Defaults to the most recently opened tab.").optional() }).strict(),
+    routes: [browserRoute("browser_snapshot")]
+  },
+  browser_status: {
+    version: 1,
+    description: "List open browser sessions (no arguments), the tabs in one session (sessionId), or details of one tab (sessionId + pageId).",
+    inputSchema: exports_external.object({ sessionId: text("Optional session ID to inspect.").optional(), pageId: text("Optional page ID from a prior browser_status call. Requires sessionId.").optional() }).strict(),
+    routes: [browserRoute("browser_status")]
+  },
+  browser_close: {
+    version: 1,
+    description: "Close a browser session opened with browser_open.",
+    inputSchema: exports_external.object({ sessionId: text("Session ID to close.") }).strict(),
+    routes: [browserRoute("browser_close")]
+  },
+  browser_screenshot: {
+    version: 1,
+    description: "Take a screenshot of the current page in an open browser session and look at it directly. Use this when the answer depends on how the page renders \u2014 layout, imagery, charts, a visual bug \u2014 rather than on the text browser_snapshot returns; prefer browser_snapshot when reading the page is enough.",
+    inputSchema: exports_external.object({ sessionId: text("Session ID from browser_open."), pageId: text("Optional page ID from browser_status. Defaults to the most recently opened tab.").optional() }).strict(),
+    routes: [{
+      primitive: "browser.capture",
+      requiredCapabilities: ["browser.act", EXECUTOR_IMAGE_CAPABILITY],
+      map: (input, callId) => ({
+        op: "browser.capture",
+        callId,
+        sessionId: input.sessionId,
+        ...input.pageId === undefined ? {} : { pageId: input.pageId }
+      })
+    }]
+  }
+};
+var ALL_EXECUTOR_TOOL_CAPABILITIES = Object.freeze([...new Set(Object.values(EXECUTOR_TOOL_CONTRACTS).flatMap((contract) => contract.routes.flatMap((route) => [...route.requiredCapabilities])))]);
+var LEDGER_TRACKED_EXECUTOR_EFFECTS = Object.freeze(Object.entries(EXECUTOR_TOOL_CONTRACTS).flatMap(([toolName, contract]) => contract.routes.filter((route) => route.requiredCapabilities.some(isEffectJournalCapability)).map((route) => ({ toolName, primitive: route.primitive }))));
+var routeRequirementsByPrimitive = new Map;
+for (const contract of Object.values(EXECUTOR_TOOL_CONTRACTS)) {
+  for (const route of contract.routes) {
+    const existing = routeRequirementsByPrimitive.get(route.primitive);
+    if (existing && (existing.length !== route.requiredCapabilities.length || existing.some((capability, index) => capability !== route.requiredCapabilities[index]))) {
+      throw new Error(`Executor Tool routes for ${route.primitive} have divergent capability requirements`);
+    }
+    routeRequirementsByPrimitive.set(route.primitive, route.requiredCapabilities);
+  }
+}
+// ../contracts/src/dockProject.ts
+var DOCK_PROJECT_MAX_SOURCES = 20;
+var DOCK_PROJECT_MAX_OUTPUTS = 20;
+var DOCK_PROJECT_MAX_DECISIONS = 10;
+var DOCK_PROJECT_MAX_OBJECTIVE_CHARS = 1e5;
+var DOCK_PROJECT_MAX_STAGED_OBJECTIVE_SUGGESTION_CHARS = 4000;
+var DOCK_PROJECT_MAX_NEXT_STEP_CHARS = 2000;
+var DOCK_PROJECT_MAX_SOURCE_OUTPUT_TITLE_CHARS = 1000;
+var DOCK_PROJECT_MAX_DECISION_SUMMARY_CHARS = 4000;
+var DOCK_PROJECT_MAX_COMPLETION_DETAIL_CHARS = 4000;
+var DOCK_PROJECT_MAX_ACTION_LABEL_CHARS = 4000;
+var id3 = exports_external.string().min(1);
+var projectId = exports_external.string().regex(/^dprj_.+$/);
+var threadId = exports_external.string().regex(/^th_.+$/);
+var proposalId = exports_external.string().regex(/^dprp_.+$/);
+var timestamp2 = exports_external.iso.datetime();
+var objectiveText = exports_external.string().min(1).max(DOCK_PROJECT_MAX_OBJECTIVE_CHARS);
+var stagedObjectiveText = exports_external.string().min(1).max(DOCK_PROJECT_MAX_STAGED_OBJECTIVE_SUGGESTION_CHARS);
+var nextStepText = exports_external.string().min(1).max(DOCK_PROJECT_MAX_NEXT_STEP_CHARS);
+var title = exports_external.string().min(1).max(DOCK_PROJECT_MAX_SOURCE_OUTPUT_TITLE_CHARS);
+var createDockProjectThreadRequestSchema = exports_external.object({ creationKey: exports_external.uuid(), objective: objectiveText }).strict();
+var createDockProjectThreadResponseSchema = exports_external.object({ projectId, threadId }).strict();
+var ensureDockProjectRequestSchema = exports_external.object({ threadId, objective: objectiveText }).strict();
+var ensureDockProjectResponseSchema = exports_external.object({ projectId, threadId }).strict();
+var dockProjectObjectiveSuggestionSchema = exports_external.object({
+  text: stagedObjectiveText,
+  sourceTurnRef: id3,
+  suggestedAt: timestamp2
+}).strict();
+var provenanceFields = {
+  source: exports_external.enum(["lore", "user"]),
+  sourceTurnRef: id3.nullable(),
+  updatedByUserId: id3.nullable()
+};
+var refineSourceProvenance = (value, ctx) => {
+  const valid = value.source === "lore" ? typeof value.sourceTurnRef === "string" && value.updatedByUserId === null : value.sourceTurnRef === null && typeof value.updatedByUserId === "string";
+  if (!valid)
+    ctx.addIssue({ code: "custom", message: "provenance must match its source" });
+};
+var dockProjectObjectiveStateSchema = exports_external.object({
+  text: objectiveText,
+  ...provenanceFields,
+  revision: exports_external.number().int().positive(),
+  updatedAt: timestamp2,
+  suggestion: dockProjectObjectiveSuggestionSchema.nullable()
+}).strict().superRefine(refineSourceProvenance);
+var updateDockProjectObjectiveRequestSchema = exports_external.object({
+  expectedRevision: exports_external.number().int().positive(),
+  objective: objectiveText,
+  acceptSuggestion: exports_external.boolean()
+}).strict();
+var recommendationFields = {
+  text: nextStepText,
+  ...provenanceFields,
+  revision: exports_external.number().int().nonnegative(),
+  updatedAt: timestamp2
+};
+var dockProjectRecommendationSchema = exports_external.object(recommendationFields).strict().superRefine(refineSourceProvenance);
+var updateDockProjectNextStepRequestSchema = exports_external.object({
+  expectedRevision: exports_external.number().int().nonnegative(),
+  nextStep: nextStepText.nullable()
+}).strict();
+var updateDockProjectNextStepResponseSchema = exports_external.object({
+  recommendation: dockProjectRecommendationSchema.nullable(),
+  nextStepRevision: exports_external.number().int().nonnegative()
+}).strict();
+var stageDockProjectStateProposalRequestSchema = exports_external.object({
+  objective: stagedObjectiveText.optional(),
+  nextStep: nextStepText.optional()
+}).strict().refine((value) => value.objective !== undefined || value.nextStep !== undefined, {
+  message: "at least one proposed value is required"
+});
+var stageDockProjectStateProposalResponseSchema = exports_external.object({ proposalId, status: exports_external.literal("staged") }).strict();
+var sourceBase = { id: id3, title, relativePath: diffSnapshotPathSchema, boundAt: timestamp2 };
+var dockProjectSourceSchema = exports_external.discriminatedUnion("kind", [
+  exports_external.object({ ...sourceBase, kind: exports_external.literal("document"), loreThreadId: exports_external.null() }).strict(),
+  exports_external.object({ ...sourceBase, kind: exports_external.literal("artifact"), loreThreadId: exports_external.null() }).strict(),
+  exports_external.object({ ...sourceBase, kind: exports_external.literal("lore_thread"), loreThreadId: threadId, loreThreadUrl: exports_external.url() }).strict()
+]);
+var dockProjectOutputSchema = exports_external.object({
+  id: id3,
+  path: diffSnapshotPathSchema,
+  title,
+  versionOrdinal: exports_external.number().int().positive(),
+  mimeType: exports_external.string().min(1).nullable(),
+  updatedAt: timestamp2
+}).strict();
+var dockProjectWorkProgramSchema = exports_external.object({ outputId: id3, title, selectedItemLabel: exports_external.string().min(1).max(DOCK_PROJECT_MAX_ACTION_LABEL_CHARS).nullable() }).strict();
+var dockProjectDecisionKindSchema = exports_external.enum(["asked", "requested", "decided", "corrected", "shared", "requirement"]);
+var dockProjectDecisionSchema = exports_external.object({
+  id: id3,
+  kind: dockProjectDecisionKindSchema,
+  summary: exports_external.string().min(1).max(DOCK_PROJECT_MAX_DECISION_SUMMARY_CHARS),
+  sourceBlockId: id3,
+  createdAt: timestamp2
+}).strict();
+var dockProjectTerminalWorkSchema = exports_external.object({
+  kind: exports_external.literal("terminal"),
+  turnRef: id3,
+  outcomeId: id3,
+  outcome: exports_external.enum(["verified_success", "unverified_completion", "partial_success", "blocked", "exhausted", "cancelled", "failed", "unknown"]),
+  detail: exports_external.string().min(1).max(DOCK_PROJECT_MAX_COMPLETION_DETAIL_CHARS),
+  verification: exports_external.enum(["passed", "failed", "unchecked", "unknown", "unavailable"]),
+  completedAt: timestamp2,
+  effectCount: exports_external.number().int().nonnegative(),
+  reviewId: id3.nullable()
+}).strict();
+var dockProjectCurrentWorkSchema = exports_external.discriminatedUnion("kind", [
+  exports_external.object({ kind: exports_external.literal("none") }).strict(),
+  exports_external.object({
+    kind: exports_external.literal("unsettled"),
+    turnRef: id3,
+    startedAt: timestamp2,
+    reason: exports_external.enum(["turn_running", "effect_in_flight", "effect_unknown", "reconciliation_pending"])
+  }).strict(),
+  dockProjectTerminalWorkSchema
+]);
+var recommendationActionSchema = exports_external.object({ kind: exports_external.literal("recommendation"), ...recommendationFields }).strict().superRefine(refineSourceProvenance);
+var dockProjectNextActionSchema = exports_external.discriminatedUnion("kind", [
+  exports_external.object({
+    kind: exports_external.literal("host_blocker"),
+    target: exports_external.enum(["reconcile", "approval", "review"]),
+    turnRef: id3,
+    label: exports_external.string().min(1).max(DOCK_PROJECT_MAX_ACTION_LABEL_CHARS)
+  }).strict(),
+  recommendationActionSchema,
+  exports_external.object({ kind: exports_external.literal("none") }).strict()
+]);
+var dockProjectResumeSchema = exports_external.object({
+  project: exports_external.object({ id: projectId, primaryThreadId: threadId, updatedAt: timestamp2 }).strict(),
+  objective: dockProjectObjectiveStateSchema,
+  nextStepRevision: exports_external.number().int().nonnegative(),
+  repository: exports_external.object({ label: exports_external.string().min(1).max(DOCK_PROJECT_MAX_SOURCE_OUTPUT_TITLE_CHARS) }).strict().nullable(),
+  sources: exports_external.object({ items: exports_external.array(dockProjectSourceSchema).max(DOCK_PROJECT_MAX_SOURCES), totalCount: exports_external.number().int().nonnegative() }).strict(),
+  outputs: exports_external.object({ items: exports_external.array(dockProjectOutputSchema).max(DOCK_PROJECT_MAX_OUTPUTS), totalCount: exports_external.number().int().nonnegative() }).strict(),
+  workProgram: dockProjectWorkProgramSchema.nullable(),
+  decisions: exports_external.object({ items: exports_external.array(dockProjectDecisionSchema).max(DOCK_PROJECT_MAX_DECISIONS), totalCount: exports_external.number().int().nonnegative() }).strict(),
+  currentWork: dockProjectCurrentWorkSchema,
+  latestCompletedWork: dockProjectTerminalWorkSchema.nullable(),
+  nextAction: dockProjectNextActionSchema
+}).strict();
+var dockProjectInvalidRequestErrorSchema = exports_external.object({ error: exports_external.literal("invalid_request"), retryable: exports_external.literal(false) }).strict();
+var dockProjectUnauthenticatedErrorSchema = exports_external.object({ error: exports_external.literal("unauthenticated"), retryable: exports_external.literal(false) }).strict();
+var dockProjectNotFoundErrorSchema = exports_external.object({ error: exports_external.literal("not_found"), retryable: exports_external.literal(false) }).strict();
+var dockProjectRevisionConflictErrorSchema = exports_external.object({ error: exports_external.literal("revision_conflict"), retryable: exports_external.literal(false) }).strict();
+var dockProjectServiceUnavailableErrorSchema = exports_external.object({ error: exports_external.literal("service_unavailable"), retryable: exports_external.literal(true) }).strict();
+var dockProjectErrorSchema = exports_external.union([
+  dockProjectInvalidRequestErrorSchema,
+  dockProjectUnauthenticatedErrorSchema,
+  dockProjectNotFoundErrorSchema,
+  dockProjectRevisionConflictErrorSchema,
+  dockProjectServiceUnavailableErrorSchema
 ]);
 
 // ../contracts/src/index.ts
@@ -19924,7 +20681,7 @@ var dockTurnRequestSchema = exports_external.object({
   tools: exports_external.array(dockTurnToolSchema).max(64),
   messages: exports_external.array(dockTurnMessageSchema).min(1).max(2000)
 });
-var c10 = initContract();
+var c9 = initContract();
 var publicEmailDomains = [
   "gmail.com",
   "googlemail.com",
@@ -20021,7 +20778,7 @@ var threadSummarySchema2 = exports_external.object({
 var threadDetailsSchema = threadSummarySchema2.extend({
   messages: exports_external.array(messageSchema)
 });
-var errorSchema10 = exports_external.object({
+var errorSchema9 = exports_external.object({
   message: exports_external.string()
 });
 var demoNotSeededResponseSchema = exports_external.object({
@@ -20550,6 +21307,21 @@ var dockHostToolMarkerV1Schema = exports_external.object({
 }).strict();
 var dockHostToolActivityV1Schema = dockHostToolMarkerV1Schema;
 var dockTerminalPresentationV1Schema = dockHostToolMarkerV1Schema;
+var dockApprovalNoticeV1Schema = exports_external.object({
+  version: exports_external.literal(1),
+  approvals: exports_external.array(exports_external.object({
+    approvalId: exports_external.string().min(1),
+    effectId: exports_external.string().min(1),
+    tier: exports_external.string().min(1),
+    scope: exports_external.string().min(1),
+    contentLength: exports_external.number().int().nonnegative()
+  }).strict()).min(1),
+  text: exports_external.string().min(1)
+}).strict();
+var dockTurnOutcomeV1Schema = exports_external.object({
+  outcome: dockOutcomeSchema,
+  stop_reason: dockWireStopReasonSchema
+}).strict();
 var threadBlockObjectSchema = exports_external.object({
   id: exports_external.string().min(1),
   type: exports_external.string().min(1),
@@ -20557,8 +21329,10 @@ var threadBlockObjectSchema = exports_external.object({
   isCritiqued: exports_external.boolean(),
   comment_threads: exports_external.array(threadBlockCommentThreadSchema).optional(),
   exploration: exports_external.lazy(() => explorationSnapshotSchema).optional(),
+  citation_sources: exports_external.array(exports_external.lazy(() => askThreadsSourceSchema)).optional(),
   host_tool_activity: exports_external.array(dockHostToolActivityV1Schema).optional(),
-  terminal_presentation: dockTerminalPresentationV1Schema.optional()
+  terminal_presentation: dockTerminalPresentationV1Schema.optional(),
+  turn_outcome: dockTurnOutcomeV1Schema.optional()
 }).passthrough();
 var threadBlockListResponseSchema = exports_external.object({
   type: exports_external.literal("list"),
@@ -20906,7 +21680,7 @@ var askThreadsTraceStepSchema = exports_external.object({
     thread_id: exports_external.string().min(1).optional(),
     thread_ids: exports_external.array(exports_external.string().min(1)).optional(),
     question: exports_external.string().min(1).optional(),
-    phase: exports_external.enum(["tier0", "injected_search", "model_step", "tool_call", "finalization"]).optional(),
+    phase: exports_external.enum(["tier0", "injected_search", "model_step", "tool_call", "rerank", "finalization"]).optional(),
     tier0_resolver: exports_external.enum(["roster", "identifier", "recency", "aggregate"]).optional(),
     tier0_result: exports_external.enum(["claimed", "declined"]).optional(),
     tool_name: exports_external.enum(["search_threads", "find_exact", "read_thread", "lookup_knowledge", "aggregate", "list_people"]).optional(),
@@ -20915,8 +21689,18 @@ var askThreadsTraceStepSchema = exports_external.object({
     parallel_fan_out: exports_external.number().int().positive().optional(),
     origin: exports_external.enum(["tier0", "injected-search", "driver"]).optional(),
     error_kind: exports_external.enum(["unknown_person", "ambiguous_person", "visibility_rejection", "timeout", "retrieval_error"]).optional(),
-    termination_reason: exports_external.enum(["answered", "abstained", "capped", "timed_out", "tool_error"]).optional(),
+    skip_reason: exports_external.enum(["no_searchable_content"]).optional(),
+    timeout_source: exports_external.enum(["injected_budget", "driver_tool_budget", "ask_deadline"]).optional(),
+    termination_reason: exports_external.enum(["answered", "abstained", "capped", "timed_out", "tool_error", "gathering_deadline"]).optional(),
     registered_sources: exports_external.number().int().nonnegative().optional(),
+    candidate_count: exports_external.number().int().nonnegative().optional(),
+    collapsed_count: exports_external.number().int().nonnegative().optional(),
+    ranked_count: exports_external.number().int().nonnegative().optional(),
+    rerank_ms: exports_external.number().nonnegative().optional(),
+    dropped_unknown_id_count: exports_external.number().int().nonnegative().optional(),
+    appended_missing_id_count: exports_external.number().int().nonnegative().optional(),
+    top1_rank_delta: exports_external.number().int().nullable().optional(),
+    rerank_outcome: exports_external.enum(["applied", "skipped_below_threshold", "skipped_cap_exhausted", "failed_open"]).optional(),
     entity_target: askThreadsTraceEntityTargetSchema.optional().describe("Historical decision-tracer plan echo retained for snapshot compatibility."),
     entity_coverage: exports_external.enum(["graph_match", "raw_evidence_only", "none"]).optional().describe("Historical decision-tracer coverage tier retained for snapshot compatibility."),
     entity_anchors: exports_external.array(askThreadsTraceEntityAnchorSchema).optional().describe("Decision-tracer anchor ids + combined scores (ids/scores only, no payload text)."),
@@ -21345,7 +22129,8 @@ var skillSummarySchema = exports_external.object({
   usage_count: exports_external.number().int().nonnegative(),
   author_count: exports_external.number().int().nonnegative(),
   first_used_at: exports_external.string().nullable(),
-  last_used_at: exports_external.string().nullable()
+  last_used_at: exports_external.string().nullable(),
+  workbench_enabled: exports_external.boolean().optional()
 });
 var skillIndexResponseSchema = exports_external.object({
   type: exports_external.literal("list"),
@@ -21382,6 +22167,25 @@ var skillDetailThreadSchema = exports_external.object({
   author: threadListAuthorSchema,
   skills_invoked: exports_external.array(exports_external.string())
 });
+var skillTemplateVariableTypeSchema = exports_external.enum([
+  "text",
+  "path",
+  "url",
+  "number",
+  "email"
+]);
+var skillTemplateMappingSchema = exports_external.object({
+  start_byte: exports_external.number().int().nonnegative(),
+  end_byte: exports_external.number().int().positive(),
+  original_text_hash: exports_external.string().min(1)
+});
+var skillTemplateDisplayVariableSchema = exports_external.object({
+  name: exports_external.string().trim().min(1).max(100),
+  description: exports_external.string().trim().max(2000).nullable(),
+  type: skillTemplateVariableTypeSchema,
+  default: exports_external.string().nullable().describe("Initially null for every generated or manual variable."),
+  mappings: exports_external.array(skillTemplateMappingSchema).min(1)
+});
 var skillDetailVersionSchema = exports_external.object({
   version_id: exports_external.string().nullable().describe("Stable accepted skill version ID; null only for optimistic client-side entries"),
   version: exports_external.number().int().positive().describe("Version timestamp for this SKILL.md body"),
@@ -21394,7 +22198,8 @@ var skillDetailVersionSchema = exports_external.object({
   rejection_reason: exports_external.string().nullable().describe("Owner-provided rejection reason for rejected versions"),
   is_templatized: exports_external.boolean().optional(),
   template_variable_count: exports_external.number().int().nonnegative().optional(),
-  template_mapped_location_count: exports_external.number().int().nonnegative().optional()
+  template_mapped_location_count: exports_external.number().int().nonnegative().optional(),
+  template_variables: exports_external.array(skillTemplateDisplayVariableSchema).optional().describe("Owner-only variable presentation metadata. Hidden internal IDs are never included.")
 });
 var skillDetailResponseSchema = exports_external.object({
   id: exports_external.string(),
@@ -21414,7 +22219,19 @@ var skillDetailResponseSchema = exports_external.object({
   threads: exports_external.array(skillDetailThreadSchema),
   share_token: exports_external.string().nullable(),
   viewer_access: exports_external.enum(["owner", "workspace", "grant", "public"]).optional(),
-  share_count: exports_external.number().int().nonnegative().optional()
+  share_count: exports_external.number().int().nonnegative().optional(),
+  workbench_enabled: exports_external.boolean().optional()
+});
+var workbenchSkillBindingSchema = exports_external.object({
+  binding_id: exports_external.string(),
+  skill_id: exports_external.string(),
+  skill_version_id: exports_external.string(),
+  version: exports_external.number().int().positive(),
+  name: exports_external.string(),
+  description: exports_external.string().nullable()
+});
+var workbenchSkillBindingsResponseSchema = exports_external.object({
+  bindings: exports_external.array(workbenchSkillBindingSchema)
 });
 var setSkillVisibilityRequestSchema = exports_external.object({
   visibility: skillVisibilitySchema2
@@ -21431,25 +22248,9 @@ var sharedSkillPreviewSchema = exports_external.object({
   has_content: exports_external.boolean(),
   viewer_can_install: exports_external.boolean()
 });
-var skillTemplateVariableTypeSchema = exports_external.enum([
-  "text",
-  "path",
-  "url",
-  "number",
-  "email"
-]);
-var skillTemplateMappingSchema = exports_external.object({
-  start_byte: exports_external.number().int().nonnegative(),
-  end_byte: exports_external.number().int().positive(),
-  original_text_hash: exports_external.string().min(1)
-});
 var skillTemplateVariableSchema = exports_external.object({
   id: exports_external.string().min(1).describe("Stable hidden variable id. Never render this value."),
-  name: exports_external.string().trim().min(1).max(100),
-  description: exports_external.string().trim().max(2000).nullable(),
-  type: skillTemplateVariableTypeSchema,
-  default: exports_external.string().nullable().describe("Initially null for every generated or manual variable."),
-  mappings: exports_external.array(skillTemplateMappingSchema).min(1)
+  ...skillTemplateDisplayVariableSchema.shape
 });
 var skillTemplateGenerationProvenanceSchema = exports_external.object({
   prompt_revision: exports_external.string(),
@@ -21506,6 +22307,7 @@ var skillVersionDraftResponseSchema = exports_external.object({
   variables: exports_external.array(skillTemplateVariableSchema),
   revision: exports_external.number().int().nonnegative(),
   generated_result_retained: exports_external.boolean(),
+  automatically_identified_variable_count: exports_external.number().int().nonnegative().nullable(),
   published_version_id: exports_external.string().nullable(),
   submission_action: exports_external.enum(["publish", "propose"])
 });
@@ -21579,7 +22381,8 @@ var sharedSkillTemplateSchema = exports_external.object({
   is_templatized: exports_external.literal(true)
 });
 var artifactSourceSchema = exports_external.enum(["cowork", "native"]);
-var artifactKindSchema = exports_external.enum(["upload", "output"]);
+var artifactKindSchema = exports_external.enum(["upload", "output", "workbench_output"]);
+var coworkArtifactKindSchema = artifactKindSchema.extract(["upload", "output"]);
 var artifactVisibilitySchema = exports_external.enum(["private", "workspace", "public"]);
 var artifactAuthorSchema = exports_external.object({
   id: exports_external.string(),
@@ -21614,13 +22417,44 @@ var artifactIndexResponseSchema = exports_external.object({
   has_more: exports_external.boolean(),
   objects: exports_external.array(artifactSummarySchema)
 });
+var artifactOutputProvenanceStatusSchema = exports_external.enum(["complete", "partial", "unavailable"]);
+var artifactOutputProvenanceEvidenceCategorySchema = exports_external.enum([
+  "repository_material",
+  "document",
+  "artifact",
+  "lore_history",
+  "output",
+  "conversation",
+  "governing_context",
+  "other_context"
+]);
+var artifactOutputProvenancePresentationSchema = exports_external.strictObject({
+  status: artifactOutputProvenanceStatusSchema,
+  evidence: exports_external.array(exports_external.strictObject({
+    category: artifactOutputProvenanceEvidenceCategorySchema,
+    labels: exports_external.array(exports_external.string().min(1)),
+    total_count: exports_external.number().int().nonnegative()
+  })),
+  inferences: exports_external.array(exports_external.string()),
+  uncertainties: exports_external.array(exports_external.string()),
+  derived_from: exports_external.array(exports_external.strictObject({
+    title: exports_external.string().min(1),
+    pinned_version_ordinal: exports_external.number().int().positive(),
+    current_version_ordinal: exports_external.number().int().positive(),
+    finding: exports_external.string().nullable(),
+    web_url: exports_external.string()
+  })),
+  restricted_source_count: exports_external.number().int().nonnegative(),
+  unavailable_source_count: exports_external.number().int().nonnegative()
+});
 var artifactDetailResponseSchema = artifactSummarySchema.extend({
   download_url: exports_external.string().describe("Presigned, time-limited URL to download the artifact bytes."),
   download_url_expires_at: exports_external.string().describe("ISO-8601 expiry for download_url."),
-  preview_url: exports_external.string().nullable().describe("Presigned, time-limited URL that serves the bytes inline for embedding (iframe/img). null when the type is not previewable.")
+  preview_url: exports_external.string().nullable().describe("Presigned, time-limited URL that serves the bytes inline for embedding (iframe/img). null when the type is not previewable."),
+  provenance: artifactOutputProvenancePresentationSchema.nullable()
 });
 var backfillArtifactFileSchema = exports_external.object({
-  kind: artifactKindSchema,
+  kind: coworkArtifactKindSchema,
   file_name: exports_external.string(),
   md5: exports_external.string(),
   size_in_bytes: exports_external.number().int().nonnegative(),
@@ -21634,7 +22468,7 @@ var presignBackfillArtifactsRequestSchema = exports_external.object({
 var presignBackfillArtifactsResponseSchema = exports_external.object({
   thread_id: exports_external.string(),
   artifact_files: exports_external.array(exports_external.object({
-    kind: artifactKindSchema,
+    kind: coworkArtifactKindSchema,
     file_name: exports_external.string(),
     presigned_url: exports_external.string().nullable(),
     storage_url: exports_external.string()
@@ -21644,7 +22478,7 @@ var commitBackfillArtifactsRequestSchema = exports_external.object({
   harness: exports_external.string(),
   harness_internal_id: exports_external.string(),
   artifacts: exports_external.array(exports_external.object({
-    kind: artifactKindSchema,
+    kind: coworkArtifactKindSchema,
     file_name: exports_external.string(),
     storage_url: exports_external.string(),
     md5: exports_external.string(),
@@ -21667,6 +22501,51 @@ var shareArtifactResponseSchema = exports_external.object({
   artifact_id: exports_external.string(),
   thread_id: exports_external.string(),
   web_url: exports_external.string().describe("Lore web URL that opens this artifact for the team.")
+});
+var recordDockOutputRequestSchema = exports_external.object({
+  harness: exports_external.string().describe("Harness of the source session, e.g. dock"),
+  harness_internal_id: exports_external.string().describe("Source session id (threads.harness_internal_id)"),
+  tool_call_id: exports_external.string().min(1).optional().describe("Successful canonical show_artifact Tool call identity."),
+  path: exports_external.string().min(1).describe("Path relative to the Session folder, e.g. docs/plan.md. With the thread this is the Output's identity, so the server canonicalizes it before storing \u2014 `\\` becomes `/`, duplicate slashes collapse, and `.` segments drop, which makes `./plan.md` and `plan.md` one Output rather than two. Callers should still send a normalized path. Absolute paths and `..` segments are rejected rather than resolved (400)."),
+  title: exports_external.string().min(1).describe("The name a person recognizes, e.g. Quarterly plan"),
+  content_base64: exports_external.string().min(1).describe("Output bytes, base64-encoded. Max 10 MiB decoded."),
+  content_type: exports_external.string().nullable().optional().describe("MIME type, e.g. text/markdown"),
+  content_hash: exports_external.string().regex(/^sha256:[0-9a-f]{64}$/, "content_hash must be sha256:<64 lowercase hex> over the decoded bytes").describe("sha256:<64 lowercase hex> over the decoded bytes. The server verifies it before writing: an equal hash suppresses the upload and the new version, so the dedupe decision must not be caller-assertable.")
+});
+var recordDockOutputResponseSchema = exports_external.object({
+  output_id: exports_external.string().describe("Durable Output id, e.g. dout_..."),
+  thread_id: exports_external.string(),
+  version_created: exports_external.boolean().describe("False when the bytes matched the current version: no upload, no new version."),
+  version_ordinal: exports_external.number().int().positive().describe("Ordinal of the current version after this call \u2014 a number a person can say out loud."),
+  web_url: exports_external.string().describe("Lore web URL that opens this Output for the team (the mirrored artifact page).")
+});
+var setDockOutputDemotedRequestSchema = exports_external.object({
+  harness: exports_external.string().min(1),
+  harness_internal_id: exports_external.string().min(1),
+  path: exports_external.string().min(1),
+  demoted: exports_external.boolean()
+});
+var setDockOutputDemotedResponseSchema = exports_external.object({ demoted: exports_external.boolean() });
+var setDockOutputDemotedNotFoundResponseSchema = exports_external.object({
+  code: exports_external.enum(["session_missing", "output_missing"]),
+  message: exports_external.string()
+});
+var listDockOutputsQuerySchema = exports_external.object({
+  thread_id: exports_external.string().min(1).describe("Thread whose Outputs to list, e.g. th_.... Visibility is derived from that thread.")
+});
+var dockOutputSummarySchema = exports_external.object({
+  id: exports_external.string(),
+  path: exports_external.string(),
+  title: exports_external.string(),
+  version_ordinal: exports_external.number().int().positive().describe("The current version's ordinal."),
+  size_in_bytes: exports_external.number().int().nonnegative().describe("The current version's size."),
+  mime_type: exports_external.string().nullable(),
+  demoted: exports_external.boolean().describe("True when removed from the Outputs surface. Demoted Outputs are flagged, never omitted."),
+  updated_at: exports_external.string()
+});
+var listDockOutputsResponseSchema = exports_external.object({
+  objects: exports_external.array(dockOutputSummarySchema),
+  has_more: exports_external.boolean().describe("True when the thread has more Outputs than this bounded read returned. There is no cursor: the cap is a ceiling, not a page size, and demoted Outputs are included in it \u2014 so a demote-heavy thread needs this flag to say the tail was dropped rather than hiding it.")
 });
 var skillInstallationSkillSchema = exports_external.object({
   id: exports_external.string(),
@@ -22431,7 +23310,106 @@ var threadCoverUploadResponseSchema = exports_external.object({
   cover_generated_at: exports_external.string().min(1)
 });
 var profileByHandleResponseSchema = userProfileResourceSchema;
-var apiContract = c10.router({
+var ampEnrollmentChallengeSchema = exports_external.object({
+  challenge: exports_external.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  expires_at: exports_external.iso.datetime(),
+  amp_workspace_id: exports_external.uuid()
+});
+var ampConnectionSchema = exports_external.discriminatedUnion("status", [
+  exports_external.object({ status: exports_external.literal("not_connected") }),
+  exports_external.object({
+    status: exports_external.literal("connected"),
+    amp_user_id: exports_external.string().trim().min(1),
+    amp_workspace_id: exports_external.uuid(),
+    connected_at: exports_external.iso.datetime(),
+    revoked_at: exports_external.null(),
+    last_live_upload_at: exports_external.iso.datetime().nullable()
+  }),
+  exports_external.object({
+    status: exports_external.literal("revoked"),
+    amp_user_id: exports_external.string().trim().min(1),
+    amp_workspace_id: exports_external.uuid(),
+    connected_at: exports_external.iso.datetime(),
+    revoked_at: exports_external.iso.datetime(),
+    last_live_upload_at: exports_external.iso.datetime().nullable()
+  })
+]);
+var ampSyncRunKindSchema = exports_external.enum(["backfill", "reconciliation"]);
+var ampSyncRunStatusSchema = exports_external.enum([
+  "running",
+  "complete",
+  "complete_with_failures",
+  "cancelled"
+]);
+var ampSyncRunCountsSchema = exports_external.strictObject({
+  discovered: exports_external.number().int().nonnegative(),
+  selected: exports_external.number().int().nonnegative(),
+  exported: exports_external.number().int().nonnegative(),
+  uploaded: exports_external.number().int().nonnegative(),
+  deduped: exports_external.number().int().nonnegative(),
+  filtered: exports_external.number().int().nonnegative(),
+  failed: exports_external.number().int().nonnegative()
+});
+var ampSyncRunSchema = exports_external.object({
+  id: exports_external.string().startsWith("ampsync_"),
+  kind: ampSyncRunKindSchema,
+  selection: exports_external.literal("all"),
+  status: ampSyncRunStatusSchema,
+  started_at: exports_external.iso.datetime(),
+  completed_at: exports_external.iso.datetime().nullable(),
+  inventory_cutoff_at: exports_external.iso.datetime().nullable(),
+  inventory_cursor: exports_external.string().max(256).nullable(),
+  counts: ampSyncRunCountsSchema
+});
+var ampCohortSyncStateSchema = exports_external.enum([
+  "not_enrolled",
+  "awaiting_enrollment_orb",
+  "enrolled",
+  "backfill_running",
+  "complete",
+  "complete_with_failures"
+]);
+var ampCohortStatusSchema = exports_external.strictObject({
+  complete: exports_external.boolean(),
+  aggregate: exports_external.strictObject({
+    total_active: exports_external.number().int().nonnegative(),
+    enrolled: exports_external.number().int().nonnegative(),
+    complete: exports_external.number().int().nonnegative(),
+    incomplete: exports_external.number().int().nonnegative(),
+    unresolved_failures: exports_external.number().int().nonnegative()
+  }),
+  members: exports_external.array(exports_external.strictObject({
+    workos_membership_id: exports_external.string().min(1),
+    lore_user_id: exports_external.string().startsWith("user_").nullable(),
+    display_name: exports_external.string().nullable(),
+    handle: exports_external.string().nullable(),
+    connection_state: exports_external.enum(["not_connected", "connected", "revoked"]),
+    sync_state: ampCohortSyncStateSchema,
+    counts: ampSyncRunCountsSchema.nullable()
+  }))
+});
+var ampSyncRunErrorSchema = exports_external.object({
+  code: exports_external.enum(["forbidden", "not_found", "invalid_counts", "terminal_conflict", "provider_unavailable"]),
+  message: exports_external.string(),
+  retryable: exports_external.boolean().optional()
+});
+var ampEnrollmentErrorSchema = exports_external.object({
+  code: exports_external.enum([
+    "invalid_token",
+    "invalid_challenge",
+    "wrong_workspace",
+    "forbidden",
+    "identity_conflict",
+    "revoked_connection",
+    "provider_unavailable"
+  ]),
+  message: exports_external.string(),
+  retryable: exports_external.boolean().optional()
+});
+var ampAuthorizationHeadersSchema = exports_external.object({
+  authorization: exports_external.string().min(1).optional()
+});
+var apiContract = c9.router({
   health: {
     method: "GET",
     path: "/health",
@@ -22488,19 +23466,79 @@ var apiContract = c10.router({
     }),
     responses: {
       200: whoAmIResponseSchema,
-      401: errorSchema10,
-      500: errorSchema10,
-      502: errorSchema10,
+      401: errorSchema9,
+      500: errorSchema9,
+      502: errorSchema9,
       503: demoNotSeededResponseSchema
     },
     summary: "Validate a WorkOS Bearer token and return member plus user fields"
+  },
+  createAmpEnrollmentChallenge: {
+    method: "POST",
+    path: "/amp/enrollment/challenges",
+    headers: ampAuthorizationHeadersSchema,
+    body: exports_external.strictObject({}),
+    responses: { 201: ampEnrollmentChallengeSchema, 401: errorSchema9, 403: ampEnrollmentErrorSchema, 503: ampEnrollmentErrorSchema },
+    summary: "Create an Amp enrollment challenge for the authenticated Lore member"
+  },
+  completeAmpEnrollmentChallenge: {
+    method: "POST",
+    path: "/amp/enrollment/completions",
+    headers: ampAuthorizationHeadersSchema,
+    body: exports_external.strictObject({ challenge: exports_external.string().trim().min(1) }),
+    responses: { 200: ampConnectionSchema, 400: ampEnrollmentErrorSchema, 401: ampEnrollmentErrorSchema, 403: ampEnrollmentErrorSchema, 409: ampEnrollmentErrorSchema, 503: ampEnrollmentErrorSchema },
+    summary: "Complete enrollment using a dedicated Amp OIDC bearer token"
+  },
+  getAmpConnection: {
+    method: "GET",
+    path: "/amp/connection",
+    headers: ampAuthorizationHeadersSchema,
+    responses: { 200: ampConnectionSchema, 401: errorSchema9, 403: ampEnrollmentErrorSchema, 503: ampEnrollmentErrorSchema },
+    summary: "Get the authenticated Lore member connection state"
+  },
+  revokeAmpConnection: {
+    method: "DELETE",
+    path: "/amp/connection",
+    headers: ampAuthorizationHeadersSchema,
+    body: exports_external.undefined(),
+    responses: { 200: ampConnectionSchema, 401: errorSchema9, 403: ampEnrollmentErrorSchema, 503: ampEnrollmentErrorSchema },
+    summary: "Revoke the authenticated Lore member connection"
+  },
+  createAmpSyncRun: {
+    method: "POST",
+    path: "/amp/sync-runs",
+    headers: ampAuthorizationHeadersSchema,
+    body: exports_external.strictObject({ kind: ampSyncRunKindSchema, selection: exports_external.literal("all") }),
+    responses: { 201: ampSyncRunSchema, 401: errorSchema9, 403: ampSyncRunErrorSchema, 503: ampSyncRunErrorSchema },
+    summary: "Create an aggregate Amp history sync run for the authenticated member"
+  },
+  updateAmpSyncRun: {
+    method: "PATCH",
+    path: "/amp/sync-runs/:runId",
+    pathParams: exports_external.object({ runId: exports_external.string().startsWith("ampsync_") }),
+    headers: ampAuthorizationHeadersSchema,
+    body: exports_external.strictObject({
+      status: ampSyncRunStatusSchema,
+      counts: ampSyncRunCountsSchema,
+      inventory_cutoff_at: exports_external.iso.datetime().nullable().optional(),
+      inventory_cursor: exports_external.string().max(256).nullable().optional()
+    }),
+    responses: { 200: ampSyncRunSchema, 400: ampSyncRunErrorSchema, 401: errorSchema9, 403: ampSyncRunErrorSchema, 404: ampSyncRunErrorSchema, 409: ampSyncRunErrorSchema, 503: ampSyncRunErrorSchema },
+    summary: "Monotonically update an authenticated member Amp sync run"
+  },
+  listAmpCohortStatus: {
+    method: "GET",
+    path: "/amp/cohort-status",
+    headers: ampAuthorizationHeadersSchema,
+    responses: { 200: ampCohortStatusSchema, 401: errorSchema9, 403: ampSyncRunErrorSchema, 503: ampSyncRunErrorSchema },
+    summary: "List aggregate Amp enrollment and backfill status for the active cohort (admin only)"
   },
   getCliAuthConfig: {
     method: "GET",
     path: "/cli-auth/config",
     responses: {
       200: cliAuthConfigResponseSchema,
-      503: errorSchema10
+      503: errorSchema9
     },
     summary: "Return public WorkOS CLI Auth configuration for the Lore CLI"
   },
@@ -22509,7 +23547,7 @@ var apiContract = c10.router({
     path: "/desktop-auth/config",
     responses: {
       200: cliAuthConfigResponseSchema,
-      503: errorSchema10
+      503: errorSchema9
     },
     summary: "Return public WorkOS configuration for the Lore desktop app (dedicated native client, separate from the web/CLI client)"
   },
@@ -22521,7 +23559,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: cliStatusResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "Return whether the viewer has connected the Lore CLI (i.e., uploaded any thread under a non-unspecified harness), plus the latest upload timestamp and the desktop app equivalent (installed/connected/last upload)."
   },
@@ -22534,10 +23572,10 @@ var apiContract = c10.router({
     body: recordHeartbeatRequestSchema,
     responses: {
       200: recordHeartbeatResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      422: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
+      422: errorSchema9
     },
     summary: "Record (or refresh) a presence heartbeat for the authenticated user against one of their own threads. Idempotent; the daemon should call this every ~30s while a session is open."
   },
@@ -22550,7 +23588,7 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: recordProductPresenceResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "Record (or refresh) an authenticated Lore web-app presence heartbeat for the current user. Browser clients call this while the product is open."
   },
@@ -22563,7 +23601,7 @@ var apiContract = c10.router({
     body: recordUploadHeartbeatRequestSchema,
     responses: {
       200: recordUploadHeartbeatResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "Record a liveness heartbeat for the authenticated user's upload watch daemon (standalone CLI or the desktop app's embedded import loop). Idempotent; the daemon calls this ~every 60s and on each completed upload (upload_completed:true). Daemon-internal \u2014 not a `lore` subcommand."
   },
@@ -22577,7 +23615,7 @@ var apiContract = c10.router({
     body: recordUploadHeartbeatRequestSchema,
     responses: {
       200: recordUploadHeartbeatResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "Deprecated alias of recordUploadHeartbeat for pre-rename CLI/desktop builds."
   },
@@ -22589,8 +23627,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: liveThreadListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "List people with user-block activity in the last 10 minutes. Includes the viewer\u2019s workspace and followed authors, deduped per author, max 10."
   },
@@ -22603,7 +23641,7 @@ var apiContract = c10.router({
     query: listThreadsQuerySchema,
     responses: {
       200: threadListResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "List threads visible to the authenticated user"
   },
@@ -22616,7 +23654,7 @@ var apiContract = c10.router({
     body: createThreadRequestSchema,
     responses: {
       201: createThreadResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "Create an empty Lore-native thread for the authenticated user"
   },
@@ -22631,7 +23669,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: threadResourceSchema,
-      404: errorSchema10
+      404: errorSchema9
     },
     summary: "Load a visible thread by id"
   },
@@ -22646,7 +23684,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: threadParseStatusResponseSchema,
-      404: errorSchema10
+      404: errorSchema9
     },
     summary: "Load only the transcript parsing status for a visible thread"
   },
@@ -22662,9 +23700,9 @@ var apiContract = c10.router({
     body: resolveThreadShareHighlightRequestSchema,
     responses: {
       200: resolveThreadShareHighlightResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      401: errorSchema9,
+      404: errorSchema9,
+      409: errorSchema9
     },
     summary: "Resolve a natural-language share highlight to a canonical /thread URL with block anchors"
   },
@@ -22680,7 +23718,7 @@ var apiContract = c10.router({
     body: exports_external.object({}),
     responses: {
       202: requestThreadAccessResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "Notify a thread owner that a signed-in viewer is requesting access"
   },
@@ -22693,7 +23731,7 @@ var apiContract = c10.router({
     body: askThreadsRequestSchema,
     responses: {
       200: askThreadsResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "Answer a question from the top 20 visible decision matches, grouped back into threads"
   },
@@ -22709,8 +23747,8 @@ var apiContract = c10.router({
     body: forkThreadRequestSchema,
     responses: {
       200: forkSummarySchema,
-      403: errorSchema10,
-      404: errorSchema10
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Generate a distilled source handoff for continuing a visible coding-assistant session"
   },
@@ -22726,7 +23764,7 @@ var apiContract = c10.router({
     query: threadBlockListQuerySchema,
     responses: {
       200: threadBlockListResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "List blocks for a visible thread"
   },
@@ -22743,8 +23781,8 @@ var apiContract = c10.router({
     body: createThreadBlockCommentThreadRequestSchema,
     responses: {
       201: createThreadBlockCommentThreadResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      404: errorSchema9
     },
     summary: "Create a new block-level comment thread on a visible thread block"
   },
@@ -22762,9 +23800,9 @@ var apiContract = c10.router({
     body: createThreadBlockCommentRequestSchema,
     responses: {
       201: createThreadBlockCommentResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      401: errorSchema9,
+      404: errorSchema9,
+      409: errorSchema9
     },
     summary: "Reply to a block-level comment thread on a visible thread block"
   },
@@ -22782,8 +23820,8 @@ var apiContract = c10.router({
     body: updateThreadBlockCommentThreadRequestSchema,
     responses: {
       200: updateThreadBlockCommentThreadResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      404: errorSchema9
     },
     summary: "Resolve or reopen a block-level comment thread on a visible thread block"
   },
@@ -22796,9 +23834,45 @@ var apiContract = c10.router({
     query: listSkillsQuerySchema,
     responses: {
       200: skillIndexResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "List visible workspace skills"
+  },
+  listWorkbenchSkillBindings: {
+    method: "GET",
+    path: "/skills/workbench-bindings",
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    responses: {
+      200: workbenchSkillBindingsResponseSchema,
+      401: errorSchema9
+    },
+    summary: "List skills enabled for the current user in Workbench"
+  },
+  enableWorkbenchSkill: {
+    method: "POST",
+    path: "/skills/:id/workbench-binding",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    body: exports_external.object({}).optional(),
+    responses: {
+      200: workbenchSkillBindingSchema,
+      401: errorSchema9,
+      404: errorSchema9,
+      409: errorSchema9
+    },
+    summary: "Pin the current accepted skill version for Workbench"
+  },
+  disableWorkbenchSkill: {
+    method: "DELETE",
+    path: "/skills/:id/workbench-binding",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    body: exports_external.object({}).optional(),
+    responses: {
+      200: exports_external.object({ disabled: exports_external.literal(true) }),
+      401: errorSchema9
+    },
+    summary: "Disable a skill for the current user in Workbench"
   },
   reconcileLocalSkills: {
     method: "GET",
@@ -22809,7 +23883,7 @@ var apiContract = c10.router({
     query: reconcileLocalSkillsQuerySchema,
     responses: {
       200: localSkillReconciliationResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "Reconcile scanned local skills with visible server-side skills by ID or content hash"
   },
@@ -22821,7 +23895,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: sharedSkillsResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "List public skills the viewer installed or copied (Shared with you)"
   },
@@ -22839,8 +23913,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: skillDetailResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      404: errorSchema9
     },
     summary: "Get visible skill details by stable skill ID"
   },
@@ -22855,7 +23929,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: exports_external.union([sharedSkillTemplateSchema, sharedSkillPreviewSchema]),
-      404: errorSchema10
+      404: errorSchema9
     },
     summary: "Public no-login preview of a skill shared by link (install requires auth)"
   },
@@ -22870,7 +23944,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: sharedSkillPreviewSchema,
-      404: errorSchema10
+      404: errorSchema9
     },
     summary: "Public no-login metadata preview of a skill by id (install requires auth)"
   },
@@ -22887,10 +23961,10 @@ var apiContract = c10.router({
     responses: {
       200: skillVersionDraftResponseSchema,
       202: skillVersionDraftResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
+      409: skillVersionDraftConflictSchema
     },
     summary: "Start or resume background templatization of a shared skill"
   },
@@ -22901,9 +23975,9 @@ var apiContract = c10.router({
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
     responses: {
       200: skillVersionDraftResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Get the current viewer's templatization draft for a skill"
   },
@@ -22919,9 +23993,9 @@ var apiContract = c10.router({
     body: publishSkillShareTemplateRequestSchema,
     responses: {
       200: skillShareTemplateSubmissionResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
       409: skillVersionDraftConflictSchema
     },
     summary: "Publish an immutable templatized skill version"
@@ -22939,10 +24013,10 @@ var apiContract = c10.router({
     body: updateSkillVersionDraftRequestSchema,
     responses: {
       200: skillVersionDraftResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
+      400: errorSchema9,
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
       409: skillVersionDraftConflictSchema
     },
     summary: "Autosave a templatization draft with optimistic concurrency"
@@ -22957,9 +24031,9 @@ var apiContract = c10.router({
     }),
     responses: {
       200: skillVersionDraftResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
       409: skillVersionDraftConflictSchema
     },
     summary: "Atomically rebase a templatization draft onto the current skill version"
@@ -22972,9 +24046,9 @@ var apiContract = c10.router({
     body: exports_external.object({}),
     responses: {
       200: skillVersionDraftResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
       409: skillVersionDraftConflictSchema
     },
     summary: "Retry persistence of a retained generated result without rerunning the model"
@@ -22991,9 +24065,9 @@ var apiContract = c10.router({
     body: setSkillVisibilityRequestSchema,
     responses: {
       200: skillDetailResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Set a skill's visibility (owner only); minting a share link when set to public"
   },
@@ -23006,7 +24080,7 @@ var apiContract = c10.router({
     query: listArtifactsQuerySchema,
     responses: {
       200: artifactIndexResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "List visible artifacts (files produced by Cowork or native threads)"
   },
@@ -23021,8 +24095,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: artifactDetailResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      404: errorSchema9
     },
     summary: "Get a visible artifact with a presigned download URL"
   },
@@ -23035,8 +24109,8 @@ var apiContract = c10.router({
     body: presignBackfillArtifactsRequestSchema,
     responses: {
       200: presignBackfillArtifactsResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      404: errorSchema9
     },
     summary: "Presign artifact-byte uploads for an existing session thread (backfill)"
   },
@@ -23049,8 +24123,8 @@ var apiContract = c10.router({
     body: commitBackfillArtifactsRequestSchema,
     responses: {
       200: commitBackfillArtifactsResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      404: errorSchema9
     },
     summary: "Promote backfilled artifact bytes into artifact rows"
   },
@@ -23063,12 +24137,50 @@ var apiContract = c10.router({
     body: shareArtifactRequestSchema,
     responses: {
       200: shareArtifactResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      404: errorSchema10,
-      413: errorSchema10
+      400: errorSchema9,
+      401: errorSchema9,
+      404: errorSchema9,
+      413: errorSchema9
     },
     summary: "Publish a live local artifact to its session thread and get a shareable web URL"
+  },
+  recordDockOutput: {
+    method: "POST",
+    path: "/dock/outputs",
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: recordDockOutputRequestSchema,
+    responses: {
+      200: recordDockOutputResponseSchema,
+      400: errorSchema9,
+      401: errorSchema9,
+      404: errorSchema9,
+      409: errorSchema9,
+      413: errorSchema9
+    },
+    summary: "Mirror a promoted Workbench Output to its session thread, versioned and deduped"
+  },
+  setDockOutputDemoted: {
+    method: "POST",
+    path: "/dock/outputs/demotion",
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    body: setDockOutputDemotedRequestSchema,
+    responses: { 200: setDockOutputDemotedResponseSchema, 400: errorSchema9, 401: errorSchema9, 404: setDockOutputDemotedNotFoundResponseSchema },
+    summary: "Remove or restore a durable Output for the authenticated Dock session"
+  },
+  listDockOutputs: {
+    method: "GET",
+    path: "/dock/outputs",
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    query: listDockOutputsQuerySchema,
+    responses: {
+      200: listDockOutputsResponseSchema,
+      401: errorSchema9
+    },
+    summary: "List a visible thread's durable Outputs, newest-updated first, demoted ones flagged"
   },
   getSkillPackage: {
     method: "GET",
@@ -23086,10 +24198,10 @@ var apiContract = c10.router({
     }),
     responses: {
       200: skillPackageDownloadResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
+      409: errorSchema9
     },
     summary: "Download metadata for an accepted skill package or visible proposal package"
   },
@@ -23105,9 +24217,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: skillInstallationResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Register the current user as an installer of a visible skill"
   },
@@ -23123,7 +24235,7 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: skillInstallationSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "Unregister the current user installation for a skill (idempotent)"
   },
@@ -23139,9 +24251,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: unpublishSkillResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Unpublish an owned workspace skill and remove it from the team catalog"
   },
@@ -23157,11 +24269,11 @@ var apiContract = c10.router({
     body: createSkillShareRequestSchema,
     responses: {
       200: skillShareResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      422: errorSchema10
+      400: errorSchema9,
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
+      422: errorSchema9
     },
     summary: "Grant a person view access to a skill by Lore user id or email (owner only). Re-adding a revoked grantee un-revokes; capped at 50 active grants per skill."
   },
@@ -23176,9 +24288,9 @@ var apiContract = c10.router({
     }),
     responses: {
       200: skillSharesListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "List the active per-person grants on a skill with pending/active status (owner only)."
   },
@@ -23195,9 +24307,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: skillShareResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Soft-revoke a per-person grant on a skill (owner only)."
   },
@@ -23213,9 +24325,9 @@ var apiContract = c10.router({
     body: updateSkillInstallationRequestSchema,
     responses: {
       200: skillInstallationSchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      422: errorSchema10
+      401: errorSchema9,
+      404: errorSchema9,
+      422: errorSchema9
     },
     summary: "Record the accepted skill version installed by the current user"
   },
@@ -23227,7 +24339,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: skillInstallationSyncResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "List installed skills with latest accepted version metadata"
   },
@@ -23243,8 +24355,8 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: skillCopyResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      404: errorSchema9
     },
     summary: "Record that the viewer copied a public skill (for the Shared with you tab)"
   },
@@ -23255,9 +24367,9 @@ var apiContract = c10.router({
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
     responses: {
       200: skillProposalListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "List package proposals visible to the current user for a skill"
   },
@@ -23272,11 +24384,11 @@ var apiContract = c10.router({
     body: approveSkillProposalRequestSchema,
     responses: {
       200: skillPackageVersionResourceSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      400: errorSchema9,
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
+      409: errorSchema9
     },
     summary: "Approve a package proposal by proposal ID"
   },
@@ -23291,10 +24403,10 @@ var apiContract = c10.router({
     body: rejectSkillProposalRequestSchema.optional(),
     responses: {
       200: skillProposalResourceSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      400: errorSchema9,
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Reject a package proposal by proposal ID"
   },
@@ -23309,8 +24421,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: threadDecisionListResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      404: errorSchema9
     },
     summary: "List AI-extracted user decisions for a thread, in chronological order"
   },
@@ -23323,7 +24435,7 @@ var apiContract = c10.router({
     query: decisionGraphQuerySchema,
     responses: {
       200: decisionGraphResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "Visible threads active in a date range with their extracted decisions, grouped by thread author"
   },
@@ -23339,9 +24451,9 @@ var apiContract = c10.router({
     body: updateThreadRequestSchema,
     responses: {
       200: threadResourceSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Update thread visibility (author only)"
   },
@@ -23357,9 +24469,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       204: exports_external.null(),
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Soft-delete a thread (author only)"
   },
@@ -23378,10 +24490,10 @@ var apiContract = c10.router({
         cover_status: threadCoverStatusSchema,
         how_to_status: threadHowToStatusSchema
       }),
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      429: errorSchema10.extend({
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
+      429: errorSchema9.extend({
         retry_after_seconds: exports_external.number().int().nonnegative()
       })
     },
@@ -23399,11 +24511,11 @@ var apiContract = c10.router({
     body: threadCoverUploadRequestSchema,
     responses: {
       200: threadCoverUploadResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      413: errorSchema10,
-      422: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
+      413: errorSchema9,
+      422: errorSchema9
     },
     summary: "Upload a custom cover image for a thread. Author or Tanagram admin only. Bytes go to the same storage substrate the AI cover uses (S3 in prod, filesystem in dev), and the threads row is updated atomically with the new cover_storage_url, cover_status='ready', cover_generated_at=now, cover_model='user-uploaded' so subsequent re-rolls / how-to fan-outs treat the upload like any other ready cover."
   },
@@ -23419,11 +24531,11 @@ var apiContract = c10.router({
     body: createThreadShareRequestSchema,
     responses: {
       200: threadShareResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      422: errorSchema10
+      400: errorSchema9,
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
+      422: errorSchema9
     },
     summary: "Grant a person view access to a thread by Lore user id or email (author only). Re-adding a revoked grantee un-revokes; capped at 50 active grants per thread."
   },
@@ -23438,9 +24550,9 @@ var apiContract = c10.router({
     }),
     responses: {
       200: threadSharesListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "List the active per-person grants on a thread with pending/active status (author only)."
   },
@@ -23457,9 +24569,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: threadShareResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Soft-revoke a per-person grant on a thread (author only)."
   },
@@ -23474,7 +24586,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: threadPreviewResponseSchema,
-      404: errorSchema10
+      404: errorSchema9
     },
     summary: "Visibility-redacted metadata for OG / social preview consumers. Optional auth: a viewer to whom the thread is visible (including via a share) gets the full preview; others get the private/workspace stub."
   },
@@ -23489,7 +24601,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: userProfileResourceSchema,
-      404: errorSchema10
+      404: errorSchema9
     },
     summary: "Public profile for a user. Optional auth \u2014 unauthenticated viewers see only public thread metadata; signed-in viewers see counts scoped to the threads they'd normally be able to access."
   },
@@ -23502,9 +24614,9 @@ var apiContract = c10.router({
     body: updateCurrentUserRequestSchema,
     responses: {
       200: userSchema,
-      401: errorSchema10,
-      409: errorSchema10,
-      422: errorSchema10
+      401: errorSchema9,
+      409: errorSchema9,
+      422: errorSchema9
     },
     summary: "Update the authenticated user profile"
   },
@@ -23517,7 +24629,7 @@ var apiContract = c10.router({
     body: exports_external.object({}),
     responses: {
       202: deleteMyThreadDataResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "Queue deletion of the authenticated user\u2019s Lore threads, parsed thread content, and related uploaded thread storage objects."
   },
@@ -23530,7 +24642,7 @@ var apiContract = c10.router({
     body: exports_external.object({}),
     responses: {
       200: reenableMyThreadUploadsResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "Clear the authenticated user\u2019s thread upload disable marker."
   },
@@ -23543,7 +24655,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: profileByHandleResponseSchema,
-      404: errorSchema10
+      404: errorSchema9
     },
     summary: "Resolve a public profile by handle \u2014 same shape as GET /users/:id but keyed on the user's chosen handle."
   },
@@ -23555,7 +24667,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: referralListResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "Total count plus the most-recent referees the authenticated user has attributed via `/?invited_by=\u2026` invite links. Mirrors the inviter side of users.referred_by_user_id."
   },
@@ -23571,7 +24683,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: userActivityListResponseSchema,
-      404: errorSchema10
+      404: errorSchema9
     },
     summary: "Reverse-chronological activity feed for a user, scoped to what the viewer can see (same visibility rules as listThreads)."
   },
@@ -23584,7 +24696,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: userContributionsResponseSchema,
-      404: errorSchema10
+      404: errorSchema9
     },
     summary: "Daily contribution counts for the trailing 365 days \u2014 counts thread blocks the user authored on threads visible to the viewer."
   },
@@ -23597,7 +24709,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: userFollowListResponseSchema,
-      404: errorSchema10
+      404: errorSchema9
     },
     summary: "List the users following a given user."
   },
@@ -23610,7 +24722,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: userFollowListResponseSchema,
-      404: errorSchema10
+      404: errorSchema9
     },
     summary: "List the users a given user is following."
   },
@@ -23623,7 +24735,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: followSuggestionListResponseSchema,
-      404: errorSchema10
+      404: errorSchema9
     },
     summary: "Mutual-follow suggestions for a viewer: walks the viewer's followees one hop further and ranks candidates by mutual count. Replaces a 1 \u2192 24 client-side fan-out across `/users/:seed/following`."
   },
@@ -23637,10 +24749,10 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: followUserResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10,
-      422: errorSchema10
+      401: errorSchema9,
+      404: errorSchema9,
+      409: errorSchema9,
+      422: errorSchema9
     },
     summary: "Follow another user. Idempotent \u2014 repeating the call is a no-op."
   },
@@ -23654,8 +24766,8 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: unfollowUserResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      404: errorSchema9
     },
     summary: "Unfollow a user. Idempotent \u2014 repeating the call is a no-op."
   },
@@ -23668,9 +24780,9 @@ var apiContract = c10.router({
     body: profileImageUploadRequestSchema,
     responses: {
       200: profileImageUploadResponseSchema,
-      401: errorSchema10,
-      413: errorSchema10,
-      422: errorSchema10
+      401: errorSchema9,
+      413: errorSchema9,
+      422: errorSchema9
     },
     summary: "Upload an avatar or banner image (base64-encoded JSON body). The API streams the bytes to its configured storage substrate using its own credentials and returns the canonical storage URL the client passes to PATCH /users/me."
   },
@@ -23682,7 +24794,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: organizationMemberListResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "List members of the authenticated user\u2019s organization"
   },
@@ -23695,10 +24807,10 @@ var apiContract = c10.router({
     body: createOrganizationInviteRequestSchema,
     responses: {
       201: createOrganizationInviteResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      409: errorSchema10,
-      422: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      409: errorSchema9,
+      422: errorSchema9
     },
     summary: "Invite a teammate to the authenticated user\u2019s workspace via WorkOS AuthKit"
   },
@@ -23711,9 +24823,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: ensureWorkOSOrganizationResponseSchema,
-      401: errorSchema10,
-      422: errorSchema10,
-      503: errorSchema10
+      401: errorSchema9,
+      422: errorSchema9,
+      503: errorSchema9
     },
     summary: "Create or reuse a WorkOS organization for the authenticated user\u2019s non-public email domain and add the user as a member."
   },
@@ -23725,8 +24837,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: repositoryListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "List repositories known to the authenticated user\u2019s organization across threads and building blocks"
   },
@@ -23739,8 +24851,8 @@ var apiContract = c10.router({
     body: createBuildingBlockSnapshotsRequestSchema,
     responses: {
       201: createBuildingBlockSnapshotsResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "Create building block snapshots for the authenticated user\u2019s organization"
   },
@@ -23755,9 +24867,9 @@ var apiContract = c10.router({
     }),
     responses: {
       200: getPlanResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Load a thread-backed plan container visible to the authenticated user, including all visible plan revisions in that thread (only the latest revision carries body + prosemirror_json; older revisions are metadata-only and load on demand via getPlanRevision)"
   },
@@ -23773,9 +24885,9 @@ var apiContract = c10.router({
     }),
     responses: {
       200: getPlanRevisionResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Load a single revision body + prosemirror_json + comment threads for a thread-backed plan container. Used to fetch non-latest revisions on demand without paying for every revision when the plan is first opened"
   },
@@ -23791,10 +24903,10 @@ var apiContract = c10.router({
     body: createPlanCommentThreadRequestSchema,
     responses: {
       201: createPlanCommentThreadResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      422: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
+      422: errorSchema9
     },
     summary: "Create a new inline comment thread on a specific revision inside a thread-backed plan container"
   },
@@ -23811,10 +24923,10 @@ var apiContract = c10.router({
     body: createPlanCommentRequestSchema,
     responses: {
       201: createPlanCommentResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
+      409: errorSchema9
     },
     summary: "Reply to an inline comment thread on a thread-backed plan container"
   },
@@ -23831,9 +24943,9 @@ var apiContract = c10.router({
     body: updatePlanCommentThreadRequestSchema,
     responses: {
       200: updatePlanCommentThreadResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Resolve or reopen an inline comment thread on a thread-backed plan container"
   },
@@ -23846,8 +24958,8 @@ var apiContract = c10.router({
     query: listPlansQuerySchema,
     responses: {
       200: planListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "List thread-backed plan containers visible to the authenticated user in their organization, ordered by latest visible revision and optionally filtered by author or repository"
   },
@@ -23860,8 +24972,8 @@ var apiContract = c10.router({
     query: listBuildingBlockSnapshotsQuerySchema,
     responses: {
       200: buildingBlockSnapshotListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "List building block snapshots for the authenticated user\u2019s organization and repo origin path"
   },
@@ -23873,7 +24985,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: uploadSessionListResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "List recent upload sessions for the authenticated user"
   },
@@ -23886,8 +24998,8 @@ var apiContract = c10.router({
     query: listUploadApiKeysQuerySchema,
     responses: {
       200: uploadApiKeyListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "List Upload API keys owned by the authenticated user in a workspace"
   },
@@ -23900,9 +25012,9 @@ var apiContract = c10.router({
     body: createUploadApiKeyRequestSchema,
     responses: {
       201: createUploadApiKeyResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10
+      400: errorSchema9,
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "Create an Upload API key and return the raw key exactly once"
   },
@@ -23918,9 +25030,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: uploadApiKeyResourceSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Revoke an Upload API key owned by the authenticated user"
   },
@@ -23933,9 +25045,9 @@ var apiContract = c10.router({
     query: listWorkosUserApiKeysQuerySchema,
     responses: {
       200: workosUserApiKeyListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      502: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      502: errorSchema9
     },
     summary: "List WorkOS user API keys owned by the authenticated user in a workspace"
   },
@@ -23948,10 +25060,10 @@ var apiContract = c10.router({
     body: createWorkosUserApiKeyRequestSchema,
     responses: {
       201: createWorkosUserApiKeyResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      502: errorSchema10
+      400: errorSchema9,
+      401: errorSchema9,
+      403: errorSchema9,
+      502: errorSchema9
     },
     summary: "Create a WorkOS user API key and return the raw key exactly once"
   },
@@ -23967,10 +25079,10 @@ var apiContract = c10.router({
     body: expireWorkosUserApiKeyRequestSchema.optional(),
     responses: {
       200: workosUserApiKeyResourceSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      502: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
+      502: errorSchema9
     },
     summary: "Expire a WorkOS user API key owned by the authenticated user"
   },
@@ -23986,10 +25098,10 @@ var apiContract = c10.router({
     body: deleteWorkosUserApiKeyRequestSchema.optional(),
     responses: {
       204: exports_external.undefined(),
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      502: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
+      502: errorSchema9
     },
     summary: "Delete a WorkOS user API key owned by the authenticated user"
   },
@@ -24007,9 +25119,9 @@ var apiContract = c10.router({
     }),
     responses: {
       201: uploadSessionResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      409: errorSchema10
+      400: errorSchema9,
+      401: errorSchema9,
+      409: errorSchema9
     },
     summary: "Create an upload session with presigned URLs for file uploads"
   },
@@ -24029,12 +25141,12 @@ var apiContract = c10.router({
     }),
     responses: {
       200: completeUploadSessionResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10,
-      422: errorSchema10
+      400: errorSchema9,
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
+      409: errorSchema9,
+      422: errorSchema9
     },
     summary: "Complete an upload session after files have been uploaded to storage"
   },
@@ -24047,8 +25159,8 @@ var apiContract = c10.router({
     body: claudeCodeSyncStatusRequestSchema,
     responses: {
       200: claudeCodeSyncStatusResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10
+      400: errorSchema9,
+      401: errorSchema9
     },
     summary: "Return server-side Claude Code block sync status for Spanner JSONL replay"
   },
@@ -24060,8 +25172,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminStatsSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "Cross-org operational counts. Tanagram admins only."
   },
@@ -24073,8 +25185,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminOrganizationListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "List every organization with member and thread counts. Tanagram admins only."
   },
@@ -24088,9 +25200,9 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminEntityGraphResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Entity graph (persons, foot guns, decisions, and optionally threads) for one organization. Tanagram admins only."
   },
@@ -24103,8 +25215,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminUserListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "List every user with their org memberships and thread count. Tanagram admins only."
   },
@@ -24117,8 +25229,8 @@ var apiContract = c10.router({
     query: adminListThreadsQuerySchema,
     responses: {
       200: adminThreadListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "List live threads across every organization. Tanagram admins only."
   },
@@ -24130,8 +25242,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminTweetLeadListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "List unreplied tweet leads from the last 24h, ranked by relevance. Tanagram admins only."
   },
@@ -24145,9 +25257,9 @@ var apiContract = c10.router({
     body: adminUpdateTweetLeadRequestSchema,
     responses: {
       200: tweetLeadSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Update a tweet lead status (replied/dismissed/new). Tanagram admins only."
   },
@@ -24160,10 +25272,10 @@ var apiContract = c10.router({
     query: adminLookupThreadQuerySchema,
     responses: {
       200: adminThreadLookupResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      400: errorSchema9,
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Look up a thread by thread id, thread file id, or harness session id. Tanagram admins only."
   },
@@ -24174,10 +25286,10 @@ var apiContract = c10.router({
     body: adminForceFollowRequestSchema,
     responses: {
       200: adminForceFollowResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      422: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
+      422: errorSchema9
     },
     summary: "Force follower->followee edge. Admin-only and non-destructive."
   },
@@ -24193,9 +25305,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       204: exports_external.null(),
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Permanently remove a thread. Tanagram admins only."
   },
@@ -24211,9 +25323,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: adminDeleteSkillResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Permanently remove a skill and its sync records. Tanagram admins only."
   },
@@ -24229,9 +25341,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: adminReparseThreadFileResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Re-enqueue parsing for a thread file. Tanagram admins only."
   },
@@ -24247,11 +25359,11 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: adminReprojectThreadResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10,
-      500: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
+      409: errorSchema9,
+      500: errorSchema9
     },
     summary: "Re-project a thread from its current uploaded transcript or OTEL session. Tanagram admins only."
   },
@@ -24267,9 +25379,9 @@ var apiContract = c10.router({
     query: adminThreadReprojectionStatusQuerySchema,
     responses: {
       200: adminThreadReprojectionStatusResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Get the outcome of an admin-triggered thread re-projection."
   },
@@ -24310,7 +25422,7 @@ var apiContract = c10.router({
     body: createWaitlistEntryRequestSchema,
     responses: {
       201: waitlistEntrySchema,
-      409: errorSchema10
+      409: errorSchema9
     },
     summary: "Create an unauthenticated waitlist entry keyed by (location, contact)."
   },
@@ -24320,8 +25432,8 @@ var apiContract = c10.router({
     body: submitContactMessageRequestSchema,
     responses: {
       200: submitContactMessageResponseSchema,
-      429: errorSchema10,
-      503: errorSchema10
+      429: errorSchema9,
+      503: errorSchema9
     },
     summary: "Submit a contact-form message from the marketing site; emails the Lore team."
   },
@@ -24334,9 +25446,9 @@ var apiContract = c10.router({
     body: createFeedbackRequestSchema,
     responses: {
       201: feedbackEntrySchema,
-      401: errorSchema10,
-      422: errorSchema10,
-      429: errorSchema10
+      401: errorSchema9,
+      422: errorSchema9,
+      429: errorSchema9
     },
     summary: "Submit in-app feedback. Persists to lore.feedback_entries and best-effort posts to the #lore-feedback Slack channel. Rate-limited to 30 submissions/hour per user."
   },
@@ -24352,10 +25464,10 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       201: shareTokenResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
+      409: errorSchema9
     },
     summary: "Mint a short share-link token for a public thread. Author only. The token powers `/s/:token` short URLs and enables k-factor attribution."
   },
@@ -24371,7 +25483,7 @@ var apiContract = c10.router({
     query: resolveShareTokenQuerySchema,
     responses: {
       200: shareTokenResponseSchema,
-      404: errorSchema10
+      404: errorSchema9
     },
     summary: "Resolve a share-link token to its thread and record the view. Works for signed-out viewers; if a bearer token is present we attribute the view to that Lore user for analytics."
   },
@@ -24383,8 +25495,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminGrowthResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "Share-link k-factor, funnel, sparkline, and top sharers by window. Tanagram admins only."
   },
@@ -24396,8 +25508,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminActiveUsersResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "DAU/WAU/MAU/all-time active-user buckets \u2014 distinct users with product usage: CLI/plugin publishes and web writes + presence on the thread-event spine, plus desktop-app daily activity touches (user_activity_daily); auth/token issuance excluded. Tanagram admins only."
   },
@@ -24412,9 +25524,9 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminUserPipelineResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Per-user upload-pipeline health drilldown: heartbeat/web presence, 14-day OTEL ingest + rejections, projection ledger, upload sessions, thread parsing, and a computed verdict. Tanagram admins only."
   },
@@ -24426,8 +25538,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminReferralsAnalyticsResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "Cross-organization invite-link funnel: lifetime + 30-day counts, 60-day daily timeseries, top inviters, recent attributions. Tanagram admins only."
   },
@@ -24439,8 +25551,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminOnboardingSourcesResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "Signed-up persons grouped by PostHog `initial_source` first-touch attribution. Powers bucket 1 of /admin's Onboarding flow tab; sourced via HogQL."
   },
@@ -24452,8 +25564,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminEmailTemplateListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "List transactional email templates and their editable preview fields. Tanagram admins only."
   },
@@ -24469,10 +25581,10 @@ var apiContract = c10.router({
     body: adminEmailTemplatePreviewRequestSchema,
     responses: {
       200: renderedEmailSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      400: errorSchema9,
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Render a transactional email template with supplied values. Tanagram admins only."
   },
@@ -24488,11 +25600,11 @@ var apiContract = c10.router({
     body: adminEmailTemplateSendRequestSchema,
     responses: {
       200: adminEmailTemplateSendResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      503: errorSchema10
+      400: errorSchema9,
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
+      503: errorSchema9
     },
     summary: "Send a transactional email template through Resend. Tanagram admins only."
   },
@@ -24504,7 +25616,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: billingStateResponseSchema,
-      401: errorSchema10
+      401: errorSchema9
     },
     summary: "Resolve the caller's plan, features, seat count, and any admin override."
   },
@@ -24517,10 +25629,10 @@ var apiContract = c10.router({
     body: createCheckoutSessionRequestSchema,
     responses: {
       200: createCheckoutSessionResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      503: errorSchema10
+      400: errorSchema9,
+      401: errorSchema9,
+      403: errorSchema9,
+      503: errorSchema9
     },
     summary: "Start a Stripe Checkout session for Team ($20/seat/mo, min 2)."
   },
@@ -24535,9 +25647,9 @@ var apiContract = c10.router({
     }).optional(),
     responses: {
       200: createBillingPortalResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      503: errorSchema10
+      401: errorSchema9,
+      404: errorSchema9,
+      503: errorSchema9
     },
     summary: "Open the Stripe customer portal so the subject can manage their subscription."
   },
@@ -24550,11 +25662,11 @@ var apiContract = c10.router({
     body: updateTeamSeatsRequestSchema,
     responses: {
       200: billingSubjectSummarySchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      503: errorSchema10
+      400: errorSchema9,
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9,
+      503: errorSchema9
     },
     summary: "Adjust the caller-organization's Team seat quantity (admin of that org only)."
   },
@@ -24566,10 +25678,10 @@ var apiContract = c10.router({
     }),
     responses: {
       200: creditSettingsResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      503: errorSchema10
+      400: errorSchema9,
+      401: errorSchema9,
+      403: errorSchema9,
+      503: errorSchema9
     },
     summary: "Get the caller-organization's credit pool balance + auto-recharge settings."
   },
@@ -24582,10 +25694,10 @@ var apiContract = c10.router({
     body: updateCreditSettingsRequestSchema,
     responses: {
       200: creditSettingsResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      503: errorSchema10
+      400: errorSchema9,
+      401: errorSchema9,
+      403: errorSchema9,
+      503: errorSchema9
     },
     summary: "Update the caller-organization's auto-recharge settings (billing admin only)."
   },
@@ -24598,10 +25710,10 @@ var apiContract = c10.router({
     body: createCreditTopUpRequestSchema,
     responses: {
       200: createCreditTopUpResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      503: errorSchema10
+      400: errorSchema9,
+      401: errorSchema9,
+      403: errorSchema9,
+      503: errorSchema9
     },
     summary: "Manually top up the caller-organization's credit pool by charging the saved card."
   },
@@ -24613,8 +25725,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminBillingOverviewResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "List every user and org with current plan + override for the admin panel."
   },
@@ -24626,8 +25738,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminCreditPoolsResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9
     },
     summary: "Per-team credit-pool utilization, blended margin, breakage, and overage."
   },
@@ -24643,9 +25755,9 @@ var apiContract = c10.router({
     body: adminPlanOverrideRequestSchema,
     responses: {
       200: adminBillingSubjectSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Admin override for a user's plan tier. Null clears the override."
   },
@@ -24661,14 +25773,13 @@ var apiContract = c10.router({
     body: adminPlanOverrideRequestSchema,
     responses: {
       200: adminBillingSubjectSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema9,
+      403: errorSchema9,
+      404: errorSchema9
     },
     summary: "Admin override for an organization's plan tier. Null clears the override."
   },
   quests: questsContract,
-  regions: regionsContract,
   entities: entitiesContract,
   docs: docsContract,
   mentions: mentionsContract,
@@ -24679,152 +25790,6 @@ var apiContract = c10.router({
 }, {
   pathPrefix: "/api"
 });
-
-// ../contracts/src/mcpZodSchema.ts
-var zodDef = (schema) => {
-  const schemaLike = schema;
-  return schemaLike._def ?? schemaLike.def ?? {};
-};
-var zodKind = (schema) => {
-  const def = zodDef(schema);
-  if (typeof def.typeName === "string")
-    return def.typeName;
-  return typeof def.type === "string" ? def.type : undefined;
-};
-var isZodKind = (schema, v3Kind, v4Kind) => {
-  const kind = zodKind(schema);
-  return kind === v3Kind || kind === v4Kind;
-};
-var asZodType = (value) => value;
-var zodObjectShape = (schema) => {
-  if (!schema || !isZodKind(schema, "ZodObject", "object"))
-    return;
-  const schemaShape = schema.shape;
-  if (typeof schemaShape === "function") {
-    return schemaShape();
-  }
-  if (schemaShape && typeof schemaShape === "object") {
-    return schemaShape;
-  }
-  const defShape = zodDef(schema).shape;
-  if (typeof defShape === "function") {
-    return defShape();
-  }
-  if (defShape && typeof defShape === "object") {
-    return defShape;
-  }
-  return;
-};
-var arrayElement = (schema) => {
-  const def = zodDef(schema);
-  if (def.element)
-    return asZodType(def.element);
-  if (typeof def.type === "object" && def.type !== null) {
-    return asZodType(def.type);
-  }
-  return;
-};
-var unionOptions = (schema) => {
-  const schemaOptions = schema.options;
-  if (Array.isArray(schemaOptions))
-    return schemaOptions.map(asZodType);
-  const defOptions = zodDef(schema).options;
-  return Array.isArray(defOptions) ? defOptions.map(asZodType) : [];
-};
-var enumOptions = (schema) => {
-  const schemaOptions = schema.options;
-  if (Array.isArray(schemaOptions))
-    return [...schemaOptions];
-  const def = zodDef(schema);
-  if (Array.isArray(def.values))
-    return [...def.values];
-  if (def.entries && typeof def.entries === "object") {
-    return Object.values(def.entries);
-  }
-  return [];
-};
-var unwrapField = (schema) => {
-  let current = schema;
-  let required2 = true;
-  while (true) {
-    const def = zodDef(current);
-    if (isZodKind(current, "ZodOptional", "optional")) {
-      required2 = false;
-      current = asZodType(def.innerType);
-    } else if (isZodKind(current, "ZodNullable", "nullable")) {
-      required2 = false;
-      current = asZodType(def.innerType);
-    } else if (isZodKind(current, "ZodDefault", "default")) {
-      required2 = false;
-      current = asZodType(def.innerType);
-    } else if (isZodKind(current, "ZodEffects", "effects")) {
-      current = asZodType(def.schema);
-    } else if (isZodKind(current, "ZodPipeline", "pipe")) {
-      current = asZodType(def.in);
-    } else {
-      break;
-    }
-  }
-  return { schema: current, required: required2 };
-};
-var applyDescription = (schema, zodSchema) => {
-  if (zodSchema.description) {
-    return { ...schema, description: zodSchema.description };
-  }
-  return schema;
-};
-var fieldToJsonSchema = (fieldSchema) => {
-  const { schema } = unwrapField(fieldSchema);
-  if (isZodKind(schema, "ZodString", "string")) {
-    return applyDescription({ type: "string" }, fieldSchema);
-  }
-  if (isZodKind(schema, "ZodNumber", "number")) {
-    return applyDescription({ type: "number" }, fieldSchema);
-  }
-  if (isZodKind(schema, "ZodBoolean", "boolean")) {
-    return applyDescription({ type: "boolean" }, fieldSchema);
-  }
-  if (isZodKind(schema, "ZodEnum", "enum")) {
-    return applyDescription({ type: "string", enum: enumOptions(schema) }, fieldSchema);
-  }
-  if (isZodKind(schema, "ZodArray", "array")) {
-    const element = arrayElement(schema);
-    return applyDescription({ type: "array", items: element ? fieldToJsonSchema(element) : {} }, fieldSchema);
-  }
-  if (isZodKind(schema, "ZodUnion", "union")) {
-    return applyDescription({ anyOf: unionOptions(schema).map((option) => fieldToJsonSchema(option)) }, fieldSchema);
-  }
-  if (isZodKind(schema, "ZodObject", "object")) {
-    return applyDescription(zodObjectToMcpJsonSchema(schema), fieldSchema);
-  }
-  if (isZodKind(schema, "ZodRecord", "record")) {
-    const valueType = zodDef(schema).valueType;
-    return applyDescription({
-      type: "object",
-      additionalProperties: valueType ? fieldToJsonSchema(asZodType(valueType)) : {}
-    }, fieldSchema);
-  }
-  return applyDescription({}, fieldSchema);
-};
-var zodShapeToMcpJsonSchema = (shape) => {
-  const properties = {};
-  const required2 = [];
-  for (const [key, fieldSchema] of Object.entries(shape)) {
-    properties[key] = fieldToJsonSchema(fieldSchema);
-    if (unwrapField(fieldSchema).required)
-      required2.push(key);
-  }
-  return {
-    type: "object",
-    properties,
-    ...required2.length > 0 ? { required: required2 } : {},
-    additionalProperties: false
-  };
-};
-var zodObjectToMcpJsonSchema = (schema) => {
-  const shape = zodObjectShape(schema);
-  return zodShapeToMcpJsonSchema(shape ?? {});
-};
 
 // ../contracts/src/mcpContractToolBuilder.ts
 var findContract = (path) => {
@@ -25712,16 +26677,16 @@ function stateDir2(home = os3.homedir()) {
     return path6.resolve(expandHome2(devStateDir, home));
   return path6.join(home, ".lore");
 }
-function resourceUrl(base2) {
-  return `${base2}/mcp`;
+function resourceUrl(base3) {
+  return `${base3}/mcp`;
 }
 var inFlight = null;
 function discoverEndpoints(opts) {
   if (inFlight)
     return inFlight;
-  const base2 = cloudBaseUrl();
+  const base3 = cloudBaseUrl();
   const p = discoverOAuthEndpoints({
-    resource: resourceUrl(base2),
+    resource: resourceUrl(base3),
     stateDir: stateDir2(opts?.home),
     fetchImpl: opts?.fetchImpl,
     now: opts?.now
@@ -26204,9 +27169,9 @@ function readCodexSessionId(transcriptPath) {
   if (firstLine !== null) {
     try {
       const parsed = JSON.parse(firstLine);
-      const id = nonBlank(parsed.payload?.id);
-      if (id !== null)
-        return id;
+      const id4 = nonBlank(parsed.payload?.id);
+      if (id4 !== null)
+        return id4;
     } catch {}
   }
   return inferSessionIdFromFilename(transcriptPath);
@@ -26229,10 +27194,10 @@ function readFirstLine(filePath, maxBytes = 16 * 1024) {
   }
 }
 function inferSessionIdFromFilename(transcriptPath) {
-  const base2 = path10.basename(transcriptPath, ".jsonl");
+  const base3 = path10.basename(transcriptPath, ".jsonl");
   const uuidSuffix = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
-  const match = base2.match(uuidSuffix);
-  return match?.[1] ?? base2;
+  const match = base3.match(uuidSuffix);
+  return match?.[1] ?? base3;
 }
 
 // server-src/lib/session/cowork.ts
@@ -27246,10 +28211,10 @@ var readLocalSessionTool = {
 // server-src/lib/clipboard.ts
 import { spawn } from "child_process";
 import os7 from "os";
-async function copyToClipboard(text, options = {}) {
+async function copyToClipboard(text2, options = {}) {
   const timeoutMs = options.timeoutMs ?? 2000;
   for (const candidate of clipboardCandidates()) {
-    const ok = await runClipboardCandidate(candidate, text, timeoutMs);
+    const ok = await runClipboardCandidate(candidate, text2, timeoutMs);
     if (ok)
       return true;
   }
@@ -27271,7 +28236,7 @@ function clipboardCandidates() {
       return [];
   }
 }
-async function runClipboardCandidate(candidate, text, timeoutMs) {
+async function runClipboardCandidate(candidate, text2, timeoutMs) {
   return new Promise((resolve2) => {
     let child;
     try {
@@ -27300,7 +28265,7 @@ async function runClipboardCandidate(candidate, text, timeoutMs) {
       settle(code === 0);
     });
     child.stdin?.on("error", () => {});
-    child.stdin?.end(text);
+    child.stdin?.end(text2);
   });
 }
 
@@ -27392,13 +28357,13 @@ async function shareSessionFromDisk(args, opts = {}) {
     env
   });
   const highlight = args.highlight?.trim();
-  const title = args.title?.trim();
+  const title2 = args.title?.trim();
   const result = await runShareSession({
     transcript: session.transcript,
     uploads: session.uploads,
     outputs: session.outputs,
     ...highlight ? { highlight } : {},
-    ...title ? { title } : {}
+    ...title2 ? { title: title2 } : {}
   }, { fetchImpl: opts.fetchImpl, home: opts.home, harness: RUNTIME_TO_HARNESS[source.runtime] ?? source.runtime });
   if (result.isError === true) {
     return result;
@@ -27466,8 +28431,8 @@ var shareSessionTool = {
 
 // server-src/amp/shareAmpThread.ts
 var execFileAsync = promisify(execFile);
-async function runAmpThreadExportWithShell(threadId, shell) {
-  const result = await shell`amp threads export ${threadId}`;
+async function runAmpThreadExportWithShell(threadId2, shell) {
+  const result = await shell`amp threads export ${threadId2}`;
   if (result.exitCode !== 0) {
     const detail = result.stderr.trim() || result.stdout.trim() || `exit code ${result.exitCode}`;
     throw new Error(`amp threads export failed: ${detail}`);
@@ -27514,19 +28479,19 @@ function createShareCurrentAmpThreadTool(deps) {
   };
 }
 async function shareAmpThread(args, deps) {
-  const threadId = firstNonEmpty(args.threadId, args.activeThreadId, deps.env?.AMP_CURRENT_THREAD_ID);
-  if (!threadId) {
+  const threadId2 = firstNonEmpty(args.threadId, args.activeThreadId, deps.env?.AMP_CURRENT_THREAD_ID);
+  if (!threadId2) {
     throw new Error("No active Amp thread could be resolved. Run this command from an active Amp thread (ctx.thread.id), set AMP_CURRENT_THREAD_ID, or pass thread_id explicitly.");
   }
-  const exportedJson = await deps.runAmpExport(threadId);
+  const exportedJson = await deps.runAmpExport(threadId2);
   const shareArgs = {
     transcript: exportedJson
   };
-  const title = extractTitle(exportedJson);
-  if (title) {
-    shareArgs.title = title;
+  const title2 = extractTitle(exportedJson);
+  if (title2) {
+    shareArgs.title = title2;
   }
-  const sourceUrl = buildAmpThreadUrl(deps.ampBaseUrl, threadId);
+  const sourceUrl = buildAmpThreadUrl(deps.ampBaseUrl, threadId2);
   if (sourceUrl) {
     shareArgs.source_url = sourceUrl;
   }
@@ -27561,16 +28526,16 @@ function extractTitle(exportedJson) {
     const parsed = JSON.parse(exportedJson);
     if (typeof parsed.title !== "string")
       return;
-    const title = parsed.title.trim();
-    return title === "" ? undefined : title;
+    const title2 = parsed.title.trim();
+    return title2 === "" ? undefined : title2;
   } catch {
     return;
   }
 }
-function buildAmpThreadUrl(baseUrl, threadId) {
+function buildAmpThreadUrl(baseUrl, threadId2) {
   if (!baseUrl)
     return;
-  return new URL(`/threads/${encodeURIComponent(threadId)}`, baseUrl).toString();
+  return new URL(`/threads/${encodeURIComponent(threadId2)}`, baseUrl).toString();
 }
 
 // server-src/tools/cloudProxyTools.ts
@@ -27662,8 +28627,8 @@ async function initiateDeviceCode(opts) {
     body
   });
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    const excerpt = text.length > 200 ? `${text.slice(0, 200)}...` : text;
+    const text2 = await res.text().catch(() => "");
+    const excerpt = text2.length > 200 ? `${text2.slice(0, 200)}...` : text2;
     throw new Error(`device-code request failed: HTTP ${res.status} ${excerpt}`);
   }
   let json2;
@@ -27922,7 +28887,6 @@ var tools = [
 
 // amp/lore.ts
 var SHARE_COMMAND_ID = "lore.share-active-amp-thread";
-var PASSIVE_MIRROR_SERVICE_NAME = "amp";
 var SAFE_AMP_TOOL_NAMES = new Set([
   "lore_login",
   "lore_login_resume",
@@ -27934,32 +28898,6 @@ var SAFE_AMP_TOOL_NAMES = new Set([
 var uploadedMessageFingerprintsByThread = new Map;
 var pendingUploadByThread = new Map;
 var mirrorPromiseByThread = new Map;
-var RUNTIME_EVENT_NAMES = [
-  "agent.start",
-  "agent_state",
-  "compaction_complete",
-  "compaction_started",
-  "delta",
-  "executor_connected",
-  "executor_guidance_discovery",
-  "executor_status",
-  "executor_tool_lease_ack",
-  "executor_tool_result",
-  "executor_tool_result_ack",
-  "executor_workspace_maybe_changed",
-  "inference_tools",
-  "message_added",
-  "message_updated",
-  "observers",
-  "plugin_message",
-  "queued_message_added",
-  "queued_message_dequeued",
-  "queued_messages",
-  "thread_settings",
-  "thread_title",
-  "tool_lease",
-  "tool_progress"
-];
 var INSTALLED_AMP_PLUGIN_SUFFIXES = [
   `${path13.sep}harness${path13.sep}amp${path13.sep}lore-plugin${path13.sep}amp${path13.sep}lore-bundled.js`,
   `${path13.sep}harness${path13.sep}amp${path13.sep}lore-plugin${path13.sep}amp${path13.sep}lore.ts`
@@ -27995,7 +28933,26 @@ function configureLoreStateDirForInstalledAmpPlugin(importMetaUrl) {
 }
 configureLoreStateDirForInstalledAmpPlugin(import.meta.url);
 function loreAmpPlugin(amp) {
-  installPassiveAmpThreadMirror(amp);
+  installPassiveAmpThreadMirror(amp, {
+    exportThread: async (threadId2, ctx) => {
+      const shell = ctx.$ ?? amp.$;
+      const result = await shell`amp threads export ${threadId2}`;
+      if (result.exitCode !== 0)
+        throw new Error("thread_export_failed");
+      return JSON.parse(result.stdout);
+    },
+    getToken: () => getValidAccessToken(),
+    upload: async ({ token, body }, signal) => {
+      const response = await fetch(`${otelApiOrigin()}/api/otel/v1/logs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-lore-harness": "Amp" },
+        body: JSON.stringify(body),
+        signal
+      });
+      if (!response.ok)
+        throw Object.assign(new Error("http_request_failed"), { status: response.status });
+    }
+  });
   amp.registerCommand(SHARE_COMMAND_ID, {
     category: "Lore",
     title: "Share active Amp thread",
@@ -28005,7 +28962,7 @@ function loreAmpPlugin(amp) {
   });
   amp.registerTool(createShareCurrentAmpThreadTool({
     env: process.env,
-    runAmpExport: (threadId) => runAmpThreadExportWithShell(threadId, amp.$),
+    runAmpExport: (threadId2) => runAmpThreadExportWithShell(threadId2, amp.$),
     share: runShareAmpSession,
     ampBaseUrl: amp.system.ampURL
   }));
@@ -28018,7 +28975,7 @@ function loreAmpPlugin(amp) {
 async function shareActiveThread(ctx, deps = {
   env: process.env,
   ampBaseUrl: ctx.system.ampURL,
-  runAmpExport: (threadId) => runAmpThreadExportWithShell(threadId, ctx.$),
+  runAmpExport: (threadId2) => runAmpThreadExportWithShell(threadId2, ctx.$),
   share: runShareAmpSession
 }) {
   try {
@@ -28081,550 +29038,9 @@ async function appendShareUrlToThread(ctx, threadUrl) {
     return error51.message;
   }
 }
-function installPassiveAmpThreadMirror(amp) {
-  const pluginWithEvents = amp;
-  if (typeof pluginWithEvents.on !== "function") {
-    amp.logger.log("[lore] Amp plugin API does not expose events; passive thread upload disabled.");
-    return;
-  }
-  pluginWithEvents.on("session.start", (event, ctx) => {
-    const threadId = resolveThreadId(event, ctx);
-    if (threadId && !uploadedMessageFingerprintsByThread.has(threadId)) {
-      uploadedMessageFingerprintsByThread.set(threadId, []);
-    }
-    postRuntimeEvent("session.start", event, ctx, amp);
-  });
-  for (const eventName of RUNTIME_EVENT_NAMES) {
-    pluginWithEvents.on(eventName, (event, ctx) => {
-      postRuntimeEvent(eventName, event, ctx, amp);
-    });
-  }
-  pluginWithEvents.on("message_added", async (event, ctx) => {
-    await enqueueAmpThreadMirror(event, ctx, amp, "message_added");
-  });
-  pluginWithEvents.on("message_updated", async (event, ctx) => {
-    await enqueueAmpThreadMirror(event, ctx, amp, "message_updated");
-  });
-  pluginWithEvents.on("agent.end", async (event, ctx) => {
-    await postRuntimeEvent("agent.end", event, ctx, amp);
-    await enqueueAmpThreadMirror(event, ctx, amp, "agent.end");
-  });
-}
-async function postRuntimeEvent(eventName, event, ctx, amp) {
-  const runtimeRecord = runtimeRecordForEvent(eventName, event, ctx);
-  if (!runtimeRecord)
-    return;
-  try {
-    await postPassiveLogs([runtimeRecord.record]);
-  } catch (error51) {
-    amp.logger.log(`[lore] Failed to upload Amp runtime event ${eventName} for ${runtimeRecord.threadId} to Lore: ${error51 instanceof Error ? error51.message : String(error51)}`);
-  }
-}
-function enqueueAmpThreadMirror(event, ctx, amp, trigger) {
-  const threadId = resolveThreadId(event, ctx);
-  if (!threadId)
-    return Promise.resolve();
-  const previous = mirrorPromiseByThread.get(threadId) ?? Promise.resolve();
-  const next = previous.catch(() => {
-    return;
-  }).then(() => mirrorAmpThread(threadId, ctx, amp, trigger));
-  const tracked = next.finally(() => {
-    if (mirrorPromiseByThread.get(threadId) === tracked) {
-      mirrorPromiseByThread.delete(threadId);
-    }
-  });
-  mirrorPromiseByThread.set(threadId, tracked);
-  return tracked;
-}
-async function mirrorAmpThread(threadId, ctx, amp, trigger) {
-  const commandContext = ctx;
-  if (typeof commandContext.$ !== "function") {
-    amp.logger.log(`[lore] Missing shell context while exporting Amp thread ${threadId}.`);
-    return;
-  }
-  const pendingUpload = pendingUploadByThread.get(threadId);
-  if (pendingUpload) {
-    try {
-      await postPassiveLogs(pendingUpload.records);
-      uploadedMessageFingerprintsByThread.set(threadId, pendingUpload.messageFingerprints);
-      pendingUploadByThread.delete(threadId);
-    } catch (error51) {
-      amp.logger.log(`[lore] Failed to retry Amp thread ${threadId} to Lore: ${error51 instanceof Error ? error51.message : String(error51)}`);
-      return;
-    }
-  }
-  try {
-    const exportResult = await commandContext.$`amp threads export ${threadId}`;
-    if (exportResult.exitCode !== 0) {
-      const detail = exportResult.stderr.trim() || exportResult.stdout.trim() || `exit code ${exportResult.exitCode}`;
-      throw new Error(`amp threads export failed: ${detail}`);
-    }
-    const thread = JSON.parse(exportResult.stdout);
-    if (stringOrNull(thread.id) !== threadId)
-      thread.id = threadId;
-    const previousMessageFingerprints = uploadedMessageFingerprintsByThread.get(threadId) ?? [];
-    const { records, messageFingerprints } = buildPassiveLogRecords(thread, previousMessageFingerprints);
-    if (records.length === 0) {
-      uploadedMessageFingerprintsByThread.set(threadId, messageFingerprints);
-      return;
-    }
-    try {
-      await postPassiveLogs(records);
-      uploadedMessageFingerprintsByThread.set(threadId, messageFingerprints);
-      pendingUploadByThread.delete(threadId);
-    } catch (error51) {
-      pendingUploadByThread.set(threadId, { messageFingerprints, records });
-      throw error51;
-    }
-  } catch (error51) {
-    amp.logger.log(`[lore] Failed to upload Amp thread ${threadId} to Lore after ${trigger}: ${error51 instanceof Error ? error51.message : String(error51)}`);
-  }
-}
-function resolveThreadId(event, ctx) {
-  if (isRecord(event)) {
-    const direct = stringOrNull(event.threadId) ?? stringOrNull(event.thread_id);
-    if (direct)
-      return direct;
-  }
-  if (isRecord(event) && isRecord(event.thread)) {
-    const fromEvent = stringOrNull(event.thread.id);
-    if (fromEvent)
-      return fromEvent;
-  }
-  if (isRecord(ctx) && isRecord(ctx.thread)) {
-    const fromContext = stringOrNull(ctx.thread.id);
-    if (fromContext)
-      return fromContext;
-  }
-  return null;
-}
-function runtimeRecordForEvent(eventName, event, ctx) {
-  const threadId = resolveThreadId(event, ctx);
-  if (!threadId)
-    return null;
-  const eventRecord = isRecord(event) ? event : {};
-  const contextRecord = isRecord(ctx) ? ctx : {};
-  const messageId = firstRuntimeString(eventRecord, ["messageId", "messageID", "id"]) ?? firstRuntimeString(contextRecord, ["messageId", "messageID"]);
-  const timestamp = isoTimestamp(eventRecord["@timestamp"]) ?? isoTimestamp(eventRecord.timestamp) ?? isoTimestamp(eventRecord.time) ?? new Date().toISOString();
-  const attributes = {
-    "event.name": `amp.${eventName}`,
-    "session.id": threadId,
-    "amp.event.name": eventName
-  };
-  const sequence = firstRuntimeNumber(eventRecord, ["seq", "sequence"]);
-  if (sequence !== null)
-    attributes["event.sequence"] = sequence;
-  const subtype = firstRuntimeString(eventRecord, ["subtype"]);
-  if (subtype)
-    attributes["amp.event.subtype"] = subtype;
-  const toolCallId = firstRuntimeString(eventRecord, ["toolCallId", "tool_call_id"]);
-  if (toolCallId)
-    attributes.tool_use_id = toolCallId;
-  const toolName = firstRuntimeString(eventRecord, ["toolName", "tool_name"]);
-  if (toolName)
-    attributes.tool_name = toolName;
-  if (messageId)
-    attributes["prompt.id"] = messageId;
-  const records = [];
-  pushLogRecord({
-    records,
-    timestamp,
-    attributes,
-    body: event
-  });
-  const [record2] = records;
-  if (!record2)
-    return null;
-  return { threadId, record: record2 };
-}
-function firstRuntimeString(record2, keys) {
-  for (const key of keys) {
-    const value = stringOrNull(record2[key]);
-    if (value)
-      return value;
-  }
-  return null;
-}
-function firstRuntimeNumber(record2, keys) {
-  for (const key of keys) {
-    const value = record2[key];
-    if (typeof value === "number" && Number.isFinite(value))
-      return value;
-    if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) {
-      return Number(value);
-    }
-  }
-  return null;
-}
-function buildPassiveLogRecords(thread, previousMessageFingerprints) {
-  const threadId = stringOrNull(thread.id);
-  if (!threadId)
-    return { records: [], messageFingerprints: [] };
-  const messages = Array.isArray(thread.messages) ? thread.messages.filter(isRecord) : [];
-  const messageCount = messages.length;
-  const messageFingerprints = messages.map(messageFingerprint);
-  const startIndex = firstChangedMessageIndex(previousMessageFingerprints, messageFingerprints);
-  if (startIndex >= messageCount)
-    return { records: [], messageFingerprints };
-  const fallbackTimestamp = isoTimestamp(thread.updatedAt) ?? isoTimestamp(thread.created) ?? new Date().toISOString();
-  const pendingToolCalls = preloadToolCalls(messages, startIndex);
-  const records = [];
-  if (startIndex === 0) {
-    pushLogRecord({
-      records,
-      timestamp: fallbackTimestamp,
-      attributes: {
-        "event.name": "amp.export.thread",
-        "event.sequence": 0,
-        "session.id": threadId,
-        "amp.export.kind": "thread"
-      },
-      body: compactThreadMetadata(thread, messageCount)
-    });
-  }
-  for (let index = startIndex;index < messageCount; index += 1) {
-    const message = messages[index];
-    const timestamp = messageTimestamp(message, fallbackTimestamp);
-    const promptId = stringOrNull(message.messageId) ?? `amp-msg-${index}`;
-    const sequence = index + 1;
-    const role = stringOrNull(message.role) ?? "";
-    pushLogRecord({
-      records,
-      timestamp,
-      attributes: {
-        "event.name": "amp.export.message",
-        "event.sequence": sequence,
-        "session.id": threadId,
-        "prompt.id": promptId,
-        "amp.export.kind": "message",
-        "amp.message.index": index,
-        "amp.message.role": role
-      },
-      body: copyRecordWithoutKeys(message, ["content"])
-    });
-    if (Array.isArray(message.content)) {
-      for (let blockIndex = 0;blockIndex < message.content.length; blockIndex += 1) {
-        const part = message.content[blockIndex];
-        if (!isRecord(part))
-          continue;
-        const blockType = stringOrNull(part.type) ?? "unknown";
-        const toolUseId = toolUseIdFromPart(part);
-        const blockAttributes = {
-          "event.name": `amp.export.block.${blockType}`,
-          "event.sequence": sequence,
-          "session.id": threadId,
-          "prompt.id": promptId,
-          "amp.export.kind": "block",
-          "amp.message.index": index,
-          "amp.message.role": role,
-          "amp.block.index": blockIndex,
-          "amp.block.type": blockType
-        };
-        if (toolUseId)
-          blockAttributes.tool_use_id = toolUseId;
-        const toolName = stringOrNull(part.name);
-        if (toolName)
-          blockAttributes.tool_name = toolName;
-        pushLogRecord({ records, timestamp, attributes: blockAttributes, body: part });
-      }
-    }
-    if (role === "user") {
-      const promptText = extractText(message.content);
-      if (promptText.trim().length > 0) {
-        pushLogRecord({
-          records,
-          timestamp,
-          attributes: {
-            "event.name": "claude_code.user_prompt",
-            "event.sequence": sequence,
-            "session.id": threadId,
-            "prompt.id": promptId,
-            prompt: promptText
-          },
-          body: promptText
-        });
-      }
-    } else if (role === "assistant") {
-      const assistantParts = toAssistantParts(message.content, pendingToolCalls);
-      if (assistantParts.length > 0) {
-        pushLogRecord({
-          records,
-          timestamp,
-          attributes: {
-            "event.name": "claude_code.api_response_body",
-            "event.sequence": sequence,
-            "session.id": threadId,
-            "prompt.id": promptId,
-            model: "amp"
-          },
-          body: {
-            id: promptId,
-            model: "amp",
-            type: "message",
-            role: "assistant",
-            content: assistantParts,
-            usage: {
-              input_tokens: 0,
-              output_tokens: 0,
-              cache_creation_input_tokens: 0,
-              cache_read_input_tokens: 0,
-              inference_geo: "",
-              service_tier: "",
-              cache_creation: {}
-            }
-          }
-        });
-      }
-    }
-    if (!Array.isArray(message.content))
-      continue;
-    for (const part of message.content) {
-      if (!isRecord(part) || part.type !== "tool_result")
-        continue;
-      const toolUseId = toolUseIdFromPart(part);
-      if (!toolUseId)
-        continue;
-      const pendingToolCall = pendingToolCalls.get(toolUseId);
-      pushLogRecord({
-        records,
-        timestamp,
-        attributes: {
-          "event.name": "claude_code.tool_result",
-          "event.sequence": sequence,
-          "session.id": threadId,
-          "prompt.id": promptId,
-          tool_use_id: toolUseId,
-          tool_name: pendingToolCall?.name ?? "unknown",
-          tool_input: pendingToolCall?.input ?? {},
-          tool_output: toolOutputFromPart(part),
-          success: part.is_error !== true
-        },
-        body: toolOutputFromPart(part) ?? {}
-      });
-    }
-  }
-  return { records, messageFingerprints };
-}
-function firstChangedMessageIndex(previous, current) {
-  const limit = Math.min(previous.length, current.length);
-  for (let index = 0;index < limit; index += 1) {
-    if (previous[index] !== current[index])
-      return index;
-  }
-  return previous.length === current.length ? current.length : limit;
-}
-function messageFingerprint(message) {
-  try {
-    return JSON.stringify(message);
-  } catch {
-    return String(message.messageId ?? "") + ":" + String(message.meta?.sentAt ?? "") + ":" + String(message.usage?.timestamp ?? "");
-  }
-}
-async function postPassiveLogs(records) {
-  if (records.length === 0)
-    return;
-  const token = await getValidAccessToken();
-  const response = await fetch(`${otelApiOrigin()}/api/otel/v1/logs`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-      "x-lore-harness": "Amp"
-    },
-    body: JSON.stringify({
-      resourceLogs: [
-        {
-          resource: {
-            attributes: objectToAttributes({
-              "service.name": PASSIVE_MIRROR_SERVICE_NAME,
-              "service.namespace": "lore.amp-plugin"
-            })
-          },
-          scopeLogs: [
-            {
-              scope: { name: "lore.amp-plugin.passive-thread-upload" },
-              logRecords: records
-            }
-          ]
-        }
-      ]
-    })
-  });
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`Lore OTEL logs upload failed (${response.status}): ${body.slice(0, 500)}`);
-  }
-}
 function otelApiOrigin(env = process.env) {
   const configured = env.LORE_OTEL_API_ORIGIN?.trim() || env.LORE_API_ORIGIN?.trim() || env.LORE_MCP_PROXY_BASE_URL?.trim();
   return (configured || "https://lore-api.tanagram.ai").replace(/\/+$/, "");
-}
-function preloadToolCalls(messages, limit) {
-  const pendingToolCalls = new Map;
-  for (let index = 0;index < limit; index += 1) {
-    const message = messages[index];
-    if (!Array.isArray(message?.content))
-      continue;
-    for (const part of message.content) {
-      if (!isRecord(part) || part.type !== "tool_use")
-        continue;
-      const toolUseId = toolUseIdFromPart(part);
-      if (!toolUseId)
-        continue;
-      pendingToolCalls.set(toolUseId, {
-        name: stringOrNull(part.name) ?? "unknown",
-        input: part.input
-      });
-    }
-  }
-  return pendingToolCalls;
-}
-function compactThreadMetadata(thread, messageCount) {
-  return {
-    ...copyRecordWithoutKeys(thread, ["messages"]),
-    messageCount
-  };
-}
-function copyRecordWithoutKeys(record2, keysToOmit) {
-  const copy = {};
-  for (const [key, value] of Object.entries(record2)) {
-    if (keysToOmit.includes(key))
-      continue;
-    copy[key] = value;
-  }
-  return copy;
-}
-function messageTimestamp(message, fallback) {
-  return isoTimestamp(message.usage?.timestamp) ?? isoTimestamp(message.meta?.sentAt) ?? fallback;
-}
-function extractText(content) {
-  if (typeof content === "string")
-    return content;
-  if (!Array.isArray(content))
-    return "";
-  const parts = [];
-  for (const part of content) {
-    if (!isRecord(part) || part.type !== "text")
-      continue;
-    const text = stringOrNull(part.text);
-    if (text)
-      parts.push(text);
-  }
-  return parts.join(`
-
-`);
-}
-function toAssistantParts(content, pendingToolCalls) {
-  if (typeof content === "string") {
-    return content.trim().length > 0 ? [{ type: "text", text: content }] : [];
-  }
-  if (!Array.isArray(content))
-    return [];
-  const parts = [];
-  for (const entry of content) {
-    if (!isRecord(entry))
-      continue;
-    if (entry.type === "text") {
-      const text = stringOrNull(entry.text);
-      if (text)
-        parts.push({ type: "text", text });
-      continue;
-    }
-    if (entry.type === "tool_use") {
-      const toolUseId = toolUseIdFromPart(entry);
-      const toolName = stringOrNull(entry.name) ?? "unknown";
-      const toolInput = isRecord(entry.input) ? entry.input : entry.input ?? {};
-      if (toolUseId)
-        pendingToolCalls.set(toolUseId, { name: toolName, input: toolInput });
-      parts.push({
-        type: "tool_use",
-        id: toolUseId ?? `toolu-${Math.random().toString(16).slice(2, 10)}`,
-        name: toolName,
-        input: toolInput,
-        caller: { type: "assistant" }
-      });
-    }
-  }
-  return parts;
-}
-function toolUseIdFromPart(part) {
-  return stringOrNull(part.id) ?? stringOrNull(part.tool_use_id) ?? stringOrNull(part.toolUseId) ?? stringOrNull(part.toolUseID);
-}
-function toolOutputFromPart(part) {
-  if (isRecord(part.run)) {
-    if ("result" in part.run)
-      return part.run.result;
-    if ("output" in part.run)
-      return part.run.output;
-  }
-  if ("content" in part)
-    return part.content;
-  if ("output" in part)
-    return part.output;
-  if ("result" in part)
-    return part.result;
-  return;
-}
-function pushLogRecord(args) {
-  const unixNano = toUnixNano(args.timestamp);
-  args.records.push({
-    timeUnixNano: unixNano,
-    observedTimeUnixNano: unixNano,
-    severityText: "INFO",
-    attributes: objectToAttributes(args.attributes),
-    body: normalizeAnyValue(args.body)
-  });
-}
-function objectToAttributes(value) {
-  return Object.entries(value).filter(([, entry]) => entry !== undefined).map(([key, entry]) => ({ key, value: normalizeAnyValue(entry) }));
-}
-function normalizeAnyValue(value) {
-  if (typeof value === "string")
-    return { stringValue: value };
-  if (typeof value === "number" && Number.isFinite(value)) {
-    if (Number.isInteger(value))
-      return { intValue: String(value) };
-    return { doubleValue: value };
-  }
-  if (typeof value === "boolean")
-    return { boolValue: value };
-  if (Array.isArray(value))
-    return { arrayValue: { values: value.map((item) => normalizeAnyValue(item)) } };
-  if (isRecord(value)) {
-    return {
-      kvlistValue: {
-        values: Object.entries(value).map(([key, entry]) => ({ key, value: normalizeAnyValue(entry) }))
-      }
-    };
-  }
-  return { stringValue: "" };
-}
-function toUnixNano(timestamp) {
-  const millis = Date.parse(timestamp);
-  if (!Number.isFinite(millis) || Number.isNaN(millis))
-    return String(BigInt(Date.now()) * 1000000n);
-  return String(BigInt(Math.trunc(millis)) * 1000000n);
-}
-function isoTimestamp(value) {
-  if (typeof value === "string" && value.trim().length > 0)
-    return value;
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const millis = value > 10000000000 ? value : value * 1000;
-    const asDate = new Date(millis);
-    if (!Number.isNaN(asDate.getTime()))
-      return asDate.toISOString();
-  }
-  return null;
-}
-function stringOrNull(value) {
-  if (typeof value === "string" && value.trim().length > 0)
-    return value;
-  if (typeof value === "number" && Number.isFinite(value))
-    return String(value);
-  return null;
-}
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function extractThreadUrl(result) {
   if (result === null || typeof result !== "object")
@@ -28640,18 +29056,18 @@ function extractThreadUrl(result) {
       continue;
     if (block.type !== "text")
       continue;
-    const text = block.text;
-    if (typeof text !== "string" || text.trim() === "")
+    const text2 = block.text;
+    if (typeof text2 !== "string" || text2.trim() === "")
       continue;
-    const parsedUrl = extractThreadUrlFromJsonText(text);
+    const parsedUrl = extractThreadUrlFromJsonText(text2);
     if (parsedUrl)
       return parsedUrl;
   }
   return;
 }
-function extractThreadUrlFromJsonText(text) {
+function extractThreadUrlFromJsonText(text2) {
   try {
-    const parsed = JSON.parse(text);
+    const parsed = JSON.parse(text2);
     const url2 = parsed.thread_url;
     return typeof url2 === "string" && url2.trim() !== "" ? url2 : undefined;
   } catch {
@@ -28660,14 +29076,14 @@ function extractThreadUrlFromJsonText(text) {
 }
 function formatShareResult(result) {
   if (result !== null && typeof result === "object" && Array.isArray(result.content)) {
-    const text = result.content.map((block) => {
+    const text2 = result.content.map((block) => {
       if (block !== null && typeof block === "object" && block.type === "text" && typeof block.text === "string") {
         return block.text;
       }
       return JSON.stringify(block);
     }).join(`
 `);
-    return text || "Lore share returned no message.";
+    return text2 || "Lore share returned no message.";
   }
   if (typeof result === "string")
     return result;
