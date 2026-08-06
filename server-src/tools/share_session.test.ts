@@ -145,7 +145,7 @@ describe('share_session tool', () => {
     __resetDiscoveryInFlightForTests();
   });
 
-  test('happy path: returns cloud result and merges harness=cowork into args', async () => {
+  test('cloud-call core preserves omitted visibility for callers that use the cloud preference', async () => {
     await writeTokens(validTokens(), home);
     const expected = { thread_id: 't_abc', thread_url: 'https://lore/t_abc' };
     const { fetchImpl, calls } = captureFetch((req) =>
@@ -184,6 +184,25 @@ describe('share_session tool', () => {
     expect(
       (calls[0]!.body.params.arguments as { harness: string }).harness,
     ).toBe('cowork');
+  });
+
+  test('cloud-call core preserves explicit visibility', async () => {
+    await writeTokens(validTokens(), home);
+    const { fetchImpl, calls } = captureFetch((req) =>
+      rpcShareSuccess(req.body.id, {
+        thread_id: 'x',
+        thread_url: 'https://lore/x',
+      }),
+    );
+
+    await runShareSession(
+      { transcript: 't', visibility: 'public' },
+      { fetchImpl, home },
+    );
+
+    expect(
+      (calls[0]!.body.params.arguments as { visibility: string }).visibility,
+    ).toBe('public');
   });
 
   test('no tokens on disk → returns authRequiredToMcpError shape', async () => {
@@ -242,8 +261,8 @@ describe('share_session tool', () => {
     expect((caught as Error).message).toContain('workspace_required');
   });
 
-  test('input schema exposes only local selection/presentation fields — not `harness` or `transcript`', () => {
-    // The agent can choose a session, highlight, and title while the
+  test('input schema exposes local selection/presentation fields and visibility — not `harness` or `transcript`', () => {
+    // The agent can choose a session, highlight, title, and visibility while the
     // plugin handles the read internally. Exposing `transcript`
     // would re-introduce the round-trip-through-agent-context bug
     // that motivated the local-resolve refactor.
@@ -251,7 +270,11 @@ describe('share_session tool', () => {
     const propertyNames = Object.keys(
       shareSessionTool.inputSchema.properties!,
     );
-    expect(propertyNames).toEqual(['session_id', 'highlight', 'title']);
+    expect(propertyNames).toEqual(['session_id', 'highlight', 'title', 'visibility']);
+    expect(shareSessionTool.inputSchema.properties!.visibility).toEqual({
+      type: 'string',
+      enum: ['private', 'workspace', 'public'],
+    });
     expect(shareSessionTool.inputSchema.additionalProperties).toBe(false);
     expect(shareSessionTool.inputSchema.required ?? []).toEqual([]);
   });
@@ -341,6 +364,32 @@ describe('shareSessionFromDisk', () => {
       uploads: [],
       outputs: [],
       harness: 'cowork',
+      visibility: 'workspace',
+    });
+  });
+
+  test('forwards an explicit public visibility to the cloud share tool', async () => {
+    await writeTokens(validTokens(), home);
+    stageSession('public-transcript');
+
+    const { fetchImpl, calls } = captureFetch((req) =>
+      rpcShareSuccess(req.body.id, {
+        thread_id: 't_public',
+        thread_url: 'https://lore/t_public',
+      }),
+    );
+
+    await shareSessionFromDiskForTest(
+      { visibility: 'public' },
+      { fetchImpl, home, source, env: {} },
+    );
+
+    expect(calls[0]!.body.params.arguments).toEqual({
+      transcript: 'public-transcript',
+      uploads: [],
+      outputs: [],
+      harness: 'cowork',
+      visibility: 'public',
     });
   });
 
@@ -363,6 +412,7 @@ describe('shareSessionFromDisk', () => {
       outputs: [],
       highlight: 'where the parser changed',
       harness: 'cowork',
+      visibility: 'workspace',
     });
   });
 
@@ -384,6 +434,7 @@ describe('shareSessionFromDisk', () => {
       uploads: [],
       outputs: [],
       harness: 'cowork',
+      visibility: 'workspace',
     });
   });
 
@@ -406,6 +457,7 @@ describe('shareSessionFromDisk', () => {
       outputs: [],
       title: 'My Custom Thread',
       harness: 'cowork',
+      visibility: 'workspace',
     });
   });
 
@@ -427,6 +479,7 @@ describe('shareSessionFromDisk', () => {
       uploads: [],
       outputs: [],
       harness: 'cowork',
+      visibility: 'workspace',
     });
   });
 
@@ -468,6 +521,7 @@ describe('shareSessionFromDisk', () => {
         uploads: [],
         outputs: [],
         harness: 'codex',
+        visibility: 'workspace',
       });
     } finally {
       rmrf(codexRoot);

@@ -19,11 +19,11 @@
  *   The agent only sees `{thread_id, thread_url}` come back.
  *
  * Local plumbing:
- *   - Merges `harness` into the args passed cloud-side, derived from
- *     the detected runtime. The merge order deliberately puts the
- *     plugin's `harness` last, so even if a future schema change
- *     opened up an agent-controlled `harness` field, the plugin value
- *     wins.
+ *   - Merges the plugin-controlled `harness` into the args passed cloud-side.
+ *     The stdio tool defaults omitted visibility to `workspace`; shared callers
+ *     can omit it so the cloud honors the user's preference. The harness is
+ *     always derived from the detected runtime rather than accepted from the
+ *     agent.
  *   - Catches `AuthRequiredError` and returns the SDK's
  *     `authRequiredToMcpError()` shape so the agent can call
  *     `lore_login` and retry. Every other error bubbles to the
@@ -60,6 +60,7 @@ export type ShareSessionArgs = {
   session_id?: string;
   highlight?: string;
   title?: string;
+  visibility?: 'private' | 'workspace' | 'public';
 };
 
 /**
@@ -77,10 +78,9 @@ const RUNTIME_TO_HARNESS: Record<string, string> = {
 };
 
 /**
- * Pure cloud-call core: invoke `callCloudTool` with the harness
- * merged in. Exported for tests so they can verify the merge order
- * and result round-trip without mocking module-level globals or
- * staging session files on disk.
+ * Pure cloud-call core: invoke `callCloudTool` with the harness merged in.
+ * Exported for tests so they can verify the merge order and result round-trip
+ * without mocking module-level globals or staging session files on disk.
  */
 export async function runShareSession(
   args: Record<string, unknown>,
@@ -88,9 +88,9 @@ export async function runShareSession(
 ): Promise<McpTextCallToolResult> {
   try {
     const harness = opts.harness ?? 'cowork';
-    // Plugin-controlled `harness` is spread LAST so it overrides any
-    // (currently impossible, but defense-in-depth) caller-supplied
-    // value. See module docstring.
+    // Keep the runtime-derived harness authoritative. Visibility stays
+    // untouched here because Amp callers use omission to request the cloud
+    // preference; the stdio boundary applies its own workspace default below.
     return await callCloudTool(
       'share_session',
       { ...args, harness },
@@ -148,6 +148,7 @@ export async function shareSessionFromDisk(
       outputs: session.outputs,
       ...(highlight ? { highlight } : {}),
       ...(title ? { title } : {}),
+      visibility: args.visibility ?? 'workspace',
     },
     { fetchImpl: opts.fetchImpl, home: opts.home, harness: RUNTIME_TO_HARNESS[source.runtime] ?? source.runtime },
   );

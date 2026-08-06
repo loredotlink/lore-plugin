@@ -30,6 +30,7 @@ import path from 'node:path';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { ToolInputSchema } from './lib/tool';
 import { listLocalSessionsTool } from './tools/listLocalSessions';
+import { shareSessionTool } from './tools/share_session';
 import { validateAgainstSchema, dispatchToolCall } from './index';
 import { readTokens } from './lib/auth/store';
 import { __resetCloudBaseUrlForTests } from './lib/cloudBaseUrl';
@@ -145,6 +146,26 @@ describe('validateAgainstSchema — listLocalSessionsTool integration', () => {
     });
     expect(err).not.toBeNull();
     expect(err).toContain("'sessionId'");
+  });
+});
+
+describe('validateAgainstSchema — shareSessionTool visibility', () => {
+  test('accepts every declared visibility', () => {
+    for (const visibility of ['private', 'workspace', 'public']) {
+      expect(
+        validateAgainstSchema(shareSessionTool.inputSchema, { visibility }),
+      ).toBeNull();
+    }
+  });
+
+  test('rejects a visibility outside the declared enum', () => {
+    const err = validateAgainstSchema(shareSessionTool.inputSchema, {
+      visibility: 'organization',
+    });
+    expect(err).toContain("'visibility'");
+    expect(err).toContain('private');
+    expect(err).toContain('workspace');
+    expect(err).toContain('public');
   });
 });
 

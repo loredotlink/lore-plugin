@@ -27,12 +27,23 @@ If the user asks to name the thread while sharing — for example "share and nam
 
 Strip framing words ("name it", "call it", "titled", surrounding quotes) and pass only the title itself.
 
+## Setting Visibility
+
+Shares default to `workspace`. When the user explicitly requests an access level, pass it as `visibility`:
+
+- "share this publicly" or "anyone with the link" → `visibility: "public"`.
+- "share this privately" or "only me" → `visibility: "private"`.
+- "share this with my workspace" or "share with my team" → `visibility: "workspace"`.
+
+If the user does not mention access, omit `visibility`; the tool uses the `workspace` default. Explicit visibility can be combined with `title`, `highlight`, or `session_id` in the same call.
+
 ## Tool Flow
 
-1. Call the `lore-local` MCP tool `share_session` with no arguments.
-2. If the user includes a natural-language highlight request after `/lore:share`, pass that request as `highlight`. For example, `/lore:share where I made the parser handle Amp exports` should call `share_session({ highlight: "where I made the parser handle Amp exports" })`.
-3. If the user asked for a specific older session, call `list_local_sessions`, pick the match, then call `share_session({ session_id })` (or `share_session({ session_id, highlight })` when they also asked for a highlight).
-4. Surface `thread_url` prominently. If `clipboard_copied` is true, mention that the shared link was copied to the clipboard. If `clipboard_copied` is false, still show the link and mention that clipboard copy was unavailable. If `highlight` was supplied and resolved, `thread_url` already includes the selected block anchor or range. If the result includes a tip, show it after the link.
+1. Collect the optional arguments requested by the user, then make exactly one `share_session` call. Use no arguments only when none of the cases below apply.
+2. If the user explicitly requests public, private, or workspace access, include the corresponding `visibility`. For example, `/lore:share this session publicly` should call `share_session({ visibility: "public" })`.
+3. If the user includes a natural-language highlight request after `/lore:share`, include that request as `highlight`. For example, `/lore:share where I made the parser handle Amp exports` should call `share_session({ highlight: "where I made the parser handle Amp exports" })`.
+4. If the user asked for a specific older session, call `list_local_sessions`, pick the match, then include its `session_id`, combining any requested `visibility` or `highlight` in the same `share_session` call.
+5. Surface `thread_url` prominently. If `clipboard_copied` is true, mention that the shared link was copied to the clipboard. If `clipboard_copied` is false, still show the link and mention that clipboard copy was unavailable. If `highlight` was supplied and resolved, `thread_url` already includes the selected block anchor or range. If the result includes a tip, show it after the link.
 
 The share result is a JSON object with:
 

@@ -57,11 +57,12 @@ const SERVER_INFO = {
  *   - `required: string[]` — every named field must be present in args
  *   - `additionalProperties: false` — reject any field not in `properties`
  *   - per-property `type`: 'string' | 'number' | 'integer' | 'boolean'
+ *   - per-property `enum` values
  *
  * Why a hand-rolled validator instead of Ajv: Ajv is in `node_modules`
  * as a transitive dep of the SDK, but adding it as a direct dep just
- * to enforce four features is more surface than the four features
- * justify. If a future tool needs `oneOf` / `enum` / nested objects,
+ * to enforce this small subset is more surface than the supported features
+ * justify. If a future tool needs `oneOf` or nested objects,
  * swap in Ajv or zod — `ToolInputSchema` deliberately has no index
  * signature so any new field forces a paired validator update.
  *
@@ -100,7 +101,7 @@ export function validateAgainstSchema(
 
   for (const [name, propSchemaRaw] of Object.entries(properties)) {
     if (!Object.prototype.hasOwnProperty.call(obj, name)) continue;
-    const propSchema = propSchemaRaw as { type?: string };
+    const propSchema = propSchemaRaw as { type?: string; enum?: unknown[] };
     if (typeof propSchema?.type !== 'string') continue;
     const value = obj[name];
     const actual = typeof value;
@@ -126,6 +127,12 @@ export function validateAgainstSchema(
     }
     if (!ok) {
       return `field '${name}' expected ${expected}, got ${actual}`;
+    }
+    if (
+      Array.isArray(propSchema.enum) &&
+      !propSchema.enum.some((candidate) => Object.is(candidate, value))
+    ) {
+      return `field '${name}' expected one of ${propSchema.enum.map((candidate) => JSON.stringify(candidate)).join(', ')}`;
     }
   }
 

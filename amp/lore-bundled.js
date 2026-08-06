@@ -19443,10 +19443,45 @@ var searchContract = c8.router({
   }
 });
 
+// ../contracts/src/findings.ts
+var findingIdSchema = exports_external.string().regex(/^F-[0-9]{3}$/);
+var MAX_FINDING_TEXT_LENGTH = 1e4;
+var MAX_QUOTED_SPAN_LENGTH = 50000;
+var MAX_FINDING_REFS = 100;
+var MAX_FINDING_GAPS = 100;
+var findingKindSchema = exports_external.enum(["fact", "claim", "inference", "missing"]);
+var findingSourceRefSchema = exports_external.object({
+  sourceId: exports_external.string().min(1),
+  quotedSpan: exports_external.string().min(1).max(MAX_QUOTED_SPAN_LENGTH).optional(),
+  whatItContributes: exports_external.string().min(1).max(MAX_FINDING_TEXT_LENGTH)
+}).strict();
+var findingGapKindSchema = exports_external.enum(["not_found", "not_inspected"]);
+var findingGapSchema = exports_external.object({
+  description: exports_external.string().min(1).max(MAX_FINDING_TEXT_LENGTH),
+  kind: findingGapKindSchema,
+  sourceId: exports_external.string().min(1).optional()
+}).strict();
+var findingConfidenceSchema = exports_external.object({
+  level: exports_external.enum(["high", "medium", "low"]),
+  why: exports_external.string().min(1).max(MAX_FINDING_TEXT_LENGTH)
+}).strict();
+var findingSchema = exports_external.object({
+  id: findingIdSchema,
+  claim: exports_external.string().min(1).max(MAX_FINDING_TEXT_LENGTH),
+  kind: findingKindSchema,
+  restsOn: exports_external.array(findingSourceRefSchema).max(MAX_FINDING_REFS),
+  gaps: exports_external.array(findingGapSchema).max(MAX_FINDING_GAPS),
+  confidence: findingConfidenceSchema
+}).strict();
+var findingsManifestSchema = exports_external.object({
+  findings: exports_external.array(findingSchema)
+}).strict();
+
 // ../contracts/src/evidence.ts
 var id = exports_external.string().min(1);
 var timestamp = exports_external.iso.datetime();
 var visibility = exports_external.enum(["private", "organization"]);
+var provenanceClassSchema = exports_external.enum(["witnessed", "attested"]);
 var verification = exports_external.object({
   status: exports_external.enum(["passed", "failed", "unchecked", "unknown"]),
   policy: exports_external.string().min(1),
@@ -19480,6 +19515,7 @@ var base = {
 var evidenceEffectDetailSchema = exports_external.object({
   ...base,
   kind: exports_external.literal("dock_effect"),
+  provenanceClass: exports_external.literal("witnessed"),
   effectId: id,
   toolCallId: exports_external.string().min(1),
   action: exports_external.string().min(1),
@@ -19499,6 +19535,7 @@ var evidenceEffectDetailSchema = exports_external.object({
 var evidenceOutcomeDetailSchema = exports_external.object({
   ...base,
   kind: exports_external.literal("dock_turn_outcome"),
+  provenanceClass: exports_external.literal("witnessed"),
   promptBlockId: id,
   outcome: exports_external.enum(["verified_success", "unverified_completion", "partial_success", "blocked", "exhausted", "cancelled", "failed", "unknown"]),
   stopReason: exports_external.enum(["end_turn", "aborted", "error"]),
@@ -19506,10 +19543,19 @@ var evidenceOutcomeDetailSchema = exports_external.object({
   settledAt: timestamp,
   verificationConclusions: exports_external.array(exports_external.object({ status: exports_external.enum(["passed", "failed", "unchecked", "unknown"]) }).strict())
 }).strict();
-var evidenceDetailSchema = exports_external.discriminatedUnion("kind", [evidenceEffectDetailSchema, evidenceOutcomeDetailSchema]);
+var evidenceFindingDetailSchema = exports_external.object({
+  ...base,
+  kind: exports_external.literal("finding"),
+  provenanceClass: exports_external.literal("attested"),
+  findingRecordId: id,
+  outputPath: exports_external.string().min(1),
+  retractedAt: timestamp.nullable(),
+  finding: findingSchema
+}).strict();
+var evidenceDetailSchema = exports_external.discriminatedUnion("kind", [evidenceEffectDetailSchema, evidenceOutcomeDetailSchema, evidenceFindingDetailSchema]);
 var evidenceWorkbenchSummarySchema = exports_external.object({
   bundleId: id,
-  kind: exports_external.enum(["dock_effect", "dock_turn_outcome"]),
+  kind: exports_external.enum(["dock_effect", "dock_turn_outcome", "finding"]),
   toolCallId: exports_external.string().nullable(),
   status: exports_external.string().min(1),
   createdAt: timestamp
@@ -19524,10 +19570,31 @@ var promoteEvidenceResponseSchema = exports_external.object({
   organizationId: id,
   copyUrl: exports_external.url()
 }).strict();
-var evidenceErrorSchema = exports_external.object({
-  error: exports_external.enum(["not_found", "forbidden", "invalid_request", "conflict", "unavailable"]),
-  retryable: exports_external.boolean().optional()
+var publishFindingRequestSchema = exports_external.object({
+  outputPath: exports_external.string().min(1),
+  finding: findingSchema,
+  organizationId: id
 }).strict();
+var publishFindingResponseSchema = exports_external.object({
+  bundleId: id,
+  findingRecordId: id,
+  visibility: exports_external.literal("organization"),
+  organizationId: id,
+  copyUrl: exports_external.url()
+}).strict();
+var retractFindingResponseSchema = exports_external.object({
+  bundleId: id,
+  visibility: exports_external.literal("private"),
+  retractedAt: timestamp
+}).strict();
+var evidenceErrorSchema = exports_external.discriminatedUnion("error", [
+  exports_external.object({ error: exports_external.literal("not_found") }).strict(),
+  exports_external.object({ error: exports_external.literal("forbidden") }).strict(),
+  exports_external.object({ error: exports_external.literal("invalid_request") }).strict(),
+  exports_external.object({ error: exports_external.literal("conflict") }).strict(),
+  exports_external.object({ error: exports_external.literal("already_published"), bundleId: id }).strict(),
+  exports_external.object({ error: exports_external.literal("unavailable"), retryable: exports_external.literal(true) }).strict()
+]);
 // ../contracts/src/sourceDocuments.ts
 var SUPPORTED_SOURCE_DOCUMENT_EXTENSIONS = Object.freeze([
   ".md",
@@ -19578,6 +19645,11 @@ var dockThreadSourceSchema = exports_external.object({
 }).strict();
 var dockThreadSourcesResponseSchema = exports_external.object({
   sources: exports_external.array(dockThreadSourceSchema)
+}).strict();
+var SOURCE_AUTHORITY_STATES = Object.freeze(["active", "set_aside"]);
+var sourceAuthorityStateSchema = exports_external.enum(SOURCE_AUTHORITY_STATES);
+var setSourceAsideRequestSchema = exports_external.object({
+  setAside: exports_external.boolean()
 }).strict();
 // ../contracts/src/events/types.ts
 var subjectKindSchema = exports_external.enum(["thread", "org", "user", "public"]);
@@ -20851,6 +20923,7 @@ var posthogOrganizationContextSchema = exports_external.object({
 var whoAmIResponseSchema = exports_external.object({
   authProviderUserId: exports_external.string().min(1).optional(),
   authProviderOrganizationId: exports_external.string().min(1).optional(),
+  organizationId: exports_external.string().min(1).optional(),
   org_name: exports_external.string().min(1).optional(),
   workspaceOrganizationIds: exports_external.array(exports_external.string().min(1)).optional(),
   organizations: exports_external.array(exports_external.object({
@@ -22381,6 +22454,7 @@ var sharedSkillTemplateSchema = exports_external.object({
   is_templatized: exports_external.literal(true)
 });
 var artifactSourceSchema = exports_external.enum(["cowork", "native"]);
+var artifactCreationOriginSchema = exports_external.enum(["deliberate_output", "browser_capture"]);
 var artifactKindSchema = exports_external.enum(["upload", "output", "workbench_output"]);
 var coworkArtifactKindSchema = artifactKindSchema.extract(["upload", "output"]);
 var artifactVisibilitySchema = exports_external.enum(["private", "workspace", "public"]);
@@ -22402,6 +22476,7 @@ var artifactSummarySchema = exports_external.object({
   thread_title: exports_external.string(),
   source: artifactSourceSchema,
   kind: artifactKindSchema,
+  creation_origin: artifactCreationOriginSchema.nullable(),
   file_name: exports_external.string(),
   mime_type: exports_external.string().nullable(),
   size_in_bytes: exports_external.number().int().nonnegative().nullable(),
@@ -22495,7 +22570,8 @@ var shareArtifactRequestSchema = exports_external.object({
   harness_internal_id: exports_external.string().describe("Source session id (threads.harness_internal_id)"),
   file_name: exports_external.string().min(1).describe("Artifact file name, e.g. dashboard.html"),
   content_base64: exports_external.string().min(1).describe("Artifact bytes, base64-encoded. Max 10 MiB decoded."),
-  content_type: exports_external.string().nullable().optional().describe("MIME type, e.g. text/html")
+  content_type: exports_external.string().nullable().optional().describe("MIME type, e.g. text/html"),
+  creation_origin: artifactCreationOriginSchema.optional()
 });
 var shareArtifactResponseSchema = exports_external.object({
   artifact_id: exports_external.string(),
@@ -25920,7 +25996,7 @@ var mcpSearchThreadsToolSpec = {
 };
 var mcpShareSessionPluginToolSpec = {
   name: "share_session",
-  description: "Share the current session to Lore. Auto-detects Claude Code " + "(via CLAUDE_SESSION_ID), Cowork (via COWORK_SESSION_ID), or " + "Codex (via CODEX_THREAD_ID) and resolves the right transcript " + "on disk. With no arguments, shares the active session; pass " + "`session_id` to share a specific older one (typically surfaced " + "by `list_local_sessions`). Pass `highlight` with a natural-language " + "description to return a Lore URL anchored to matching thread blocks. " + 'Pass `title` when the user asks to name the thread (e.g. "share and ' + 'name it X", "share as X") to set the thread title instead of letting ' + "Lore auto-generate one. Requires authentication via " + "lore_login on first use. Returns {thread_id, thread_url, " + "clipboard_copied}. The " + "plugin reads the transcript off disk itself; the agent does " + "not need to fetch it first.",
+  description: "Share the current session to Lore. Auto-detects Claude Code " + "(via CLAUDE_SESSION_ID), Cowork (via COWORK_SESSION_ID), or " + "Codex (via CODEX_THREAD_ID) and resolves the right transcript " + "on disk. With no arguments, shares the active session; pass " + "`session_id` to share a specific older one (typically surfaced " + "by `list_local_sessions`). Pass `highlight` with a natural-language " + "description to return a Lore URL anchored to matching thread blocks. " + 'Pass `title` when the user asks to name the thread (e.g. "share and ' + 'name it X", "share as X") to set the thread title instead of letting ' + "Lore auto-generate one. Pass `visibility` when the user explicitly asks " + "to share privately, with their workspace, or publicly; it defaults to " + "`workspace`. Requires authentication via " + "lore_login on first use. Returns {thread_id, thread_url, " + "clipboard_copied}. The " + "plugin reads the transcript off disk itself; the agent does " + "not need to fetch it first.",
   requiredScope: "mcp.write",
   annotations: mcpWriteAnnotations,
   inputSchema: {
@@ -25934,6 +26010,10 @@ var mcpShareSessionPluginToolSpec = {
       title: {
         type: "string",
         description: 'Title for the shared thread, extracted from the user request (e.g. "name it X"). Overrides the auto-generated title.'
+      },
+      visibility: {
+        type: "string",
+        enum: ["private", "workspace", "public"]
       }
     },
     additionalProperties: false
@@ -28363,7 +28443,8 @@ async function shareSessionFromDisk(args, opts = {}) {
     uploads: session.uploads,
     outputs: session.outputs,
     ...highlight ? { highlight } : {},
-    ...title2 ? { title: title2 } : {}
+    ...title2 ? { title: title2 } : {},
+    visibility: args.visibility ?? "workspace"
   }, { fetchImpl: opts.fetchImpl, home: opts.home, harness: RUNTIME_TO_HARNESS[source.runtime] ?? source.runtime });
   if (result.isError === true) {
     return result;
