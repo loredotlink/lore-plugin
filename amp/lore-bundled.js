@@ -21170,17 +21170,6 @@ var listBuildingBlockSnapshotsQuerySchema = exports_external.object({
   before: exports_external.string().min(1).optional(),
   after: exports_external.string().min(1).optional()
 });
-var repositorySourceSchema = exports_external.enum(["thread", "building_block"]);
-var repositoryResourceSchema = exports_external.object({
-  repo_origin_path: exports_external.string().min(1),
-  sources: exports_external.array(repositorySourceSchema).nonempty()
-});
-var repositoryListResponseSchema = exports_external.object({
-  type: exports_external.literal("list"),
-  list_type: exports_external.literal("repository"),
-  has_more: exports_external.boolean(),
-  objects: exports_external.array(repositoryResourceSchema)
-});
 var harnessSchema = exports_external.enum([
   "claudeCode",
   "codex",
@@ -24985,19 +24974,6 @@ var apiContract = c7.router({
       503: errorSchema7
     },
     summary: "Create or reuse a WorkOS organization for the authenticated user\u2019s non-public email domain and add the user as a member."
-  },
-  listRepositories: {
-    method: "GET",
-    path: "/repositories",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    responses: {
-      200: repositoryListResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7
-    },
-    summary: "List repositories known to the authenticated user\u2019s organization across threads and building blocks"
   },
   createBuildingBlockSnapshots: {
     method: "POST",
