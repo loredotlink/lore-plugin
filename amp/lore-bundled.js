@@ -19396,7 +19396,7 @@ var verification = exports_external.object({
 var authorityBase = {
   authorizationId: exports_external.string().min(1),
   requirement: exports_external.object({
-    tier: exports_external.enum(["whole_file_replacement", "deletion", "non_allowlisted_shell", "submit_class_browser"]),
+    tier: exports_external.enum(["whole_file_replacement", "deletion", "non_allowlisted_shell", "browser_interaction", "submit_class_browser"]),
     scope: exports_external.string(),
     policyVersion: exports_external.string()
   }).strict().nullable()
@@ -19534,6 +19534,19 @@ var registerSourceDocumentRequestSchema = exports_external.object({
   kind: exports_external.literal("document"),
   relativePath: exports_external.string().min(1),
   title: exports_external.string().min(1)
+}).strict();
+var registerLoreThreadSourceRequestSchema = exports_external.object({
+  kind: exports_external.literal("lore_thread"),
+  loreThreadId: exports_external.string().min(1),
+  title: exports_external.string().min(1)
+}).strict();
+var loreSourceSnapshotResponseSchema = exports_external.object({
+  loreThreadId: exports_external.string(),
+  title: exports_external.string(),
+  relativePath: exports_external.string(),
+  content: exports_external.string(),
+  capturedAt: exports_external.string().datetime(),
+  capturedBlockCount: exports_external.number().int().nonnegative()
 }).strict();
 var dockThreadSourceSchema = exports_external.object({
   id: exports_external.string(),
@@ -20007,8 +20020,45 @@ var EFFECT_JOURNAL_SHELL_EXEC_CAPABILITY = "effect.journal.shell.exec";
 var EFFECT_JOURNAL_FS_DELETE_CAPABILITY = "effect.journal.fs.delete";
 var EFFECT_JOURNAL_UPLOAD_ASSET_CAPABILITY = "effect.journal.uploadAsset";
 var EFFECT_JOURNAL_BROWSER_ACT_CAPABILITY = "effect.journal.browser.act";
+var BROWSER_NAVIGATE_READ_CAPABILITY = "browser.navigateRead.v1";
+var BROWSER_ORIGIN_BOUND_INTERACTION_CAPABILITY = "browser.originBoundInteraction.v1";
+var BROWSER_REF_PATTERN = /^e\d+$/;
+var BROWSER_REF_MAX_LENGTH = 32;
+var browserCanonicalOriginSchema = exports_external.string().superRefine((value, ctx) => {
+  try {
+    const url2 = new URL(value);
+    if (url2.protocol !== "http:" && url2.protocol !== "https:" || url2.origin !== value || url2.username !== "" || url2.password !== "" || url2.pathname !== "/" || url2.search !== "" || url2.hash !== "") {
+      ctx.addIssue({ code: "custom", message: "must be an exact canonical http(s) origin" });
+    }
+  } catch {
+    ctx.addIssue({ code: "custom", message: "must be an exact canonical http(s) origin" });
+  }
+});
+var browserStatusPageSuccessSchema = exports_external.object({
+  ok: exports_external.literal(true),
+  sessionId: exports_external.string().min(1),
+  pageId: exports_external.string().min(1),
+  url: exports_external.string(),
+  title: exports_external.string(),
+  active: exports_external.boolean()
+}).strict();
 var isEffectJournalCapability = (capability) => capability === EFFECT_JOURNAL_CAPABILITY || capability === EFFECT_JOURNAL_FS_EDIT_FILE_CAPABILITY || capability === EFFECT_JOURNAL_SHELL_EXEC_CAPABILITY || capability === EFFECT_JOURNAL_FS_DELETE_CAPABILITY || capability === EFFECT_JOURNAL_UPLOAD_ASSET_CAPABILITY || capability === EFFECT_JOURNAL_BROWSER_ACT_CAPABILITY;
 var EFFECT_CANCELLATION_CAPABILITY = "effect.cancel";
+var digestSchema = exports_external.object({ algorithm: exports_external.literal("sha256"), value: exports_external.string().regex(/^[0-9a-f]{64}$/) }).strict();
+var observationIdentitySchema = exports_external.object({ contractVersion: exports_external.literal(1), requestedPath: exports_external.string().min(1), target: exports_external.string().min(1) });
+var fsInspectPathResultSchema = exports_external.discriminatedUnion("kind", [
+  observationIdentitySchema.extend({ kind: exports_external.literal("missing") }).strict(),
+  observationIdentitySchema.extend({ kind: exports_external.literal("file"), byteLength: exports_external.number().int().nonnegative(), digest: digestSchema }).strict(),
+  observationIdentitySchema.extend({ kind: exports_external.literal("directory") }).strict(),
+  observationIdentitySchema.extend({ kind: exports_external.literal("symlink") }).strict(),
+  observationIdentitySchema.extend({ kind: exports_external.literal("other") }).strict()
+]);
+var fsEditImageSchema = exports_external.object({ characterLength: exports_external.number().int().nonnegative(), byteLength: exports_external.number().int().nonnegative(), digest: digestSchema }).strict();
+var fsPreviewEditResultSchema = exports_external.discriminatedUnion("status", [
+  observationIdentitySchema.extend({ status: exports_external.literal("ready"), prior: fsEditImageSchema, post: fsEditImageSchema }).strict(),
+  observationIdentitySchema.extend({ status: exports_external.literal("not_ready"), reason: exports_external.enum(["absent", "old_text_not_unique"]) }).strict(),
+  observationIdentitySchema.extend({ status: exports_external.literal("unavailable"), reason: exports_external.enum(["binary", "unavailable"]) }).strict()
+]);
 var executorContractVersionRangeSchema = exports_external.object({
   min: exports_external.number().int().positive(),
   max: exports_external.number().int().positive()
@@ -20060,6 +20110,8 @@ var executorRequestVariantSchemas = {
     expectedArgumentDigest: exports_external.string().regex(/^[0-9a-f]{64}$/)
   }),
   "fs.readFile": base2.extend({ op: exports_external.literal("fs.readFile"), path: exports_external.string().min(1) }),
+  "fs.inspectPath": base2.extend({ op: exports_external.literal("fs.inspectPath"), path: exports_external.string().min(1) }),
+  "fs.previewEdit": base2.extend({ op: exports_external.literal("fs.previewEdit"), path: exports_external.string().min(1), oldText: exports_external.string().min(1), newText: exports_external.string() }),
   "fs.writeFile": base2.extend({ op: exports_external.literal("fs.writeFile"), path: exports_external.string().min(1), content: exports_external.string() }),
   "fs.editFile": base2.extend({
     op: exports_external.literal("fs.editFile"),
@@ -20073,7 +20125,12 @@ var executorRequestVariantSchemas = {
   "git.command": base2.extend({ op: exports_external.literal("git.command"), args: exports_external.array(exports_external.string()).min(1) }),
   "shell.exec": base2.extend({ op: exports_external.literal("shell.exec"), command: exports_external.string().min(1), timeoutMs: exports_external.number().int().positive().max(600000).optional() }),
   uploadAsset: base2.extend({ op: exports_external.literal("uploadAsset"), path: exports_external.string().min(1), kind: exports_external.string().min(1) }),
-  "browser.act": base2.extend({ op: exports_external.literal("browser.act"), action: exports_external.string().min(1), params: exports_external.record(exports_external.string(), exports_external.unknown()).optional() }),
+  "browser.act": base2.extend({
+    op: exports_external.literal("browser.act"),
+    action: exports_external.string().min(1),
+    params: exports_external.record(exports_external.string(), exports_external.unknown()).optional(),
+    approvedOrigin: browserCanonicalOriginSchema.optional()
+  }),
   "browser.capture": base2.extend({
     op: exports_external.literal("browser.capture"),
     sessionId: exports_external.string().min(1),
@@ -20444,14 +20501,27 @@ var showArtifactProvenanceSchema = exports_external.strictObject({
   })).max(SHOW_ARTIFACT_PROVENANCE_MAX_ANNOTATIONS)
 });
 var browserRoute = (action) => {
-  const request = { op: "browser.act", callId: "route-metadata", action };
-  const journalCapability = effectJournalCapabilityForRequest(request);
   return {
     primitive: "browser.act",
-    requiredCapabilities: journalCapability === null ? ["browser.act"] : ["browser.act", journalCapability, EFFECT_CANCELLATION_CAPABILITY],
+    requiredCapabilities: browserReadActionCapabilities(action),
     map: (input, callId) => ({ op: "browser.act", callId, action, params: input })
   };
 };
+function browserReadActionCapabilities(action) {
+  if (action === "browser_click" || action === "browser_type") {
+    return [
+      "browser.act",
+      BROWSER_ORIGIN_BOUND_INTERACTION_CAPABILITY,
+      EFFECT_JOURNAL_BROWSER_ACT_CAPABILITY,
+      EFFECT_CANCELLATION_CAPABILITY
+    ];
+  }
+  if (action === "browser_navigate" || action === "browser_read_text") {
+    return ["browser.act", BROWSER_NAVIGATE_READ_CAPABILITY];
+  }
+  const request = { op: "browser.act", callId: "route-metadata", action };
+  return effectJournalCapabilityForRequest(request) === null ? ["browser.act"] : ["browser.act", EFFECT_JOURNAL_BROWSER_ACT_CAPABILITY, EFFECT_CANCELLATION_CAPABILITY];
+}
 var EXECUTOR_TOOL_CONTRACTS = {
   list_files: {
     version: 1,
@@ -20502,6 +20572,12 @@ var EXECUTOR_TOOL_CONTRACTS = {
     inputSchema: exports_external.object({ url: text("Optional full https:// URL to open after the session starts. Omit to start blank.").optional() }).strict(),
     routes: [browserRoute("browser_open")]
   },
+  browser_navigate: {
+    version: 1,
+    description: "Navigate an open browser tab to a full http:// or https:// URL. Returns the resolved page ID and the page\u2019s resulting URL and title.",
+    inputSchema: exports_external.object({ sessionId: text("Session ID from browser_open."), url: text("Full http:// or https:// URL to navigate to."), pageId: text("Optional page ID from browser_status. Defaults to the active tab.").optional() }).strict(),
+    routes: [browserRoute("browser_navigate")]
+  },
   browser_snapshot: {
     version: 1,
     description: "Read the current page in an open browser session as a text accessibility tree \u2014 the fastest way to see what is on the page. Each element is listed with a [ref=eN] handle identifying it, valid only until the page changes.",
@@ -20519,6 +20595,24 @@ var EXECUTOR_TOOL_CONTRACTS = {
     description: "Close a browser session opened with browser_open.",
     inputSchema: exports_external.object({ sessionId: text("Session ID to close.") }).strict(),
     routes: [browserRoute("browser_close")]
+  },
+  browser_read_text: {
+    version: 1,
+    description: "Read the visible text of the current page, or of one element identified by a [ref=eN] handle from browser_snapshot. Selectors, XPath, and expressions are not accepted.",
+    inputSchema: exports_external.object({ sessionId: text("Session ID from browser_open."), ref: exports_external.string().max(BROWSER_REF_MAX_LENGTH).regex(BROWSER_REF_PATTERN).describe("Optional [ref=eN] handle from the latest browser_snapshot.").optional(), pageId: text("Optional page ID from browser_status. Defaults to the active tab.").optional() }).strict(),
+    routes: [browserRoute("browser_read_text")]
+  },
+  browser_click: {
+    version: 1,
+    description: "Click one element identified by a [ref=eN] handle from the latest browser_snapshot. Requires exact approval for the current browser origin.",
+    inputSchema: exports_external.object({ sessionId: text("Session ID from browser_open."), ref: exports_external.string().max(BROWSER_REF_MAX_LENGTH).regex(BROWSER_REF_PATTERN), pageId: text("Optional page ID. Defaults to the active tab.").optional() }).strict(),
+    routes: [browserRoute("browser_click")]
+  },
+  browser_type: {
+    version: 1,
+    description: "Type text into one element identified by a [ref=eN] handle from the latest browser_snapshot. Requires exact approval for the current browser origin.",
+    inputSchema: exports_external.object({ sessionId: text("Session ID from browser_open."), ref: exports_external.string().max(BROWSER_REF_MAX_LENGTH).regex(BROWSER_REF_PATTERN), text: exports_external.string(), pageId: text("Optional page ID. Defaults to the active tab.").optional() }).strict(),
+    routes: [browserRoute("browser_type")]
   },
   browser_screenshot: {
     version: 1,
@@ -20722,6 +20816,15 @@ var dockProjectErrorSchema = exports_external.union([
   dockProjectRevisionConflictErrorSchema,
   dockProjectServiceUnavailableErrorSchema
 ]);
+// ../contracts/src/dockFork.ts
+var forkDockThreadRequestSchema = exports_external.object({}).strict();
+var forkDockThreadResponseSchema = exports_external.object({
+  threadId: exports_external.string(),
+  projectId: exports_external.string(),
+  title: exports_external.string().nullable(),
+  forkedAtBlockId: exports_external.string().nullable(),
+  copiedBlockCount: exports_external.number().int().nonnegative()
+}).strict();
 
 // ../contracts/src/index.ts
 var defaultThreadFileParseSizeLimitInBytes = 50 * 1024 * 1024;
@@ -21037,60 +21140,10 @@ var createBuildingBlockSnapshotsRequestSchema = exports_external.object({
   repo_origin_path: exports_external.string().min(1),
   building_blocks: exports_external.array(createBuildingBlockSnapshotSchema)
 });
-var planIdSchema = exports_external.string().regex(/^th_[0-9A-Za-z]{22}$/);
-var planRevisionIdSchema = exports_external.string().regex(/^tb_[0-9A-Za-z]{22}$/);
-var planListObjectSchema = exports_external.object({
-  id: planIdSchema,
-  author: exports_external.object({
-    id: exports_external.string().min(1),
-    display_name: exports_external.string().min(1)
-  }),
-  title: exports_external.string().min(1),
-  excerpt: exports_external.string(),
-  created_at: exports_external.string().datetime(),
-  repo_origin_path: exports_external.string().min(1),
-  latest_revision_id: planRevisionIdSchema,
-  revision_count: exports_external.number().int().positive()
-});
-var planCommentAuthorSchema = exports_external.object({
-  id: exports_external.string().min(1),
-  display_name: exports_external.string().min(1)
-});
-var planCommentSchema = exports_external.object({
-  id: exports_external.string().min(1),
-  author_id: exports_external.string().min(1).nullable(),
-  author: planCommentAuthorSchema.nullable(),
-  created_at: exports_external.string().datetime(),
-  deleted_at: exports_external.string().datetime().nullable(),
-  content: exports_external.string().min(1)
-});
-var planCommentThreadSchema = exports_external.object({
-  id: exports_external.string().min(1),
-  thread_block_id: exports_external.string().min(1),
-  created_at: exports_external.string().datetime(),
-  resolved_at: exports_external.string().datetime().nullable(),
-  comments: exports_external.array(planCommentSchema)
-});
-var createPlanCommentThreadRequestSchema = exports_external.object({
-  thread_block_id: planRevisionIdSchema,
-  from_position: exports_external.number().int().positive(),
-  to_position: exports_external.number().int().positive(),
-  selected_text: exports_external.string().min(1),
-  content: exports_external.string().trim().min(1)
-});
-var createPlanCommentThreadResponseSchema = exports_external.object({
-  id: exports_external.string().min(1)
-});
 var createThreadBlockCommentThreadRequestSchema = exports_external.object({
   content: exports_external.string().trim().min(1)
 });
 var createThreadBlockCommentThreadResponseSchema = exports_external.object({
-  id: exports_external.string().min(1)
-});
-var createPlanCommentRequestSchema = exports_external.object({
-  content: exports_external.string().trim().min(1)
-});
-var createPlanCommentResponseSchema = exports_external.object({
   id: exports_external.string().min(1)
 });
 var createThreadBlockCommentRequestSchema = exports_external.object({
@@ -21098,13 +21151,6 @@ var createThreadBlockCommentRequestSchema = exports_external.object({
 });
 var createThreadBlockCommentResponseSchema = exports_external.object({
   id: exports_external.string().min(1)
-});
-var updatePlanCommentThreadRequestSchema = exports_external.object({
-  resolved: exports_external.boolean()
-});
-var updatePlanCommentThreadResponseSchema = exports_external.object({
-  id: exports_external.string().min(1),
-  resolved_at: exports_external.string().datetime().nullable()
 });
 var updateThreadBlockCommentThreadRequestSchema = exports_external.object({
   resolved: exports_external.boolean()
@@ -21114,41 +21160,6 @@ var updateThreadBlockCommentThreadResponseSchema = exports_external.object({
   resolved_at: exports_external.string().datetime().nullable()
 });
 var prosemirrorJsonSchema = exports_external.record(exports_external.string(), exports_external.unknown());
-var planRevisionSchema = exports_external.object({
-  id: planRevisionIdSchema,
-  body: exports_external.string().nullable(),
-  created_at: exports_external.string().datetime(),
-  prosemirror_json: prosemirrorJsonSchema.nullable(),
-  comment_threads: exports_external.array(planCommentThreadSchema)
-});
-var getPlanRevisionResponseSchema = planRevisionSchema.extend({
-  body: exports_external.string(),
-  prosemirror_json: prosemirrorJsonSchema
-});
-var getPlanResponseSchema = exports_external.object({
-  id: planIdSchema,
-  created_at: exports_external.string().datetime(),
-  repo_origin_path: exports_external.string().min(1),
-  author: exports_external.object({
-    id: exports_external.string().min(1),
-    display_name: exports_external.string().min(1)
-  }),
-  latest_revision_id: planRevisionIdSchema,
-  revision_count: exports_external.number().int().positive(),
-  revisions: exports_external.array(planRevisionSchema)
-});
-var planListResponseSchema = exports_external.object({
-  type: exports_external.literal("list"),
-  list_type: exports_external.literal("plan"),
-  has_more: exports_external.boolean(),
-  objects: exports_external.array(planListObjectSchema)
-});
-var listPlansQuerySchema = exports_external.object({
-  before: exports_external.string().min(1).optional(),
-  after: exports_external.string().min(1).optional(),
-  author_id: exports_external.string().min(1).optional(),
-  repo_origin_path: exports_external.string().min(1).optional()
-});
 var buildingBlockSnapshotSchema = exports_external.object({
   id: exports_external.string().min(1),
   organization_id: exports_external.string().min(1).nullable(),
@@ -21675,12 +21686,6 @@ var askThreadsSourceSchema = exports_external.object({
   block_id: exports_external.string().nullable(),
   decisions: exports_external.array(askThreadsSourceDecisionSchema)
 });
-var askThreadsPlanSummarySchema = exports_external.object({
-  interpretation: exports_external.string(),
-  lanes: exports_external.array(exports_external.string()),
-  filters: exports_external.record(exports_external.string(), exports_external.unknown()),
-  entity_kinds: exports_external.array(exports_external.string())
-});
 var askThreadsPersonRefSchema = exports_external.object({
   entity_id: exports_external.string(),
   name: exports_external.string(),
@@ -21819,7 +21824,6 @@ var explorationSnapshotV1Schema = exports_external.object({
   session_id: exports_external.string().min(1),
   turn_index: exports_external.number().int().nonnegative(),
   rephrase_of_ask_id: exports_external.string().min(1).nullable().optional(),
-  plan: askThreadsPlanSummarySchema.optional(),
   outcome: askThreadsOutcomeSchema,
   coverage: askThreadsCoverageSchema.nullable(),
   searched_query: exports_external.string().optional(),
@@ -21840,7 +21844,6 @@ var loreThreadStreamEventSchema = exports_external.discriminatedUnion("type", [
     session_id: exports_external.string().min(1),
     turn_index: exports_external.number().int().nonnegative()
   }),
-  exports_external.object({ type: exports_external.literal("plan"), plan: askThreadsPlanSummarySchema }),
   exports_external.object({ type: exports_external.literal("trace_step"), step: askThreadsTraceStepSchema }),
   exports_external.object({
     type: exports_external.literal("retrieval_result"),
@@ -23081,6 +23084,11 @@ var updateTeamSeatsRequestSchema = exports_external.object({
 var adminPlanOverrideRequestSchema = exports_external.object({
   plan: planTierSchema.nullable()
 });
+var adminCreditPoolSummarySchema = exports_external.object({
+  balance_millicents: exports_external.number().int(),
+  period_start: exports_external.string(),
+  period_end: exports_external.string()
+});
 var adminBillingSubjectSchema = exports_external.object({
   subject_type: exports_external.enum(["user", "organization"]),
   subject_id: exports_external.string().min(1),
@@ -23088,11 +23096,19 @@ var adminBillingSubjectSchema = exports_external.object({
   effective_plan: planTierSchema,
   admin_override: planTierSchema.nullable(),
   stripe_subscription_status: exports_external.string().nullable(),
-  seat_quantity: exports_external.number().int().positive()
+  seat_quantity: exports_external.number().int().positive(),
+  credit_pool: adminCreditPoolSummarySchema.nullable()
 });
 var adminBillingOverviewResponseSchema = exports_external.object({
   users: exports_external.array(adminBillingSubjectSchema),
   organizations: exports_external.array(adminBillingSubjectSchema)
+});
+var adminBootstrapCreditPoolResponseSchema = adminCreditPoolSummarySchema.extend({
+  subject_id: exports_external.string().min(1),
+  created: exports_external.boolean(),
+  granted_millicents: exports_external.number().int().nonnegative(),
+  seat_quantity: exports_external.number().int().positive(),
+  plan_version: exports_external.string().min(1)
 });
 var creditSettingsResponseSchema = exports_external.object({
   pool_balance_millicents: exports_external.number().int(),
@@ -23120,6 +23136,8 @@ var creditPoolMetricSchema = exports_external.object({
   period_start: exports_external.string().nullable(),
   period_end: exports_external.string().nullable(),
   granted_millicents: exports_external.number().int().nonnegative(),
+  promotional_granted_millicents: exports_external.number().int().nonnegative(),
+  revenue_millicents: exports_external.number().int().nonnegative(),
   used_millicents: exports_external.number().int().nonnegative(),
   raw_cogs_millicents: exports_external.number().int().nonnegative(),
   breakage_millicents: exports_external.number().int().nonnegative(),
@@ -23132,6 +23150,8 @@ var adminCreditPoolsResponseSchema = exports_external.object({
   rollup: exports_external.object({
     team_count: exports_external.number().int().nonnegative(),
     granted_millicents: exports_external.number().int().nonnegative(),
+    promotional_granted_millicents: exports_external.number().int().nonnegative(),
+    revenue_millicents: exports_external.number().int().nonnegative(),
     used_millicents: exports_external.number().int().nonnegative(),
     raw_cogs_millicents: exports_external.number().int().nonnegative(),
     breakage_millicents: exports_external.number().int().nonnegative(),
@@ -25027,113 +25047,6 @@ var apiContract = c7.router({
     },
     summary: "Create building block snapshots for the authenticated user\u2019s organization"
   },
-  getPlan: {
-    method: "GET",
-    path: "/plans/:id",
-    pathParams: exports_external.object({
-      id: exports_external.string().min(1)
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    responses: {
-      200: getPlanResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
-    },
-    summary: "Load a thread-backed plan container visible to the authenticated user, including all visible plan revisions in that thread (only the latest revision carries body + prosemirror_json; older revisions are metadata-only and load on demand via getPlanRevision)"
-  },
-  getPlanRevision: {
-    method: "GET",
-    path: "/plans/:id/revisions/:revisionId",
-    pathParams: exports_external.object({
-      id: exports_external.string().min(1),
-      revisionId: exports_external.string().min(1)
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    responses: {
-      200: getPlanRevisionResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
-    },
-    summary: "Load a single revision body + prosemirror_json + comment threads for a thread-backed plan container. Used to fetch non-latest revisions on demand without paying for every revision when the plan is first opened"
-  },
-  createPlanCommentThread: {
-    method: "POST",
-    path: "/plans/:id/comment-threads",
-    pathParams: exports_external.object({
-      id: exports_external.string().min(1)
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: createPlanCommentThreadRequestSchema,
-    responses: {
-      201: createPlanCommentThreadResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      422: errorSchema7
-    },
-    summary: "Create a new inline comment thread on a specific revision inside a thread-backed plan container"
-  },
-  createPlanComment: {
-    method: "POST",
-    path: "/plans/:id/comment-threads/:threadId/comments",
-    pathParams: exports_external.object({
-      id: exports_external.string().min(1),
-      threadId: exports_external.string().min(1)
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: createPlanCommentRequestSchema,
-    responses: {
-      201: createPlanCommentResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      409: errorSchema7
-    },
-    summary: "Reply to an inline comment thread on a thread-backed plan container"
-  },
-  updatePlanCommentThread: {
-    method: "PATCH",
-    path: "/plans/:id/comment-threads/:threadId",
-    pathParams: exports_external.object({
-      id: exports_external.string().min(1),
-      threadId: exports_external.string().min(1)
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: updatePlanCommentThreadRequestSchema,
-    responses: {
-      200: updatePlanCommentThreadResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
-    },
-    summary: "Resolve or reopen an inline comment thread on a thread-backed plan container"
-  },
-  listPlans: {
-    method: "GET",
-    path: "/plans",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    query: listPlansQuerySchema,
-    responses: {
-      200: planListResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7
-    },
-    summary: "List thread-backed plan containers visible to the authenticated user in their organization, ordered by latest visible revision and optionally filtered by author or repository"
-  },
   listBuildingBlockSnapshots: {
     method: "GET",
     path: "/building_blocks",
@@ -25964,6 +25877,25 @@ var apiContract = c7.router({
       403: errorSchema7
     },
     summary: "Per-team credit-pool utilization, blended margin, breakage, and overage."
+  },
+  adminBootstrapOrganizationCreditPool: {
+    method: "POST",
+    path: "/admin/billing/organizations/:id/credits/bootstrap",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1)
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: exports_external.object({}),
+    responses: {
+      200: adminBootstrapCreditPoolResponseSchema,
+      401: errorSchema7,
+      403: errorSchema7,
+      404: errorSchema7,
+      409: errorSchema7
+    },
+    summary: "Create an organization current-period pool with a promotional grant."
   },
   adminSetUserPlanOverride: {
     method: "PUT",
