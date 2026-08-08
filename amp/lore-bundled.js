@@ -20,7 +20,8 @@ import path13 from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 
 // amp/passiveMirror.ts
-var PASSIVE_EVENTS = ["session.start", "message_added", "message_updated", "agent.end"];
+var PASSIVE_EVENTS = ["session.start", "agent.end"];
+var THREAD_MESSAGE_PAGE_SIZE = 20;
 function installPassiveAmpThreadMirror(amp, deps) {
   const eventApi = amp;
   if (typeof eventApi.on !== "function") {
@@ -36,6 +37,7 @@ function installPassiveAmpThreadMirror(amp, deps) {
       const completion = enqueue(queues, threadId, {
         full: eventName === "session.start" || eventName === "agent.end",
         ctx,
+        event,
         trigger: eventName,
         settle: () => {
           return;
@@ -89,6 +91,8 @@ async function mirrorOnce(threadId, work, amp, deps) {
     const signal = AbortSignal.timeout(deps.deadlineMs ?? 15000);
     await deps.beforeSessionStart(threadId, work.ctx, signal);
   }
+  if (work.trigger === "agent.end" && (!isRecord(work.event) || work.event.status !== "done"))
+    return;
   const thread = await deps.exportThread(threadId, work.ctx);
   if (stringOrNull(thread.id) !== threadId) {
     logStatus(amp, work.trigger, threadId, "rejected", "thread_mismatch");
@@ -110,6 +114,44 @@ async function mirrorOnce(threadId, work, amp, deps) {
     }
   }
 }
+async function readPluginThreadSnapshot(threadId, ctx) {
+  const thread = isRecord(ctx) && isRecord(ctx.thread) ? ctx.thread : null;
+  if (!thread || stringOrNull(thread.id) !== threadId || typeof thread.messages !== "function")
+    throw new Error("thread_messages_unavailable");
+  const readMessages = thread.messages;
+  const messages = [];
+  for (let offset = 0;; offset += THREAD_MESSAGE_PAGE_SIZE) {
+    const page = await readMessages.call(thread, {
+      full: true,
+      from: "start",
+      offset,
+      limit: THREAD_MESSAGE_PAGE_SIZE,
+      roles: ["user", "assistant"]
+    });
+    if (!Array.isArray(page))
+      throw new Error("thread_messages_invalid");
+    messages.push(...page.filter(isRecord).map(normalizePluginMessage));
+    if (page.length < THREAD_MESSAGE_PAGE_SIZE)
+      break;
+  }
+  const title = isRecord(thread.title) && typeof thread.title.get === "function" ? stringOrNull(await thread.title.get()) : null;
+  return {
+    id: threadId,
+    ...title ? { title } : {},
+    updatedAt: new Date().toISOString(),
+    messages
+  };
+}
+function normalizePluginMessage(message) {
+  const role = stringOrNull(message.role);
+  const content = Array.isArray(message.content) ? message.content.filter(isRecord).map((part) => ({ ...part, blockState: "complete" })) : [];
+  return {
+    ...message,
+    messageId: message.messageId ?? message.id,
+    content,
+    ...role === "assistant" ? { state: { type: "complete" } } : {}
+  };
+}
 function buildFullSnapshot(thread) {
   const threadId = stringOrNull(thread.id);
   if (!threadId)
@@ -124,25 +166,64 @@ function buildFullSnapshot(thread) {
   messages.forEach((message, index) => {
     const role = stringOrNull(message.role) ?? "";
     const timestamp = isoTimestamp(isRecord(message.meta) ? message.meta.sentAt : undefined) ?? fallback;
-    const promptId = stringOrNull(message.messageId) ?? `amp-msg-${index}`;
+    const promptId = stringOrNull(message.messageId) ?? (typeof message.messageId === "number" && Number.isFinite(message.messageId) ? String(message.messageId) : null) ?? `amp-msg-${index}`;
+    const prompt = role === "user" ? textContent(message.content) : null;
+    const assistant = role === "assistant" ? assistantResponseBody(message, promptId) : null;
+    if (!role || role === "user" && !prompt || role === "assistant" && !assistant)
+      return;
     records.push({
       timeUnixNano: toUnixNano(timestamp),
       attributes: attributes({
-        "event.name": role === "user" ? "claude_code.user_prompt" : role === "assistant" ? "claude_code.api_response_body" : "amp.export.message",
+        "event.name": prompt ? "claude_code.user_prompt" : assistant ? "claude_code.api_response_body" : "amp.export.message",
         "event.sequence": index + 1,
         "session.id": threadId,
         "prompt.id": promptId,
         "amp.export.kind": "message",
         "amp.message.index": index,
-        "amp.message.role": role
+        "amp.message.role": role,
+        ...prompt ? { prompt } : {}
       }),
-      body: anyValue(message)
+      body: anyValue(prompt ?? assistant ?? message)
     });
   });
   return { resourceLogs: [{
     resource: { attributes: attributes({ "service.name": "amp", "service.namespace": "lore.amp-plugin" }) },
     scopeLogs: [{ scope: { name: "lore.amp-plugin.passive-thread-upload" }, logRecords: records }]
   }] };
+}
+function textContent(content) {
+  if (typeof content === "string")
+    return stringOrNull(content);
+  if (!Array.isArray(content))
+    return null;
+  const text = content.filter(isRecord).filter((part) => part.type === "text").map((part) => stringOrNull(part.text)).filter((part) => part !== null).join(`
+
+`);
+  return stringOrNull(text);
+}
+function assistantResponseBody(message, promptId) {
+  const content = Array.isArray(message.content) ? message.content.filter(isRecord) : typeof message.content === "string" && message.content.trim() ? [{ type: "text", text: message.content }] : [];
+  const state = isRecord(message.state) ? stringOrNull(message.state.type) : null;
+  const contentIsComplete = content.every((part) => part.blockState === "complete");
+  if (content.length === 0 || state !== "complete" || !contentIsComplete)
+    return null;
+  const usage = isRecord(message.usage) ? message.usage : {};
+  return {
+    id: promptId,
+    model: stringOrNull(usage.model) ?? "amp",
+    type: "message",
+    role: "assistant",
+    content,
+    usage: {
+      input_tokens: finiteNumber(usage.inputTokens) ?? 0,
+      output_tokens: finiteNumber(usage.outputTokens) ?? 0,
+      cache_creation_input_tokens: finiteNumber(usage.cacheCreationInputTokens) ?? 0,
+      cache_read_input_tokens: finiteNumber(usage.cacheReadInputTokens) ?? 0,
+      inference_geo: "",
+      service_tier: "",
+      cache_creation: {}
+    }
+  };
 }
 function resolveThreadId(event, ctx) {
   if (isRecord(event)) {
@@ -181,6 +262,13 @@ function isoTimestamp(value) {
 }
 function stringOrNull(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+function finiteNumber(value) {
+  if (typeof value === "number" && Number.isFinite(value))
+    return value;
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value)))
+    return Number(value);
+  return null;
 }
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -19461,10 +19549,19 @@ var dockThreadSourceSchema = exports_external.object({
 var dockThreadSourcesResponseSchema = exports_external.object({
   sources: exports_external.array(dockThreadSourceSchema)
 }).strict();
-var SOURCE_AUTHORITY_STATES = Object.freeze(["active", "set_aside"]);
+var SOURCE_AUTHORITY_STATES = Object.freeze(["active", "authoritative", "set_aside"]);
 var sourceAuthorityStateSchema = exports_external.enum(SOURCE_AUTHORITY_STATES);
 var setSourceAsideRequestSchema = exports_external.object({
   setAside: exports_external.boolean()
+}).strict();
+var dockThreadSourceV2Schema = dockThreadSourceSchema.omit({ setAsideAt: true }).extend({
+  authority: sourceAuthorityStateSchema
+}).strict();
+var dockThreadSourcesV2ResponseSchema = exports_external.object({
+  sources: exports_external.array(dockThreadSourceV2Schema)
+}).strict();
+var setSourceAuthorityRequestSchema = exports_external.object({
+  authority: sourceAuthorityStateSchema
 }).strict();
 // ../contracts/src/events/types.ts
 var subjectKindSchema = exports_external.enum(["thread", "org", "user", "public"]);
@@ -19495,6 +19592,7 @@ var threadEventTypeSchema = exports_external.enum([
   "thread.detail.invalidated",
   "thread.dock.turn_completed",
   "thread.dock.turn_review_updated",
+  "thread.dock.turn_recovery_updated",
   "thread.dock.turn_cancel_requested",
   "thread.participant.joined",
   "thread.participant.left",
@@ -19591,12 +19689,26 @@ var threadEventSchema = exports_external.discriminatedUnion("type", [
       stop_reason: dockWireStopReasonSchema,
       error: exports_external.string().nullable(),
       outcome: dockOutcomeSchema.optional(),
+      context_receipt: exports_external.object({
+        set_aside_sources: exports_external.array(exports_external.object({
+          source_id: exports_external.string().min(1),
+          title: exports_external.string().max(160)
+        }).strict()).max(50),
+        remaining_set_aside_count: exports_external.number().int().nonnegative()
+      }).strict().optional(),
       outcome_detail: exports_external.string().min(1).optional()
     })
   }),
   threadEventBase.extend({
     type: exports_external.literal("thread.dock.turn_review_updated"),
     payload: exports_external.object({
+      thread_id: exports_external.string().min(1),
+      prompt_block_id: exports_external.string().min(1)
+    })
+  }),
+  threadEventBase.extend({
+    type: exports_external.literal("thread.dock.turn_recovery_updated"),
+    payload: exports_external.strictObject({
       thread_id: exports_external.string().min(1),
       prompt_block_id: exports_external.string().min(1)
     })
@@ -20553,13 +20665,24 @@ var dockProjectTerminalWorkSchema = exports_external.object({
   effectCount: exports_external.number().int().nonnegative(),
   reviewId: id3.nullable()
 }).strict();
+var DOCK_PROJECT_UNSETTLED_REASONS = [
+  "turn_running",
+  "effect_in_flight",
+  "effect_unknown",
+  "reconciliation_pending",
+  "executor_unavailable",
+  "effect_commitment_unknown",
+  "authority_unavailable",
+  "evidence_conflict"
+];
+var dockProjectUnsettledReasonSchema = exports_external.enum(DOCK_PROJECT_UNSETTLED_REASONS);
 var dockProjectCurrentWorkSchema = exports_external.discriminatedUnion("kind", [
   exports_external.object({ kind: exports_external.literal("none") }).strict(),
   exports_external.object({
     kind: exports_external.literal("unsettled"),
     turnRef: id3,
     startedAt: timestamp2,
-    reason: exports_external.enum(["turn_running", "effect_in_flight", "effect_unknown", "reconciliation_pending"])
+    reason: dockProjectUnsettledReasonSchema
   }).strict(),
   dockProjectTerminalWorkSchema
 ]);
@@ -21256,6 +21379,33 @@ var dockTurnOutcomeV1Schema = exports_external.object({
   outcome: dockOutcomeSchema,
   stop_reason: dockWireStopReasonSchema
 }).strict();
+var dockContextCitationSourceSchema = exports_external.object({
+  category: exports_external.enum(["document", "artifact", "lore_history", "output", "repository_material", "other_context"]),
+  title: exports_external.string().min(1).max(512),
+  open_target: exports_external.discriminatedUnion("kind", [
+    exports_external.object({ kind: exports_external.literal("source"), relative_path: exports_external.string().min(1).max(1024) }).strict(),
+    exports_external.object({ kind: exports_external.literal("lore_thread"), thread_id: exports_external.string().min(1).max(40), block_id: exports_external.string().min(1).max(40).nullable() }).strict(),
+    exports_external.object({ kind: exports_external.literal("output"), path: exports_external.string().min(1).max(1024) }).strict()
+  ]).nullable()
+}).strict();
+var dockClaimCitationPresentationV1Schema = exports_external.object({
+  version: exports_external.literal(1),
+  citations: exports_external.array(exports_external.object({
+    display_number: exports_external.number().int().positive().max(64),
+    sources: exports_external.array(dockContextCitationSourceSchema).max(8),
+    restricted_source_count: exports_external.number().int().nonnegative().max(8),
+    unavailable_source_count: exports_external.number().int().nonnegative().max(8)
+  }).strict()).max(64),
+  context_gaps: exports_external.object({
+    omitted_budget_count: exports_external.number().int().nonnegative(),
+    set_aside_count: exports_external.number().int().nonnegative(),
+    set_aside_but_selected_count: exports_external.number().int().nonnegative(),
+    source_list_limit_count: exports_external.number().int().nonnegative(),
+    missing_count: exports_external.number().int().nonnegative(),
+    restricted_count: exports_external.number().int().nonnegative(),
+    unavailable_count: exports_external.number().int().nonnegative()
+  }).strict().nullable()
+}).strict();
 var threadBlockObjectSchema = exports_external.object({
   id: exports_external.string().min(1),
   type: exports_external.string().min(1),
@@ -21266,7 +21416,9 @@ var threadBlockObjectSchema = exports_external.object({
   citation_sources: exports_external.array(exports_external.lazy(() => askThreadsSourceSchema)).optional(),
   host_tool_activity: exports_external.array(dockHostToolActivityV1Schema).optional(),
   terminal_presentation: dockTerminalPresentationV1Schema.optional(),
-  turn_outcome: dockTurnOutcomeV1Schema.optional()
+  turn_outcome: dockTurnOutcomeV1Schema.optional(),
+  context_citations: dockClaimCitationPresentationV1Schema.optional(),
+  turn_id: exports_external.string().min(1).optional()
 }).passthrough();
 var threadBlockListResponseSchema = exports_external.object({
   type: exports_external.literal("list"),
@@ -22658,6 +22810,30 @@ var adminDeleteSkillResponseSchema = exports_external.object({
     installations: exports_external.number().int().nonnegative()
   }),
   cli_command: exports_external.string().min(1)
+});
+var adminSkillRootKindResponseSchema = exports_external.object({
+  skill_id: exports_external.string().min(1),
+  name: exports_external.string().min(1),
+  root_kind: skillRootKindSchema2,
+  unpublished_at: exports_external.string().datetime().nullable()
+});
+var adminUpdateSkillRootKindRequestSchema = exports_external.object({
+  root_kind: skillRootKindSchema2
+});
+var adminUpdateSkillRootKindResponseSchema = adminSkillRootKindResponseSchema.extend({
+  previous_root_kind: skillRootKindSchema2
+});
+var adminSkillLookupQuerySchema = exports_external.object({
+  email: exports_external.string().trim().email().max(320),
+  name: exports_external.string().trim().min(1).max(200)
+});
+var adminSkillLookupMatchSchema = adminSkillRootKindResponseSchema.extend({
+  owner_user_id: exports_external.string().min(1),
+  owner_email: exports_external.string().email(),
+  owner_display_name: exports_external.string().min(1)
+});
+var adminSkillLookupResponseSchema = exports_external.object({
+  matches: exports_external.array(adminSkillLookupMatchSchema)
 });
 var adminUserListResponseSchema = exports_external.object({
   type: exports_external.literal("list"),
@@ -25323,6 +25499,57 @@ var apiContract = c7.router({
       404: errorSchema7
     },
     summary: "Permanently remove a skill and its sync records. Tanagram admins only."
+  },
+  adminLookupSkills: {
+    method: "GET",
+    path: "/admin/skills/lookup",
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    query: adminSkillLookupQuerySchema,
+    responses: {
+      200: adminSkillLookupResponseSchema,
+      400: errorSchema7,
+      401: errorSchema7,
+      403: errorSchema7
+    },
+    summary: "Find skills by owner email and exact skill name. Tanagram admins only."
+  },
+  adminGetSkillRootKind: {
+    method: "GET",
+    path: "/admin/skills/:id/root-kind",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1).describe("Workspace skill ID, e.g. sk_...")
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    responses: {
+      200: adminSkillRootKindResponseSchema,
+      401: errorSchema7,
+      403: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "Read the stored root kind for a skill. Tanagram admins only."
+  },
+  adminUpdateSkillRootKind: {
+    method: "PATCH",
+    path: "/admin/skills/:id/root-kind",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1).describe("Workspace skill ID, e.g. sk_...")
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: adminUpdateSkillRootKindRequestSchema,
+    responses: {
+      200: adminUpdateSkillRootKindResponseSchema,
+      400: errorSchema7,
+      401: errorSchema7,
+      403: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "Change only the stored root kind for a skill. Tanagram admins only."
   },
   adminReparseThreadFile: {
     method: "POST",
@@ -28932,13 +29159,7 @@ function configureLoreStateDirForInstalledAmpPlugin(importMetaUrl) {
 configureLoreStateDirForInstalledAmpPlugin(import.meta.url);
 function loreAmpPlugin(amp) {
   installPassiveAmpThreadMirror(amp, {
-    exportThread: async (threadId2, ctx) => {
-      const shell = ctx.$ ?? amp.$;
-      const result = await shell`amp threads export ${threadId2}`;
-      if (result.exitCode !== 0)
-        throw new Error("thread_export_failed");
-      return JSON.parse(result.stdout);
-    },
+    exportThread: readPluginThreadSnapshot,
     getToken: () => getValidAccessToken(),
     upload: async ({ token, body }, signal) => {
       const response = await fetch(`${otelApiOrigin()}/api/otel/v1/logs`, {

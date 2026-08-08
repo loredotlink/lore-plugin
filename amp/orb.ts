@@ -1,6 +1,6 @@
 import type { PluginAPI } from '@ampcode/plugin';
 
-import { installPassiveAmpThreadMirror, type AmpThreadExport } from './passiveMirror.js';
+import { installPassiveAmpThreadMirror, readPluginThreadSnapshot } from './passiveMirror.js';
 
 export const AMP_ORB_AUDIENCE = 'urn:lore:amp-upload';
 
@@ -18,12 +18,7 @@ export function createLoreOrbPlugin(config: OrbPluginConfig): (amp: PluginAPI) =
   const origin = config.loreApiOrigin.replace(/\/+$/, '');
   const request = config.fetch ?? globalThis.fetch;
   return (amp) => installPassiveAmpThreadMirror(amp, {
-    exportThread: async (threadId, ctx) => {
-      const shell = requireShell(ctx);
-      const result = await shell`amp threads export ${threadId}`;
-      if (result.exitCode !== 0) throw new Error('thread_export_failed');
-      return JSON.parse(result.stdout) as AmpThreadExport;
-    },
+    exportThread: readPluginThreadSnapshot,
     getToken: (threadId, ctx) => mintToken(threadId, ctx, config.expectedAmpWorkspaceId),
     beforeSessionStart: config.enrollmentChallenge ? async (threadId, ctx, signal) => {
       for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -43,7 +38,8 @@ export function createLoreOrbPlugin(config: OrbPluginConfig): (amp: PluginAPI) =
 }
 
 async function mintToken(_threadId: string, ctx: unknown, expectedWorkspaceId: string): Promise<string> {
-  const shell = requireShell(ctx);
+  const shell = (ctx as EventContext)?.$;
+  if (typeof shell !== 'function') throw new Error('event_shell_unavailable');
   const result = await shell`amp orb id-token --audience ${AMP_ORB_AUDIENCE} --ttl-seconds ${60}`;
   const token = result.stdout.trim();
   if (result.exitCode !== 0 || !token) throw new Error('token_mint_failed');
@@ -61,12 +57,6 @@ function workspaceIdFromToken(token: string): string | null {
   } catch {
     return null;
   }
-}
-
-function requireShell(ctx: unknown): NonNullable<EventContext['$']> {
-  const shell = (ctx as EventContext)?.$;
-  if (typeof shell !== 'function') throw new Error('event_shell_unavailable');
-  return shell;
 }
 
 async function post(fetcher: NonNullable<OrbPluginConfig['fetch']>, url: string, token: string, body: unknown, signal: AbortSignal): Promise<void> {

@@ -1,6 +1,7 @@
 // @bun
 // amp/passiveMirror.ts
-var PASSIVE_EVENTS = ["session.start", "message_added", "message_updated", "agent.end"];
+var PASSIVE_EVENTS = ["session.start", "agent.end"];
+var THREAD_MESSAGE_PAGE_SIZE = 20;
 function installPassiveAmpThreadMirror(amp, deps) {
   const eventApi = amp;
   if (typeof eventApi.on !== "function") {
@@ -16,6 +17,7 @@ function installPassiveAmpThreadMirror(amp, deps) {
       const completion = enqueue(queues, threadId, {
         full: eventName === "session.start" || eventName === "agent.end",
         ctx,
+        event,
         trigger: eventName,
         settle: () => {
           return;
@@ -69,6 +71,8 @@ async function mirrorOnce(threadId, work, amp, deps) {
     const signal = AbortSignal.timeout(deps.deadlineMs ?? 15000);
     await deps.beforeSessionStart(threadId, work.ctx, signal);
   }
+  if (work.trigger === "agent.end" && (!isRecord(work.event) || work.event.status !== "done"))
+    return;
   const thread = await deps.exportThread(threadId, work.ctx);
   if (stringOrNull(thread.id) !== threadId) {
     logStatus(amp, work.trigger, threadId, "rejected", "thread_mismatch");
@@ -90,6 +94,44 @@ async function mirrorOnce(threadId, work, amp, deps) {
     }
   }
 }
+async function readPluginThreadSnapshot(threadId, ctx) {
+  const thread = isRecord(ctx) && isRecord(ctx.thread) ? ctx.thread : null;
+  if (!thread || stringOrNull(thread.id) !== threadId || typeof thread.messages !== "function")
+    throw new Error("thread_messages_unavailable");
+  const readMessages = thread.messages;
+  const messages = [];
+  for (let offset = 0;; offset += THREAD_MESSAGE_PAGE_SIZE) {
+    const page = await readMessages.call(thread, {
+      full: true,
+      from: "start",
+      offset,
+      limit: THREAD_MESSAGE_PAGE_SIZE,
+      roles: ["user", "assistant"]
+    });
+    if (!Array.isArray(page))
+      throw new Error("thread_messages_invalid");
+    messages.push(...page.filter(isRecord).map(normalizePluginMessage));
+    if (page.length < THREAD_MESSAGE_PAGE_SIZE)
+      break;
+  }
+  const title = isRecord(thread.title) && typeof thread.title.get === "function" ? stringOrNull(await thread.title.get()) : null;
+  return {
+    id: threadId,
+    ...title ? { title } : {},
+    updatedAt: new Date().toISOString(),
+    messages
+  };
+}
+function normalizePluginMessage(message) {
+  const role = stringOrNull(message.role);
+  const content = Array.isArray(message.content) ? message.content.filter(isRecord).map((part) => ({ ...part, blockState: "complete" })) : [];
+  return {
+    ...message,
+    messageId: message.messageId ?? message.id,
+    content,
+    ...role === "assistant" ? { state: { type: "complete" } } : {}
+  };
+}
 function buildFullSnapshot(thread) {
   const threadId = stringOrNull(thread.id);
   if (!threadId)
@@ -104,25 +146,64 @@ function buildFullSnapshot(thread) {
   messages.forEach((message, index) => {
     const role = stringOrNull(message.role) ?? "";
     const timestamp = isoTimestamp(isRecord(message.meta) ? message.meta.sentAt : undefined) ?? fallback;
-    const promptId = stringOrNull(message.messageId) ?? `amp-msg-${index}`;
+    const promptId = stringOrNull(message.messageId) ?? (typeof message.messageId === "number" && Number.isFinite(message.messageId) ? String(message.messageId) : null) ?? `amp-msg-${index}`;
+    const prompt = role === "user" ? textContent(message.content) : null;
+    const assistant = role === "assistant" ? assistantResponseBody(message, promptId) : null;
+    if (!role || role === "user" && !prompt || role === "assistant" && !assistant)
+      return;
     records.push({
       timeUnixNano: toUnixNano(timestamp),
       attributes: attributes({
-        "event.name": role === "user" ? "claude_code.user_prompt" : role === "assistant" ? "claude_code.api_response_body" : "amp.export.message",
+        "event.name": prompt ? "claude_code.user_prompt" : assistant ? "claude_code.api_response_body" : "amp.export.message",
         "event.sequence": index + 1,
         "session.id": threadId,
         "prompt.id": promptId,
         "amp.export.kind": "message",
         "amp.message.index": index,
-        "amp.message.role": role
+        "amp.message.role": role,
+        ...prompt ? { prompt } : {}
       }),
-      body: anyValue(message)
+      body: anyValue(prompt ?? assistant ?? message)
     });
   });
   return { resourceLogs: [{
     resource: { attributes: attributes({ "service.name": "amp", "service.namespace": "lore.amp-plugin" }) },
     scopeLogs: [{ scope: { name: "lore.amp-plugin.passive-thread-upload" }, logRecords: records }]
   }] };
+}
+function textContent(content) {
+  if (typeof content === "string")
+    return stringOrNull(content);
+  if (!Array.isArray(content))
+    return null;
+  const text = content.filter(isRecord).filter((part) => part.type === "text").map((part) => stringOrNull(part.text)).filter((part) => part !== null).join(`
+
+`);
+  return stringOrNull(text);
+}
+function assistantResponseBody(message, promptId) {
+  const content = Array.isArray(message.content) ? message.content.filter(isRecord) : typeof message.content === "string" && message.content.trim() ? [{ type: "text", text: message.content }] : [];
+  const state = isRecord(message.state) ? stringOrNull(message.state.type) : null;
+  const contentIsComplete = content.every((part) => part.blockState === "complete");
+  if (content.length === 0 || state !== "complete" || !contentIsComplete)
+    return null;
+  const usage = isRecord(message.usage) ? message.usage : {};
+  return {
+    id: promptId,
+    model: stringOrNull(usage.model) ?? "amp",
+    type: "message",
+    role: "assistant",
+    content,
+    usage: {
+      input_tokens: finiteNumber(usage.inputTokens) ?? 0,
+      output_tokens: finiteNumber(usage.outputTokens) ?? 0,
+      cache_creation_input_tokens: finiteNumber(usage.cacheCreationInputTokens) ?? 0,
+      cache_read_input_tokens: finiteNumber(usage.cacheReadInputTokens) ?? 0,
+      inference_geo: "",
+      service_tier: "",
+      cache_creation: {}
+    }
+  };
 }
 function resolveThreadId(event, ctx) {
   if (isRecord(event)) {
@@ -162,6 +243,13 @@ function isoTimestamp(value) {
 function stringOrNull(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
+function finiteNumber(value) {
+  if (typeof value === "number" && Number.isFinite(value))
+    return value;
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value)))
+    return Number(value);
+  return null;
+}
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -195,13 +283,7 @@ function createLoreOrbPlugin(config) {
   const origin = config.loreApiOrigin.replace(/\/+$/, "");
   const request = config.fetch ?? globalThis.fetch;
   return (amp) => installPassiveAmpThreadMirror(amp, {
-    exportThread: async (threadId, ctx) => {
-      const shell = requireShell(ctx);
-      const result = await shell`amp threads export ${threadId}`;
-      if (result.exitCode !== 0)
-        throw new Error("thread_export_failed");
-      return JSON.parse(result.stdout);
-    },
+    exportThread: readPluginThreadSnapshot,
     getToken: (threadId, ctx) => mintToken(threadId, ctx, config.expectedAmpWorkspaceId),
     beforeSessionStart: config.enrollmentChallenge ? async (threadId, ctx, signal) => {
       for (let attempt = 1;attempt <= 3; attempt += 1) {
@@ -221,7 +303,9 @@ function createLoreOrbPlugin(config) {
   });
 }
 async function mintToken(_threadId, ctx, expectedWorkspaceId) {
-  const shell = requireShell(ctx);
+  const shell = ctx?.$;
+  if (typeof shell !== "function")
+    throw new Error("event_shell_unavailable");
   const result = await shell`amp orb id-token --audience ${AMP_ORB_AUDIENCE} --ttl-seconds ${60}`;
   const token = result.stdout.trim();
   if (result.exitCode !== 0 || !token)
@@ -238,12 +322,6 @@ function workspaceIdFromToken(token) {
   } catch {
     return null;
   }
-}
-function requireShell(ctx) {
-  const shell = ctx?.$;
-  if (typeof shell !== "function")
-    throw new Error("event_shell_unavailable");
-  return shell;
 }
 async function post(fetcher, url, token, body, signal) {
   const response = await fetcher(url, {

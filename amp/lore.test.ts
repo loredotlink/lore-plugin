@@ -174,6 +174,8 @@ describe('bundled Amp plugin artifact', () => {
     const bundle = fs.readFileSync(bundlePath, 'utf8');
 
     expect(bundle).toContain('export {');
+    expect(bundle).toContain('readMessages.call(thread');
+    expect(bundle).toContain('work.event.status !== "done"');
     expect(bundle).not.toContain('@lore/identity-store');
     expect(bundle).not.toContain('@lore/contracts');
     expect(bundle).not.toContain('@lore/transcript-locate');

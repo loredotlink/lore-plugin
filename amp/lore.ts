@@ -4,7 +4,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import type { PluginAPI, PluginCommandContext } from '@ampcode/plugin';
 
-import { installPassiveAmpThreadMirror as installReusablePassiveAmpThreadMirror } from './passiveMirror.js';
+import {
+  installPassiveAmpThreadMirror as installReusablePassiveAmpThreadMirror,
+  readPluginThreadSnapshot,
+} from './passiveMirror.js';
 import { toAmpToolDefinition } from '../server-src/amp/ampToolAdapter.js';
 import {
   createShareCurrentAmpThreadTool,
@@ -142,12 +145,7 @@ configureLoreStateDirForInstalledAmpPlugin(import.meta.url);
 
 export default function loreAmpPlugin(amp: PluginAPI): void {
   installReusablePassiveAmpThreadMirror(amp, {
-    exportThread: async (threadId, ctx) => {
-      const shell = (ctx as { $?: PluginAPI['$'] }).$ ?? amp.$;
-      const result = await shell`amp threads export ${threadId}`;
-      if (result.exitCode !== 0) throw new Error('thread_export_failed');
-      return JSON.parse(result.stdout);
-    },
+    exportThread: readPluginThreadSnapshot,
     getToken: () => getValidAccessToken(),
     upload: async ({ token, body }, signal) => {
       const response = await fetch(`${otelApiOrigin()}/api/otel/v1/logs`, {

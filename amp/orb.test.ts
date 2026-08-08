@@ -11,6 +11,16 @@ function jwt(workspaceId: string, nonce?: number): string {
   return `${encode({ alg: 'none' })}.${encode({ workspace_id: workspaceId, nonce })}.signature`;
 }
 
+function pluginThread(id: string) {
+  return {
+    id,
+    messages: async () => [
+      { id: 1, role: 'user', content: [{ type: 'text', text: 'hello' }] },
+      { id: 2, role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+    ],
+  };
+}
+
 describe('Lore Orb plugin', () => {
   test('uses event shell for exact-audience 60-second tokens and completes enrollment before upload', async () => {
     const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<void> | void>();
@@ -25,10 +35,9 @@ describe('Lore Orb plugin', () => {
       fetch: async (input, init) => { requests.push({ url: String(input), init }); return new Response('{}'); },
     })(amp);
     const ctx = {
-      thread: { id: 'T-orb' },
+      thread: pluginThread('T-orb'),
       $: async (strings: TemplateStringsArray, ...values: unknown[]) => {
         shellCalls.push([...(strings as unknown as string[]), ...values]);
-        if (String(strings[0]).includes('threads export')) return { exitCode: 0, stdout: JSON.stringify({ id: 'T-orb', messages: [] }), stderr: '' };
         return { exitCode: 0, stdout: jwt('workspace-1'), stderr: '' };
       },
     };
@@ -57,10 +66,10 @@ describe('Lore Orb plugin', () => {
         return new Response('{}');
       },
     })(amp);
-    const ctx = { thread: { id: 'T-retry' }, $: async (strings: TemplateStringsArray) =>
-      String(strings[0]).includes('threads export')
-        ? { exitCode: 0, stdout: JSON.stringify({ id: 'T-retry', messages: [] }), stderr: '' }
-        : { exitCode: 0, stdout: jwt('workspace', ++minted), stderr: '' } };
+    const ctx = {
+      thread: pluginThread('T-retry'),
+      $: async () => ({ exitCode: 0, stdout: jwt('workspace', ++minted), stderr: '' }),
+    };
     await handlers.get('session.start')?.({ threadId: 'T-retry' }, ctx);
     expect(tokens).toHaveLength(3);
     expect(new Set(tokens).size).toBe(3);
@@ -75,11 +84,13 @@ describe('Lore Orb plugin', () => {
         loreApiOrigin: 'https://lore.test', expectedAmpWorkspaceId: 'workspace',
         fetch: async () => { requests += 1; return new Response('{}'); },
       })(amp);
-      await handlers.get('agent.end')?.({ threadId: 'T-workspace' }, {
+      await handlers.get('agent.end')?.({
         thread: { id: 'T-workspace' },
-        $: async (strings: TemplateStringsArray) => String(strings[0]).includes('threads export')
-          ? { exitCode: 0, stdout: JSON.stringify({ id: 'T-workspace', messages: [] }), stderr: '' }
-          : { exitCode: 0, stdout: token, stderr: '' },
+        status: 'done',
+        messages: [],
+      }, {
+        thread: pluginThread('T-workspace'),
+        $: async () => ({ exitCode: 0, stdout: token, stderr: '' }),
       });
       expect(requests).toBe(expectedRequests);
     }
@@ -88,6 +99,9 @@ describe('Lore Orb plugin', () => {
   test('checked-in Orb bundle is self-contained and contains no injected deployment values', () => {
     const bundle = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'lore-orb-bundled.js'), 'utf8');
     expect(bundle).toContain('createLoreOrbPlugin');
+    expect(bundle).toContain('readMessages.call(thread');
+    expect(bundle).toContain('work.event.status !== "done"');
+    expect(bundle).not.toContain('amp threads export');
     expect(bundle).not.toMatch(/from ["'][.]{2}\//);
     for (const forbidden of ['@lore/', 'challenge-secret', 'workspace-1', 'LORE_PLUGIN_STATE_DIR', 'getValidAccessToken']) {
       expect(bundle).not.toContain(forbidden);

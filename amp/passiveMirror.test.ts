@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import type { PluginAPI } from '@ampcode/plugin';
 
-import { installPassiveAmpThreadMirror, type PassiveMirrorDeps } from './passiveMirror';
+import {
+  buildFullSnapshot,
+  installPassiveAmpThreadMirror,
+  readPluginThreadSnapshot,
+  type PassiveMirrorDeps,
+} from './passiveMirror';
 
 type Handler = (event: unknown, ctx: unknown) => Promise<void> | void;
 
@@ -14,14 +19,23 @@ function harness(overrides: Partial<PassiveMirrorDeps> = {}) {
     logger: { log: () => undefined },
   } as unknown as PluginAPI;
   const deps: PassiveMirrorDeps = {
-    exportThread: async (threadId) => ({ id: threadId, messages: [{ role: 'user', messageId: 'm1', content: 'hello' }] }),
+    exportThread: async (threadId) => ({
+      id: threadId,
+      messages: [
+        { role: 'user', messageId: 'm1', content: 'hello' },
+        { role: 'assistant', messageId: 'm2', state: { type: 'complete' }, content: [{ type: 'text', text: 'done', blockState: 'complete' }] },
+      ],
+    }),
     getToken: async () => `token-${++token}`,
     upload: async ({ threadId, token: bearer, body }) => { uploads.push({ threadId, token: bearer, body }); },
     ...overrides,
   };
   installPassiveAmpThreadMirror(amp, deps);
   const emit = async (name: string, threadId: string) => {
-    for (const handler of handlers.get(name) ?? []) await handler({ threadId }, { thread: { id: threadId } });
+    const event = name === 'agent.end'
+      ? { thread: { id: threadId }, status: 'done', messages: [] }
+      : { thread: { id: threadId } };
+    for (const handler of handlers.get(name) ?? []) await handler(event, { thread: { id: threadId } });
   };
   return { handlers, uploads, emit };
 }
@@ -31,10 +45,124 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise: new Promise<void>((settle) => { resolve = settle; }), resolve };
 }
 
+function decodeAnyValue(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  if ('stringValue' in record) return record.stringValue;
+  if ('intValue' in record) return Number(record.intValue);
+  if ('doubleValue' in record) return record.doubleValue;
+  if ('boolValue' in record) return record.boolValue;
+  if (typeof record.arrayValue === 'object' && record.arrayValue !== null) {
+    const values = (record.arrayValue as { values?: unknown }).values;
+    return Array.isArray(values) ? values.map(decodeAnyValue) : [];
+  }
+  if (typeof record.kvlistValue === 'object' && record.kvlistValue !== null) {
+    const values = (record.kvlistValue as { values?: unknown }).values;
+    if (!Array.isArray(values)) return {};
+    return Object.fromEntries(values.map((entry) => {
+      const attribute = entry as { key: string; value: unknown };
+      return [attribute.key, decodeAnyValue(attribute.value)];
+    }));
+  }
+  return value;
+}
+
+function snapshotRecords(snapshot: Record<string, unknown>): Array<Record<string, unknown>> {
+  const resourceLogs = snapshot.resourceLogs as Array<{ scopeLogs: Array<{ logRecords: Array<Record<string, unknown>> }> }>;
+  return resourceLogs[0]?.scopeLogs[0]?.logRecords ?? [];
+}
+
 describe('passive Amp thread mirror', () => {
+  test('serializes finalized Amp messages as projector user and assistant records instead of system fallbacks', () => {
+    const marker = 'desktop-amp-log-shipping-regression';
+    const records = snapshotRecords(buildFullSnapshot({
+      id: 'T-regression',
+      created: 1_786_138_081_141,
+      messages: [
+        {
+          meta: { sentAt: 1_786_138_085_964 },
+          role: 'user',
+          messageId: 1,
+          content: [{ type: 'text', text: `${marker}. Reply with exactly "ok".` }],
+        },
+        {
+          role: 'assistant',
+          messageId: 2,
+          state: { type: 'complete', stopReason: 'end_turn' },
+          usage: { model: 'gpt-5.6-sol', inputTokens: 17, outputTokens: 5 },
+          content: [{ type: 'text', text: 'ok', blockState: 'complete' }],
+        },
+      ],
+    }));
+    const decoded = records.map((record) => ({
+      attributes: Object.fromEntries((record.attributes as Array<{ key: string; value: unknown }>).map((attribute) => [
+        attribute.key,
+        decodeAnyValue(attribute.value),
+      ])),
+      body: decodeAnyValue(record.body),
+    }));
+
+    expect(decoded.map(({ attributes }) => attributes['event.name'])).toEqual([
+      'amp.export.thread',
+      'claude_code.user_prompt',
+      'claude_code.api_response_body',
+    ]);
+    expect(decoded[1]).toMatchObject({
+      attributes: { 'prompt.id': '1', prompt: `${marker}. Reply with exactly "ok".` },
+      body: `${marker}. Reply with exactly "ok".`,
+    });
+    expect(decoded[2]).toMatchObject({
+      attributes: { 'prompt.id': '2' },
+      body: {
+        id: '2',
+        model: 'gpt-5.6-sol',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'ok' }],
+        usage: { input_tokens: 17, output_tokens: 5 },
+      },
+    });
+  });
+
+  test('reads the finalized full transcript from the stable plugin API shape', async () => {
+    const marker = 'desktop-amp-log-shipping-plugin-api';
+    const calls: unknown[] = [];
+    const thread = await readPluginThreadSnapshot('T-finalized', {
+      thread: {
+        id: 'T-finalized',
+        title: { get: async () => 'Finalized thread' },
+        messages: async (options: unknown) => {
+          calls.push(options);
+          return [
+            { id: 1, role: 'user', content: [{ type: 'text', text: marker }] },
+            { id: 2, role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+          ];
+        },
+      },
+    });
+
+    expect(calls).toEqual([{
+      full: true,
+      from: 'start',
+      offset: 0,
+      limit: 20,
+      roles: ['user', 'assistant'],
+    }]);
+    const eventNames = snapshotRecords(buildFullSnapshot(thread)).map((record) => {
+      const eventName = (record.attributes as Array<{ key: string; value: unknown }>).find(({ key }) => key === 'event.name');
+      return decodeAnyValue(eventName?.value);
+    });
+    expect(eventNames).toEqual([
+      'amp.export.thread',
+      'claude_code.user_prompt',
+      'claude_code.api_response_body',
+    ]);
+    expect(JSON.stringify(thread)).toContain(marker);
+    expect(JSON.stringify(thread)).toContain('ok');
+  });
+
   test('registers only supported passive lifecycle events and full snapshots at correctness boundaries', async () => {
     const { handlers, uploads, emit } = harness();
-    expect([...handlers.keys()].sort()).toEqual(['agent.end', 'message_added', 'message_updated', 'session.start']);
+    expect([...handlers.keys()].sort()).toEqual(['agent.end', 'session.start']);
 
     await emit('session.start', 'T-one');
     await emit('agent.end', 'T-one');
@@ -42,6 +170,26 @@ describe('passive Amp thread mirror', () => {
     expect(uploads).toHaveLength(2);
     expect(uploads.every(({ body }) => JSON.stringify(body).includes('hello'))).toBe(true);
     expect(uploads.map(({ token }) => token)).toEqual(['token-1', 'token-2']);
+  });
+
+  test('does not snapshot a failed or cancelled agent turn as completed', async () => {
+    let reads = 0;
+    const { handlers, uploads } = harness({
+      exportThread: async (threadId) => {
+        reads += 1;
+        return { id: threadId, messages: [] };
+      },
+    });
+    for (const status of ['error', 'cancelled']) {
+      await handlers.get('agent.end')?.[0]?.({
+        thread: { id: `T-${status}` },
+        status,
+        messages: [],
+      }, { thread: { id: `T-${status}` } });
+    }
+
+    expect(reads).toBe(0);
+    expect(uploads).toEqual([]);
   });
 
   test('rejects an export whose top-level thread id differs before upload', async () => {
@@ -84,7 +232,7 @@ describe('passive Amp thread mirror', () => {
         releases.set(threadId, resolve);
       }),
     });
-    const first = emit('message_added', 'T-a');
+    const first = emit('agent.end', 'T-a');
     const queued = emit('agent.end', 'T-a');
     const independent = emit('agent.end', 'T-b');
     await Promise.resolve(); await Promise.resolve();
@@ -104,11 +252,17 @@ describe('passive Amp thread mirror', () => {
       exportThread: async (threadId) => {
         exports.push(threadId);
         if (threadId === 'T-a' && exports.filter((id) => id === 'T-a').length === 1) await blocked.promise;
-        return { id: threadId, messages: [] };
+        return {
+          id: threadId,
+          messages: [
+            { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+            { role: 'assistant', state: { type: 'complete' }, content: [{ type: 'text', text: 'done', blockState: 'complete' }] },
+          ],
+        };
       },
     });
 
-    const timedOut = emit('message_added', 'T-a');
+    const timedOut = emit('agent.end', 'T-a');
     const queued = emit('agent.end', 'T-a');
     const independent = emit('agent.end', 'T-b');
     await Promise.all([timedOut, queued, independent]);
@@ -127,7 +281,7 @@ describe('passive Amp thread mirror', () => {
       exportThread: async (threadId) => { order.push(`export:${threadId}`); return { id: threadId, messages: [] }; },
     });
     const start = successful.emit('session.start', 'T-enroll');
-    const message = successful.emit('message_added', 'T-enroll');
+    const message = successful.emit('agent.end', 'T-enroll');
     await Promise.resolve();
     expect(order).toEqual(['enroll']);
     enrollment.resolve();
