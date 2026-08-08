@@ -19598,7 +19598,6 @@ var dockOutcomeSchema = exports_external.enum(DOCK_OUTCOMES);
 var DOCK_WIRE_STOP_REASONS = ["end_turn", "aborted", "error"];
 var dockWireStopReasonSchema = exports_external.enum(DOCK_WIRE_STOP_REASONS);
 var threadEventTypeSchema = exports_external.enum([
-  "thread.created",
   "thread.listable",
   "thread.completed",
   "thread.block.appended",
@@ -19631,12 +19630,6 @@ var threadEventBase = exports_external.object({
   actor_user_id: exports_external.string().min(1).nullable(),
   created_at: exports_external.string().datetime()
 });
-var threadSummarySchema = exports_external.object({
-  thread_id: exports_external.string().min(1),
-  title: exports_external.string(),
-  author_id: exports_external.string().min(1),
-  created_at: exports_external.string().datetime()
-});
 var threadBlockKindSchema = exports_external.enum([
   "user",
   "assistant",
@@ -19661,10 +19654,6 @@ var skillVersionPayloadSchema = exports_external.object({
   content_hash: exports_external.string().startsWith("md5:")
 });
 var threadEventSchema = exports_external.discriminatedUnion("type", [
-  threadEventBase.extend({
-    type: exports_external.literal("thread.created"),
-    payload: threadSummarySchema
-  }),
   threadEventBase.extend({
     type: exports_external.literal("thread.listable"),
     payload: exports_external.object({
@@ -20924,7 +20913,7 @@ var messageSchema = exports_external.object({
   content: exports_external.string().min(1),
   timestamp: exports_external.string().datetime()
 });
-var threadSummarySchema2 = exports_external.object({
+var threadSummarySchema = exports_external.object({
   id: exports_external.string().uuid(),
   title: exports_external.string().min(1),
   author: exports_external.string().min(1),
@@ -20934,7 +20923,7 @@ var threadSummarySchema2 = exports_external.object({
   createdAt: exports_external.string().datetime(),
   preview: exports_external.string()
 });
-var threadDetailsSchema = threadSummarySchema2.extend({
+var threadDetailsSchema = threadSummarySchema.extend({
   messages: exports_external.array(messageSchema)
 });
 var errorSchema7 = exports_external.object({
@@ -22136,29 +22125,6 @@ var threadListResponseSchema = exports_external.object({
   list_type: exports_external.literal("thread"),
   has_more: exports_external.boolean(),
   objects: exports_external.array(threadListObjectSchema)
-});
-var discoverSortSchema = exports_external.enum(["recent", "popular"]);
-var discoverScopeSchema = exports_external.enum(["everyone", "following"]);
-var discoverThreadResourceSchema = threadResourceSchema;
-var discoverThreadListResponseSchema = exports_external.object({
-  type: exports_external.literal("list"),
-  list_type: exports_external.literal("discover_thread"),
-  has_more: exports_external.boolean(),
-  objects: exports_external.array(discoverThreadResourceSchema)
-});
-var listDiscoverThreadsQuerySchema = exports_external.object({
-  before: exports_external.string().min(1).optional(),
-  after: exports_external.string().min(1).optional(),
-  sort: discoverSortSchema.optional(),
-  scope: discoverScopeSchema.optional(),
-  harness: harnessSchema.optional(),
-  search: exports_external.string().max(200).optional()
-});
-var discoverStatsSchema = exports_external.object({
-  thread_count: exports_external.number().int().nonnegative(),
-  author_count: exports_external.number().int().nonnegative(),
-  organization_count: exports_external.number().int().nonnegative(),
-  harness_breakdown: exports_external.record(exports_external.string(), exports_external.number().int().nonnegative()).refine((breakdown) => Object.keys(breakdown).every((key) => harnessSchema.safeParse(key).success), "Harness breakdown keys must be known harness values")
 });
 var uploadSessionSummarySchema = exports_external.object({
   id: exports_external.string(),
@@ -25530,26 +25496,6 @@ var apiContract = c7.router({
       200: cardFeedResponseSchema
     },
     summary: "Slim feed of public threads with a ready cover image, ordered by cover_generated_at descending. Powers the landing-page UGC card scroll. Returns presigned cover URLs inline so the grid renders without a follow-up round trip per card."
-  },
-  listDiscoverThreads: {
-    method: "GET",
-    path: "/discover/threads",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    query: listDiscoverThreadsQuerySchema,
-    responses: {
-      200: discoverThreadListResponseSchema
-    },
-    summary: "Feed of public threads with sort, harness filter, search, and cursor pagination."
-  },
-  discoverStats: {
-    method: "GET",
-    path: "/discover/stats",
-    responses: {
-      200: discoverStatsSchema
-    },
-    summary: "Unauthenticated rollup of public-thread counts for the Discover header."
   },
   createWaitlistEntry: {
     method: "POST",
