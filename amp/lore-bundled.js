@@ -11800,7 +11800,7 @@ function finalize(ctx, schema) {
     result.$schema = "http://json-schema.org/draft-07/schema#";
   } else if (ctx.target === "draft-04") {
     result.$schema = "http://json-schema.org/draft-04/schema#";
-  } else if (ctx.target === "openapi-3.0") {} else {}
+  } else if (ctx.target === "openapi-3.0") {}
   if (ctx.external?.uri) {
     const id = ctx.external.registry.get(schema)?.id;
     if (!id)
@@ -12044,7 +12044,7 @@ var literalProcessor = (schema, ctx, json, _params) => {
     if (val === undefined) {
       if (ctx.unrepresentable === "throw") {
         throw new Error("Literal `undefined` cannot be represented in JSON Schema");
-      } else {}
+      }
     } else if (typeof val === "bigint") {
       if (ctx.unrepresentable === "throw") {
         throw new Error("BigInt literals cannot be represented in JSON Schema");
@@ -20641,175 +20641,10 @@ for (const route of executorToolRoutes) {
     routeRequirementsByPrimitive.set(route.primitive, route.requiredCapabilities);
   }
 }
-// ../contracts/src/dockProject.ts
-var DOCK_PROJECT_MAX_SOURCES = 20;
-var DOCK_PROJECT_MAX_OUTPUTS = 20;
-var DOCK_PROJECT_MAX_DECISIONS = 10;
-var DOCK_PROJECT_MAX_OBJECTIVE_CHARS = 1e5;
-var DOCK_PROJECT_MAX_STAGED_OBJECTIVE_SUGGESTION_CHARS = 4000;
-var DOCK_PROJECT_MAX_NEXT_STEP_CHARS = 2000;
-var DOCK_PROJECT_MAX_SOURCE_OUTPUT_TITLE_CHARS = 1000;
-var DOCK_PROJECT_MAX_DECISION_SUMMARY_CHARS = 4000;
-var DOCK_PROJECT_MAX_COMPLETION_DETAIL_CHARS = 4000;
-var DOCK_PROJECT_MAX_ACTION_LABEL_CHARS = 4000;
-var id3 = exports_external.string().min(1);
-var projectId = exports_external.string().regex(/^dprj_.+$/);
-var threadId = exports_external.string().regex(/^th_.+$/);
-var proposalId = exports_external.string().regex(/^dprp_.+$/);
-var timestamp2 = exports_external.iso.datetime();
-var objectiveText = exports_external.string().min(1).max(DOCK_PROJECT_MAX_OBJECTIVE_CHARS);
-var stagedObjectiveText = exports_external.string().min(1).max(DOCK_PROJECT_MAX_STAGED_OBJECTIVE_SUGGESTION_CHARS);
-var nextStepText = exports_external.string().min(1).max(DOCK_PROJECT_MAX_NEXT_STEP_CHARS);
-var title = exports_external.string().min(1).max(DOCK_PROJECT_MAX_SOURCE_OUTPUT_TITLE_CHARS);
-var createDockProjectThreadRequestSchema = exports_external.object({ creationKey: exports_external.uuid(), objective: objectiveText }).strict();
-var createDockProjectThreadResponseSchema = exports_external.object({ projectId, threadId }).strict();
-var ensureDockProjectRequestSchema = exports_external.object({ threadId, objective: objectiveText }).strict();
-var ensureDockProjectResponseSchema = exports_external.object({ projectId, threadId }).strict();
-var dockProjectObjectiveSuggestionSchema = exports_external.object({
-  text: stagedObjectiveText,
-  sourceTurnRef: id3,
-  suggestedAt: timestamp2
-}).strict();
-var provenanceFields = {
-  source: exports_external.enum(["lore", "user"]),
-  sourceTurnRef: id3.nullable(),
-  updatedByUserId: id3.nullable()
-};
-var refineSourceProvenance = (value, ctx) => {
-  const valid = value.source === "lore" ? typeof value.sourceTurnRef === "string" && value.updatedByUserId === null : value.sourceTurnRef === null && typeof value.updatedByUserId === "string";
-  if (!valid)
-    ctx.addIssue({ code: "custom", message: "provenance must match its source" });
-};
-var dockProjectObjectiveStateSchema = exports_external.object({
-  text: objectiveText,
-  ...provenanceFields,
-  revision: exports_external.number().int().positive(),
-  updatedAt: timestamp2,
-  suggestion: dockProjectObjectiveSuggestionSchema.nullable()
-}).strict().superRefine(refineSourceProvenance);
-var updateDockProjectObjectiveRequestSchema = exports_external.object({
-  expectedRevision: exports_external.number().int().positive(),
-  objective: objectiveText,
-  acceptSuggestion: exports_external.boolean()
-}).strict();
-var recommendationFields = {
-  text: nextStepText,
-  ...provenanceFields,
-  revision: exports_external.number().int().nonnegative(),
-  updatedAt: timestamp2
-};
-var dockProjectRecommendationSchema = exports_external.object(recommendationFields).strict().superRefine(refineSourceProvenance);
-var updateDockProjectNextStepRequestSchema = exports_external.object({
-  expectedRevision: exports_external.number().int().nonnegative(),
-  nextStep: nextStepText.nullable()
-}).strict();
-var updateDockProjectNextStepResponseSchema = exports_external.object({
-  recommendation: dockProjectRecommendationSchema.nullable(),
-  nextStepRevision: exports_external.number().int().nonnegative()
-}).strict();
-var stageDockProjectStateProposalRequestSchema = exports_external.object({
-  objective: stagedObjectiveText.optional(),
-  nextStep: nextStepText.optional()
-}).strict().refine((value) => value.objective !== undefined || value.nextStep !== undefined, {
-  message: "at least one proposed value is required"
-});
-var stageDockProjectStateProposalResponseSchema = exports_external.object({ proposalId, status: exports_external.literal("staged") }).strict();
-var sourceBase = { id: id3, title, relativePath: diffSnapshotPathSchema, boundAt: timestamp2 };
-var dockProjectSourceSchema = exports_external.discriminatedUnion("kind", [
-  exports_external.object({ ...sourceBase, kind: exports_external.literal("document"), loreThreadId: exports_external.null() }).strict(),
-  exports_external.object({ ...sourceBase, kind: exports_external.literal("artifact"), loreThreadId: exports_external.null() }).strict(),
-  exports_external.object({ ...sourceBase, kind: exports_external.literal("lore_thread"), loreThreadId: threadId, loreThreadUrl: exports_external.url() }).strict()
-]);
-var dockProjectOutputSchema = exports_external.object({
-  id: id3,
-  path: diffSnapshotPathSchema,
-  title,
-  versionOrdinal: exports_external.number().int().positive(),
-  mimeType: exports_external.string().min(1).nullable(),
-  updatedAt: timestamp2
-}).strict();
-var dockProjectWorkProgramSchema = exports_external.object({ outputId: id3, title, selectedItemLabel: exports_external.string().min(1).max(DOCK_PROJECT_MAX_ACTION_LABEL_CHARS).nullable() }).strict();
-var dockProjectDecisionKindSchema = exports_external.enum(["asked", "requested", "decided", "corrected", "shared", "requirement"]);
-var dockProjectDecisionSchema = exports_external.object({
-  id: id3,
-  kind: dockProjectDecisionKindSchema,
-  summary: exports_external.string().min(1).max(DOCK_PROJECT_MAX_DECISION_SUMMARY_CHARS),
-  sourceBlockId: id3,
-  createdAt: timestamp2
-}).strict();
-var dockProjectTerminalWorkSchema = exports_external.object({
-  kind: exports_external.literal("terminal"),
-  turnRef: id3,
-  outcomeId: id3,
-  outcome: exports_external.enum(["verified_success", "unverified_completion", "partial_success", "blocked", "exhausted", "cancelled", "failed", "unknown"]),
-  detail: exports_external.string().min(1).max(DOCK_PROJECT_MAX_COMPLETION_DETAIL_CHARS),
-  verification: exports_external.enum(["passed", "failed", "unchecked", "unknown", "unavailable"]),
-  completedAt: timestamp2,
-  effectCount: exports_external.number().int().nonnegative(),
-  reviewId: id3.nullable()
-}).strict();
-var DOCK_PROJECT_UNSETTLED_REASONS = [
-  "turn_running",
-  "effect_in_flight",
-  "effect_unknown",
-  "reconciliation_pending",
-  "executor_unavailable",
-  "effect_commitment_unknown",
-  "authority_unavailable",
-  "evidence_conflict"
-];
-var dockProjectUnsettledReasonSchema = exports_external.enum(DOCK_PROJECT_UNSETTLED_REASONS);
-var dockProjectCurrentWorkSchema = exports_external.discriminatedUnion("kind", [
-  exports_external.object({ kind: exports_external.literal("none") }).strict(),
-  exports_external.object({
-    kind: exports_external.literal("unsettled"),
-    turnRef: id3,
-    startedAt: timestamp2,
-    reason: dockProjectUnsettledReasonSchema
-  }).strict(),
-  dockProjectTerminalWorkSchema
-]);
-var recommendationActionSchema = exports_external.object({ kind: exports_external.literal("recommendation"), ...recommendationFields }).strict().superRefine(refineSourceProvenance);
-var dockProjectNextActionSchema = exports_external.discriminatedUnion("kind", [
-  exports_external.object({
-    kind: exports_external.literal("host_blocker"),
-    target: exports_external.enum(["reconcile", "approval", "review"]),
-    turnRef: id3,
-    label: exports_external.string().min(1).max(DOCK_PROJECT_MAX_ACTION_LABEL_CHARS)
-  }).strict(),
-  recommendationActionSchema,
-  exports_external.object({ kind: exports_external.literal("none") }).strict()
-]);
-var dockProjectResumeSchema = exports_external.object({
-  project: exports_external.object({ id: projectId, primaryThreadId: threadId, updatedAt: timestamp2 }).strict(),
-  objective: dockProjectObjectiveStateSchema,
-  nextStepRevision: exports_external.number().int().nonnegative(),
-  repository: exports_external.object({ label: exports_external.string().min(1).max(DOCK_PROJECT_MAX_SOURCE_OUTPUT_TITLE_CHARS) }).strict().nullable(),
-  sources: exports_external.object({ items: exports_external.array(dockProjectSourceSchema).max(DOCK_PROJECT_MAX_SOURCES), totalCount: exports_external.number().int().nonnegative() }).strict(),
-  outputs: exports_external.object({ items: exports_external.array(dockProjectOutputSchema).max(DOCK_PROJECT_MAX_OUTPUTS), totalCount: exports_external.number().int().nonnegative() }).strict(),
-  workProgram: dockProjectWorkProgramSchema.nullable(),
-  decisions: exports_external.object({ items: exports_external.array(dockProjectDecisionSchema).max(DOCK_PROJECT_MAX_DECISIONS), totalCount: exports_external.number().int().nonnegative() }).strict(),
-  currentWork: dockProjectCurrentWorkSchema,
-  latestCompletedWork: dockProjectTerminalWorkSchema.nullable(),
-  nextAction: dockProjectNextActionSchema
-}).strict();
-var dockProjectInvalidRequestErrorSchema = exports_external.object({ error: exports_external.literal("invalid_request"), retryable: exports_external.literal(false) }).strict();
-var dockProjectUnauthenticatedErrorSchema = exports_external.object({ error: exports_external.literal("unauthenticated"), retryable: exports_external.literal(false) }).strict();
-var dockProjectNotFoundErrorSchema = exports_external.object({ error: exports_external.literal("not_found"), retryable: exports_external.literal(false) }).strict();
-var dockProjectRevisionConflictErrorSchema = exports_external.object({ error: exports_external.literal("revision_conflict"), retryable: exports_external.literal(false) }).strict();
-var dockProjectServiceUnavailableErrorSchema = exports_external.object({ error: exports_external.literal("service_unavailable"), retryable: exports_external.literal(true) }).strict();
-var dockProjectErrorSchema = exports_external.union([
-  dockProjectInvalidRequestErrorSchema,
-  dockProjectUnauthenticatedErrorSchema,
-  dockProjectNotFoundErrorSchema,
-  dockProjectRevisionConflictErrorSchema,
-  dockProjectServiceUnavailableErrorSchema
-]);
 // ../contracts/src/dockFork.ts
 var forkDockThreadRequestSchema = exports_external.object({}).strict();
 var forkDockThreadResponseSchema = exports_external.object({
   threadId: exports_external.string(),
-  projectId: exports_external.string(),
   title: exports_external.string().nullable(),
   forkedAtBlockId: exports_external.string().nullable(),
   copiedBlockCount: exports_external.number().int().nonnegative()
@@ -27247,9 +27082,9 @@ function readCodexSessionId(transcriptPath) {
   if (firstLine !== null) {
     try {
       const parsed = JSON.parse(firstLine);
-      const id4 = nonBlank(parsed.payload?.id);
-      if (id4 !== null)
-        return id4;
+      const id3 = nonBlank(parsed.payload?.id);
+      if (id3 !== null)
+        return id3;
     } catch {}
   }
   return inferSessionIdFromFilename(transcriptPath);
@@ -28435,13 +28270,13 @@ async function shareSessionFromDisk(args, opts = {}) {
     env
   });
   const highlight = args.highlight?.trim();
-  const title2 = args.title?.trim();
+  const title = args.title?.trim();
   const result = await runShareSession({
     transcript: session.transcript,
     uploads: session.uploads,
     outputs: session.outputs,
     ...highlight ? { highlight } : {},
-    ...title2 ? { title: title2 } : {},
+    ...title ? { title } : {},
     visibility: args.visibility ?? "workspace"
   }, { fetchImpl: opts.fetchImpl, home: opts.home, harness: RUNTIME_TO_HARNESS[source.runtime] ?? source.runtime });
   if (result.isError === true) {
@@ -28510,8 +28345,8 @@ var shareSessionTool = {
 
 // server-src/amp/shareAmpThread.ts
 var execFileAsync = promisify(execFile);
-async function runAmpThreadExportWithShell(threadId2, shell) {
-  const result = await shell`amp threads export ${threadId2}`;
+async function runAmpThreadExportWithShell(threadId, shell) {
+  const result = await shell`amp threads export ${threadId}`;
   if (result.exitCode !== 0) {
     const detail = result.stderr.trim() || result.stdout.trim() || `exit code ${result.exitCode}`;
     throw new Error(`amp threads export failed: ${detail}`);
@@ -28558,19 +28393,19 @@ function createShareCurrentAmpThreadTool(deps) {
   };
 }
 async function shareAmpThread(args, deps) {
-  const threadId2 = firstNonEmpty(args.threadId, args.activeThreadId, deps.env?.AMP_CURRENT_THREAD_ID);
-  if (!threadId2) {
+  const threadId = firstNonEmpty(args.threadId, args.activeThreadId, deps.env?.AMP_CURRENT_THREAD_ID);
+  if (!threadId) {
     throw new Error("No active Amp thread could be resolved. Run this command from an active Amp thread (ctx.thread.id), set AMP_CURRENT_THREAD_ID, or pass thread_id explicitly.");
   }
-  const exportedJson = await deps.runAmpExport(threadId2);
+  const exportedJson = await deps.runAmpExport(threadId);
   const shareArgs = {
     transcript: exportedJson
   };
-  const title2 = extractTitle(exportedJson);
-  if (title2) {
-    shareArgs.title = title2;
+  const title = extractTitle(exportedJson);
+  if (title) {
+    shareArgs.title = title;
   }
-  const sourceUrl = buildAmpThreadUrl(deps.ampBaseUrl, threadId2);
+  const sourceUrl = buildAmpThreadUrl(deps.ampBaseUrl, threadId);
   if (sourceUrl) {
     shareArgs.source_url = sourceUrl;
   }
@@ -28605,16 +28440,16 @@ function extractTitle(exportedJson) {
     const parsed = JSON.parse(exportedJson);
     if (typeof parsed.title !== "string")
       return;
-    const title2 = parsed.title.trim();
-    return title2 === "" ? undefined : title2;
+    const title = parsed.title.trim();
+    return title === "" ? undefined : title;
   } catch {
     return;
   }
 }
-function buildAmpThreadUrl(baseUrl, threadId2) {
+function buildAmpThreadUrl(baseUrl, threadId) {
   if (!baseUrl)
     return;
-  return new URL(`/threads/${encodeURIComponent(threadId2)}`, baseUrl).toString();
+  return new URL(`/threads/${encodeURIComponent(threadId)}`, baseUrl).toString();
 }
 
 // server-src/tools/cloudProxyTools.ts
@@ -29035,7 +28870,7 @@ function loreAmpPlugin(amp) {
   });
   amp.registerTool(createShareCurrentAmpThreadTool({
     env: process.env,
-    runAmpExport: (threadId2) => runAmpThreadExportWithShell(threadId2, amp.$),
+    runAmpExport: (threadId) => runAmpThreadExportWithShell(threadId, amp.$),
     share: runShareAmpSession,
     ampBaseUrl: amp.system.ampURL
   }));
@@ -29048,7 +28883,7 @@ function loreAmpPlugin(amp) {
 async function shareActiveThread(ctx, deps = {
   env: process.env,
   ampBaseUrl: ctx.system.ampURL,
-  runAmpExport: (threadId2) => runAmpThreadExportWithShell(threadId2, ctx.$),
+  runAmpExport: (threadId) => runAmpThreadExportWithShell(threadId, ctx.$),
   share: runShareAmpSession
 }) {
   try {
