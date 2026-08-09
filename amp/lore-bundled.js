@@ -11800,7 +11800,7 @@ function finalize(ctx, schema) {
     result.$schema = "http://json-schema.org/draft-07/schema#";
   } else if (ctx.target === "draft-04") {
     result.$schema = "http://json-schema.org/draft-04/schema#";
-  } else if (ctx.target === "openapi-3.0") {}
+  } else if (ctx.target === "openapi-3.0") {} else {}
   if (ctx.external?.uri) {
     const id = ctx.external.registry.get(schema)?.id;
     if (!id)
@@ -12044,7 +12044,7 @@ var literalProcessor = (schema, ctx, json, _params) => {
     if (val === undefined) {
       if (ctx.unrepresentable === "throw") {
         throw new Error("Literal `undefined` cannot be represented in JSON Schema");
-      }
+      } else {}
     } else if (typeof val === "bigint") {
       if (ctx.unrepresentable === "throw") {
         throw new Error("BigInt literals cannot be represented in JSON Schema");
@@ -20795,7 +20795,6 @@ var userSchema = exports_external.object({
   avatar_url: exports_external.string().nullable(),
   banner_url: exports_external.string().nullable(),
   share_new_threads_to_workspace: exports_external.boolean(),
-  experimental_features_enabled: exports_external.boolean(),
   allow_skill_content_for_evaluation: exports_external.boolean().optional(),
   onboarded_at: exports_external.string().nullable(),
   thread_data_deletion_requested_at: exports_external.string().nullable(),
@@ -20858,7 +20857,6 @@ var cliAuthConfigResponseSchema = exports_external.object({
 });
 var updateCurrentUserRequestSchema = exports_external.object({
   share_new_threads_to_workspace: exports_external.boolean().optional(),
-  experimental_features_enabled: exports_external.boolean().optional(),
   allow_skill_content_for_evaluation: exports_external.boolean().optional(),
   onboarded_at: exports_external.union([exports_external.literal("now"), exports_external.null()]).optional(),
   attribution_source: userAttributionSourceSchema.nullable().optional(),
@@ -20955,15 +20953,6 @@ var feedbackEntrySchema = exports_external.object({
   message: exports_external.string().min(1),
   created_at: exports_external.string().datetime()
 });
-var createBuildingBlockSnapshotSchema = exports_external.object({
-  path_glob: exports_external.string().min(1),
-  name: exports_external.string().min(1),
-  description: exports_external.string().min(1)
-});
-var createBuildingBlockSnapshotsRequestSchema = exports_external.object({
-  repo_origin_path: exports_external.string().min(1),
-  building_blocks: exports_external.array(createBuildingBlockSnapshotSchema)
-});
 var createThreadBlockCommentThreadRequestSchema = exports_external.object({
   content: exports_external.string().trim().min(1)
 });
@@ -20984,27 +20973,6 @@ var updateThreadBlockCommentThreadResponseSchema = exports_external.object({
   resolved_at: exports_external.string().datetime().nullable()
 });
 var prosemirrorJsonSchema = exports_external.record(exports_external.string(), exports_external.unknown());
-var buildingBlockSnapshotSchema = exports_external.object({
-  id: exports_external.string().min(1),
-  organization_id: exports_external.string().min(1).nullable(),
-  created_at: exports_external.string().min(1),
-  repo_origin_path: exports_external.string().min(1),
-  path_glob: exports_external.string().min(1),
-  name: exports_external.string().min(1),
-  description: exports_external.string().min(1)
-});
-var createBuildingBlockSnapshotsResponseSchema = exports_external.array(buildingBlockSnapshotSchema);
-var buildingBlockSnapshotListResponseSchema = exports_external.object({
-  type: exports_external.literal("list"),
-  list_type: exports_external.literal("building_block"),
-  has_more: exports_external.boolean(),
-  objects: exports_external.array(buildingBlockSnapshotSchema)
-});
-var listBuildingBlockSnapshotsQuerySchema = exports_external.object({
-  repo_origin_path: exports_external.string().min(1),
-  before: exports_external.string().min(1).optional(),
-  after: exports_external.string().min(1).optional()
-});
 var harnessSchema = exports_external.enum([
   "claudeCode",
   "codex",
@@ -24809,34 +24777,6 @@ var apiContract = c7.router({
       503: errorSchema7
     },
     summary: "Create or reuse a WorkOS organization for the authenticated user\u2019s non-public email domain and add the user as a member."
-  },
-  createBuildingBlockSnapshots: {
-    method: "POST",
-    path: "/building_blocks",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: createBuildingBlockSnapshotsRequestSchema,
-    responses: {
-      201: createBuildingBlockSnapshotsResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7
-    },
-    summary: "Create building block snapshots for the authenticated user\u2019s organization"
-  },
-  listBuildingBlockSnapshots: {
-    method: "GET",
-    path: "/building_blocks",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    query: listBuildingBlockSnapshotsQuerySchema,
-    responses: {
-      200: buildingBlockSnapshotListResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7
-    },
-    summary: "List building block snapshots for the authenticated user\u2019s organization and repo origin path"
   },
   listUploadSessions: {
     method: "GET",
