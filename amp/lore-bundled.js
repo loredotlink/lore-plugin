@@ -19579,7 +19579,7 @@ var DOCK_OUTCOMES = [
   "failed",
   "unknown"
 ];
-var dockOutcomeSchema = exports_external.preprocess((value) => value === "blocked" ? "unverified_completion" : value, exports_external.enum(DOCK_OUTCOMES));
+var dockOutcomeSchema = exports_external.enum(DOCK_OUTCOMES);
 var DOCK_WIRE_STOP_REASONS = ["end_turn", "aborted", "error"];
 var dockWireStopReasonSchema = exports_external.enum(DOCK_WIRE_STOP_REASONS);
 var threadEventTypeSchema = exports_external.enum([
@@ -19637,12 +19637,7 @@ var skillVersionPayloadSchema = exports_external.object({
   package_id: exports_external.string().min(1).optional(),
   content_hash: exports_external.string().startsWith("md5:")
 });
-var dockTurnCompletedPayloadSchema = exports_external.preprocess((value) => {
-  if (!value || typeof value !== "object" || value.outcome !== "blocked")
-    return value;
-  const { outcome_detail: _outcomeDetail, ...payload } = value;
-  return { ...payload, outcome: "unverified_completion" };
-}, exports_external.object({
+var dockTurnCompletedPayloadSchema = exports_external.object({
   thread_id: exports_external.string().min(1),
   prompt_block_id: exports_external.string().min(1),
   stop_reason: dockWireStopReasonSchema,
@@ -19656,7 +19651,7 @@ var dockTurnCompletedPayloadSchema = exports_external.preprocess((value) => {
     remaining_set_aside_count: exports_external.number().int().nonnegative()
   }).strict().optional(),
   outcome_detail: exports_external.string().min(1).optional()
-}));
+});
 var threadEventSchema = exports_external.discriminatedUnion("type", [
   threadEventBase.extend({
     type: exports_external.literal("thread.listable"),
@@ -19842,6 +19837,183 @@ var RESERVED_PAYLOAD_KEYS = new Set([
   "retry",
   "data"
 ]);
+// ../contracts/src/mcpZodSchema.ts
+var zodDef = (schema) => {
+  const schemaLike = schema;
+  return schemaLike._def ?? schemaLike.def ?? {};
+};
+var zodKind = (schema) => {
+  const def = zodDef(schema);
+  if (typeof def.typeName === "string")
+    return def.typeName;
+  return typeof def.type === "string" ? def.type : undefined;
+};
+var isZodKind = (schema, v3Kind, v4Kind) => {
+  const kind = zodKind(schema);
+  return kind === v3Kind || kind === v4Kind;
+};
+var asZodType = (value) => value;
+var maximumLength = (schema) => {
+  const checks3 = zodDef(schema).checks;
+  if (!Array.isArray(checks3))
+    return;
+  for (const check2 of checks3) {
+    const def = check2._zod?.def ?? check2._def ?? check2;
+    if (def.check === "max_length" && typeof def.maximum === "number") {
+      return def.maximum;
+    }
+    if (def.kind === "max" && typeof def.value === "number") {
+      return def.value;
+    }
+  }
+  return;
+};
+var zodObjectShape = (schema) => {
+  if (!schema)
+    return;
+  const def = zodDef(schema);
+  if (!isZodKind(schema, "ZodObject", "object")) {
+    const lazySchema = typeof def.getter === "function" ? def.getter() : undefined;
+    const wrapped = [lazySchema, def.innerType, def.schema, def.out, def.in].filter((candidate) => candidate !== undefined).map(asZodType);
+    for (const candidate of wrapped) {
+      const shape = zodObjectShape(candidate);
+      if (shape)
+        return shape;
+    }
+    return;
+  }
+  const schemaShape = schema.shape;
+  if (typeof schemaShape === "function") {
+    return schemaShape();
+  }
+  if (schemaShape && typeof schemaShape === "object") {
+    return schemaShape;
+  }
+  const defShape = def.shape;
+  if (typeof defShape === "function") {
+    return defShape();
+  }
+  if (defShape && typeof defShape === "object") {
+    return defShape;
+  }
+  return;
+};
+var arrayElement = (schema) => {
+  const def = zodDef(schema);
+  if (def.element)
+    return asZodType(def.element);
+  if (typeof def.type === "object" && def.type !== null) {
+    return asZodType(def.type);
+  }
+  return;
+};
+var unionOptions = (schema) => {
+  const schemaOptions = schema.options;
+  if (Array.isArray(schemaOptions))
+    return schemaOptions.map(asZodType);
+  const defOptions = zodDef(schema).options;
+  return Array.isArray(defOptions) ? defOptions.map(asZodType) : [];
+};
+var enumOptions = (schema) => {
+  const schemaOptions = schema.options;
+  if (Array.isArray(schemaOptions))
+    return [...schemaOptions];
+  const def = zodDef(schema);
+  if (Array.isArray(def.values))
+    return [...def.values];
+  if (def.entries && typeof def.entries === "object") {
+    return Object.values(def.entries);
+  }
+  return [];
+};
+var unwrapField = (schema) => {
+  let current = schema;
+  let required2 = true;
+  while (true) {
+    const def = zodDef(current);
+    if (isZodKind(current, "ZodOptional", "optional")) {
+      required2 = false;
+      current = asZodType(def.innerType);
+    } else if (isZodKind(current, "ZodNullable", "nullable")) {
+      required2 = false;
+      current = asZodType(def.innerType);
+    } else if (isZodKind(current, "ZodDefault", "default")) {
+      required2 = false;
+      current = asZodType(def.innerType);
+    } else if (isZodKind(current, "ZodEffects", "effects")) {
+      current = asZodType(def.schema);
+    } else if (isZodKind(current, "ZodPipeline", "pipe")) {
+      current = asZodType(def.in);
+    } else {
+      break;
+    }
+  }
+  return { schema: current, required: required2 };
+};
+var applyDescription = (schema, zodSchema) => {
+  if (zodSchema.description) {
+    return { ...schema, description: zodSchema.description };
+  }
+  return schema;
+};
+var fieldToJsonSchema = (fieldSchema) => {
+  const { schema } = unwrapField(fieldSchema);
+  if (isZodKind(schema, "ZodString", "string")) {
+    const maxLength = maximumLength(schema);
+    return applyDescription({ type: "string", ...maxLength === undefined ? {} : { maxLength } }, fieldSchema);
+  }
+  if (isZodKind(schema, "ZodNumber", "number")) {
+    return applyDescription({ type: "number" }, fieldSchema);
+  }
+  if (isZodKind(schema, "ZodBoolean", "boolean")) {
+    return applyDescription({ type: "boolean" }, fieldSchema);
+  }
+  if (isZodKind(schema, "ZodEnum", "enum")) {
+    return applyDescription({ type: "string", enum: enumOptions(schema) }, fieldSchema);
+  }
+  if (isZodKind(schema, "ZodArray", "array")) {
+    const element = arrayElement(schema);
+    const maxItems = maximumLength(schema);
+    return applyDescription({
+      type: "array",
+      ...maxItems === undefined ? {} : { maxItems },
+      items: element ? fieldToJsonSchema(element) : {}
+    }, fieldSchema);
+  }
+  if (isZodKind(schema, "ZodUnion", "union")) {
+    return applyDescription({ anyOf: unionOptions(schema).map((option) => fieldToJsonSchema(option)) }, fieldSchema);
+  }
+  if (isZodKind(schema, "ZodObject", "object")) {
+    return applyDescription(zodObjectToMcpJsonSchema(schema), fieldSchema);
+  }
+  if (isZodKind(schema, "ZodRecord", "record")) {
+    const valueType = zodDef(schema).valueType;
+    return applyDescription({
+      type: "object",
+      additionalProperties: valueType ? fieldToJsonSchema(asZodType(valueType)) : {}
+    }, fieldSchema);
+  }
+  return applyDescription({}, fieldSchema);
+};
+var zodShapeToMcpJsonSchema = (shape) => {
+  const properties = {};
+  const required2 = [];
+  for (const [key, fieldSchema] of Object.entries(shape)) {
+    properties[key] = fieldToJsonSchema(fieldSchema);
+    if (unwrapField(fieldSchema).required)
+      required2.push(key);
+  }
+  return {
+    type: "object",
+    properties,
+    ...required2.length > 0 ? { required: required2 } : {},
+    additionalProperties: false
+  };
+};
+var zodObjectToMcpJsonSchema = (schema) => {
+  const shape = zodObjectShape(schema);
+  return zodShapeToMcpJsonSchema(shape ?? {});
+};
 // ../contracts/src/dockExecutor.ts
 var EFFECT_JOURNAL_CAPABILITY = "effect.journal";
 var EFFECT_JOURNAL_FS_EDIT_FILE_CAPABILITY = "effect.journal.fs.editFile";
@@ -20090,173 +20262,6 @@ var executorFrameSchema = exports_external.discriminatedUnion("kind", [
   exports_external.object({ kind: exports_external.literal("hello_ack"), contract: executorContractNegotiationSchema }),
   exports_external.object({ kind: exports_external.literal("ping") })
 ]);
-// ../contracts/src/mcpZodSchema.ts
-var zodDef = (schema) => {
-  const schemaLike = schema;
-  return schemaLike._def ?? schemaLike.def ?? {};
-};
-var zodKind = (schema) => {
-  const def = zodDef(schema);
-  if (typeof def.typeName === "string")
-    return def.typeName;
-  return typeof def.type === "string" ? def.type : undefined;
-};
-var isZodKind = (schema, v3Kind, v4Kind) => {
-  const kind = zodKind(schema);
-  return kind === v3Kind || kind === v4Kind;
-};
-var asZodType = (value) => value;
-var maximumLength = (schema) => {
-  const checks3 = zodDef(schema).checks;
-  if (!Array.isArray(checks3))
-    return;
-  for (const check2 of checks3) {
-    const def = check2._zod?.def ?? check2._def ?? check2;
-    if (def.check === "max_length" && typeof def.maximum === "number") {
-      return def.maximum;
-    }
-    if (def.kind === "max" && typeof def.value === "number") {
-      return def.value;
-    }
-  }
-  return;
-};
-var zodObjectShape = (schema) => {
-  if (!schema || !isZodKind(schema, "ZodObject", "object"))
-    return;
-  const schemaShape = schema.shape;
-  if (typeof schemaShape === "function") {
-    return schemaShape();
-  }
-  if (schemaShape && typeof schemaShape === "object") {
-    return schemaShape;
-  }
-  const defShape = zodDef(schema).shape;
-  if (typeof defShape === "function") {
-    return defShape();
-  }
-  if (defShape && typeof defShape === "object") {
-    return defShape;
-  }
-  return;
-};
-var arrayElement = (schema) => {
-  const def = zodDef(schema);
-  if (def.element)
-    return asZodType(def.element);
-  if (typeof def.type === "object" && def.type !== null) {
-    return asZodType(def.type);
-  }
-  return;
-};
-var unionOptions = (schema) => {
-  const schemaOptions = schema.options;
-  if (Array.isArray(schemaOptions))
-    return schemaOptions.map(asZodType);
-  const defOptions = zodDef(schema).options;
-  return Array.isArray(defOptions) ? defOptions.map(asZodType) : [];
-};
-var enumOptions = (schema) => {
-  const schemaOptions = schema.options;
-  if (Array.isArray(schemaOptions))
-    return [...schemaOptions];
-  const def = zodDef(schema);
-  if (Array.isArray(def.values))
-    return [...def.values];
-  if (def.entries && typeof def.entries === "object") {
-    return Object.values(def.entries);
-  }
-  return [];
-};
-var unwrapField = (schema) => {
-  let current = schema;
-  let required2 = true;
-  while (true) {
-    const def = zodDef(current);
-    if (isZodKind(current, "ZodOptional", "optional")) {
-      required2 = false;
-      current = asZodType(def.innerType);
-    } else if (isZodKind(current, "ZodNullable", "nullable")) {
-      required2 = false;
-      current = asZodType(def.innerType);
-    } else if (isZodKind(current, "ZodDefault", "default")) {
-      required2 = false;
-      current = asZodType(def.innerType);
-    } else if (isZodKind(current, "ZodEffects", "effects")) {
-      current = asZodType(def.schema);
-    } else if (isZodKind(current, "ZodPipeline", "pipe")) {
-      current = asZodType(def.in);
-    } else {
-      break;
-    }
-  }
-  return { schema: current, required: required2 };
-};
-var applyDescription = (schema, zodSchema) => {
-  if (zodSchema.description) {
-    return { ...schema, description: zodSchema.description };
-  }
-  return schema;
-};
-var fieldToJsonSchema = (fieldSchema) => {
-  const { schema } = unwrapField(fieldSchema);
-  if (isZodKind(schema, "ZodString", "string")) {
-    const maxLength = maximumLength(schema);
-    return applyDescription({ type: "string", ...maxLength === undefined ? {} : { maxLength } }, fieldSchema);
-  }
-  if (isZodKind(schema, "ZodNumber", "number")) {
-    return applyDescription({ type: "number" }, fieldSchema);
-  }
-  if (isZodKind(schema, "ZodBoolean", "boolean")) {
-    return applyDescription({ type: "boolean" }, fieldSchema);
-  }
-  if (isZodKind(schema, "ZodEnum", "enum")) {
-    return applyDescription({ type: "string", enum: enumOptions(schema) }, fieldSchema);
-  }
-  if (isZodKind(schema, "ZodArray", "array")) {
-    const element = arrayElement(schema);
-    const maxItems = maximumLength(schema);
-    return applyDescription({
-      type: "array",
-      ...maxItems === undefined ? {} : { maxItems },
-      items: element ? fieldToJsonSchema(element) : {}
-    }, fieldSchema);
-  }
-  if (isZodKind(schema, "ZodUnion", "union")) {
-    return applyDescription({ anyOf: unionOptions(schema).map((option) => fieldToJsonSchema(option)) }, fieldSchema);
-  }
-  if (isZodKind(schema, "ZodObject", "object")) {
-    return applyDescription(zodObjectToMcpJsonSchema(schema), fieldSchema);
-  }
-  if (isZodKind(schema, "ZodRecord", "record")) {
-    const valueType = zodDef(schema).valueType;
-    return applyDescription({
-      type: "object",
-      additionalProperties: valueType ? fieldToJsonSchema(asZodType(valueType)) : {}
-    }, fieldSchema);
-  }
-  return applyDescription({}, fieldSchema);
-};
-var zodShapeToMcpJsonSchema = (shape) => {
-  const properties = {};
-  const required2 = [];
-  for (const [key, fieldSchema] of Object.entries(shape)) {
-    properties[key] = fieldToJsonSchema(fieldSchema);
-    if (unwrapField(fieldSchema).required)
-      required2.push(key);
-  }
-  return {
-    type: "object",
-    properties,
-    ...required2.length > 0 ? { required: required2 } : {},
-    additionalProperties: false
-  };
-};
-var zodObjectToMcpJsonSchema = (schema) => {
-  const shape = zodObjectShape(schema);
-  return zodShapeToMcpJsonSchema(shape ?? {});
-};
-
 // ../contracts/src/dockExecutorTools.ts
 var text = (description) => exports_external.string().describe(description);
 var SHOW_ARTIFACT_PROVENANCE_MAX_ANNOTATIONS = 8;
