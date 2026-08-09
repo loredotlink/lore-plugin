@@ -1,12 +1,18 @@
 {
   "name": "lore",
   "description": "Share Claude Code and Cowork sessions to Lore and read threads back.",
-  "version": "1.0.67",
+  "version": "1.0.68",
   "author": {
     "name": "Lore",
     "url": "https://lore.link"
   },
   "homepage": "https://lore.link",
   "license": "FSL-1.1-ALv2",
-  "keywords": ["lore", "loredotlink", "share", "threads", "collaboration"]
+  "keywords": [
+    "lore",
+    "loredotlink",
+    "share",
+    "threads",
+    "collaboration"
+  ]
 }

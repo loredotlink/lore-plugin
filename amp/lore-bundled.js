@@ -19393,19 +19393,6 @@ var verification = exports_external.object({
   observedDigest: exports_external.string().nullable(),
   verifiedAt: timestamp
 }).strict();
-var authorityBase = {
-  authorizationId: exports_external.string().min(1),
-  requirement: exports_external.object({
-    tier: exports_external.enum(["whole_file_replacement", "deletion", "non_allowlisted_shell", "browser_interaction", "submit_class_browser"]),
-    scope: exports_external.string(),
-    policyVersion: exports_external.string()
-  }).strict().nullable()
-};
-var authority = exports_external.discriminatedUnion("source", [
-  exports_external.object({ ...authorityBase, source: exports_external.literal("approval"), approvalId: id, standingPolicyId: exports_external.null() }).strict(),
-  exports_external.object({ ...authorityBase, source: exports_external.literal("standing_policy"), approvalId: exports_external.null(), standingPolicyId: id }).strict(),
-  exports_external.object({ ...authorityBase, source: exports_external.literal("none"), approvalId: exports_external.null(), standingPolicyId: exports_external.null() }).strict()
-]);
 var base = {
   bundleId: id,
   authorUserId: id,
@@ -19432,15 +19419,14 @@ var evidenceEffectDetailSchema = exports_external.object({
     dispatchedAt: timestamp,
     respondedAt: timestamp.nullable()
   }).strict()),
-  verifications: exports_external.array(verification),
-  authority
+  verifications: exports_external.array(verification)
 }).strict();
 var evidenceOutcomeDetailSchema = exports_external.object({
   ...base,
   kind: exports_external.literal("dock_turn_outcome"),
   provenanceClass: exports_external.literal("witnessed"),
   promptBlockId: id,
-  outcome: exports_external.enum(["verified_success", "unverified_completion", "partial_success", "blocked", "exhausted", "cancelled", "failed", "unknown"]),
+  outcome: exports_external.enum(["verified_success", "unverified_completion", "partial_success", "exhausted", "cancelled", "failed", "unknown"]),
   stopReason: exports_external.enum(["end_turn", "aborted", "error"]),
   iterations: exports_external.number().int().nonnegative().nullable(),
   settledAt: timestamp,
@@ -19588,13 +19574,12 @@ var DOCK_OUTCOMES = [
   "verified_success",
   "unverified_completion",
   "partial_success",
-  "blocked",
   "exhausted",
   "cancelled",
   "failed",
   "unknown"
 ];
-var dockOutcomeSchema = exports_external.enum(DOCK_OUTCOMES);
+var dockOutcomeSchema = exports_external.preprocess((value) => value === "blocked" ? "unverified_completion" : value, exports_external.enum(DOCK_OUTCOMES));
 var DOCK_WIRE_STOP_REASONS = ["end_turn", "aborted", "error"];
 var dockWireStopReasonSchema = exports_external.enum(DOCK_WIRE_STOP_REASONS);
 var threadEventTypeSchema = exports_external.enum([
@@ -19652,6 +19637,26 @@ var skillVersionPayloadSchema = exports_external.object({
   package_id: exports_external.string().min(1).optional(),
   content_hash: exports_external.string().startsWith("md5:")
 });
+var dockTurnCompletedPayloadSchema = exports_external.preprocess((value) => {
+  if (!value || typeof value !== "object" || value.outcome !== "blocked")
+    return value;
+  const { outcome_detail: _outcomeDetail, ...payload } = value;
+  return { ...payload, outcome: "unverified_completion" };
+}, exports_external.object({
+  thread_id: exports_external.string().min(1),
+  prompt_block_id: exports_external.string().min(1),
+  stop_reason: dockWireStopReasonSchema,
+  error: exports_external.string().nullable(),
+  outcome: dockOutcomeSchema.optional(),
+  context_receipt: exports_external.object({
+    set_aside_sources: exports_external.array(exports_external.object({
+      source_id: exports_external.string().min(1),
+      title: exports_external.string().max(160)
+    }).strict()).max(50),
+    remaining_set_aside_count: exports_external.number().int().nonnegative()
+  }).strict().optional(),
+  outcome_detail: exports_external.string().min(1).optional()
+}));
 var threadEventSchema = exports_external.discriminatedUnion("type", [
   threadEventBase.extend({
     type: exports_external.literal("thread.listable"),
@@ -19684,21 +19689,7 @@ var threadEventSchema = exports_external.discriminatedUnion("type", [
   }),
   threadEventBase.extend({
     type: exports_external.literal("thread.dock.turn_completed"),
-    payload: exports_external.object({
-      thread_id: exports_external.string().min(1),
-      prompt_block_id: exports_external.string().min(1),
-      stop_reason: dockWireStopReasonSchema,
-      error: exports_external.string().nullable(),
-      outcome: dockOutcomeSchema.optional(),
-      context_receipt: exports_external.object({
-        set_aside_sources: exports_external.array(exports_external.object({
-          source_id: exports_external.string().min(1),
-          title: exports_external.string().max(160)
-        }).strict()).max(50),
-        remaining_set_aside_count: exports_external.number().int().nonnegative()
-      }).strict().optional(),
-      outcome_detail: exports_external.string().min(1).optional()
-    })
+    payload: dockTurnCompletedPayloadSchema
   }),
   threadEventBase.extend({
     type: exports_external.literal("thread.dock.turn_recovery_updated"),
@@ -19882,6 +19873,7 @@ var browserStatusPageSuccessSchema = exports_external.object({
 }).strict();
 var isEffectJournalCapability = (capability) => capability === EFFECT_JOURNAL_CAPABILITY || capability === EFFECT_JOURNAL_FS_EDIT_FILE_CAPABILITY || capability === EFFECT_JOURNAL_SHELL_EXEC_CAPABILITY || capability === EFFECT_JOURNAL_FS_DELETE_CAPABILITY || capability === EFFECT_JOURNAL_UPLOAD_ASSET_CAPABILITY || capability === EFFECT_JOURNAL_BROWSER_ACT_CAPABILITY;
 var EFFECT_CANCELLATION_CAPABILITY = "effect.cancel";
+var EXECUTOR_CONTRACT_VERSION = 2;
 var digestSchema = exports_external.object({ algorithm: exports_external.literal("sha256"), value: exports_external.string().regex(/^[0-9a-f]{64}$/) }).strict();
 var observationIdentitySchema = exports_external.object({ contractVersion: exports_external.literal(1), requestedPath: exports_external.string().min(1), target: exports_external.string().min(1) });
 var fsInspectPathResultSchema = exports_external.discriminatedUnion("kind", [
@@ -19945,7 +19937,7 @@ var executorRequestVariantSchemas = {
     op: exports_external.literal("browser.act"),
     action: exports_external.string().min(1),
     params: exports_external.record(exports_external.string(), exports_external.unknown()).optional(),
-    approvedOrigin: browserCanonicalOriginSchema.optional()
+    expectedOrigin: browserCanonicalOriginSchema.optional()
   }),
   "browser.capture": base2.extend({
     op: exports_external.literal("browser.capture"),
@@ -20305,37 +20297,37 @@ function browserReadActionCapabilities(action) {
 }
 var EXECUTOR_TOOL_CONTRACTS = {
   list_files: {
-    version: 1,
+    version: EXECUTOR_CONTRACT_VERSION,
     description: "List the files and folders at a path inside the session folder. Call this first when you need to understand what is in the folder before reading or changing anything.",
     inputSchema: exports_external.object({ path: text("Folder path relative to the session folder. Defaults to the folder root.").optional() }).strict(),
     routes: [{ primitive: "fs.readDirectory", requiredCapabilities: ["fs.readDirectory"], map: (input, callId) => ({ op: "fs.readDirectory", callId, path: input.path === undefined || input.path === "" ? "." : input.path }) }]
   },
   read_file: {
-    version: 1,
+    version: EXECUTOR_CONTRACT_VERSION,
     description: "Read a file's contents. Call this before editing a file, and whenever the answer depends on what a file actually contains rather than what you assume it contains.",
     inputSchema: exports_external.object({ path: text("File path relative to the session folder.") }).strict(),
     routes: [{ primitive: "fs.readFile", requiredCapabilities: ["fs.readFile"], map: (input, callId) => ({ op: "fs.readFile", callId, path: input.path }) }]
   },
   edit_file: {
-    version: 1,
+    version: EXECUTOR_CONTRACT_VERSION,
     description: "Replace an exact snippet of text in a file with new text. Prefer this over write_file for changing part of an existing file. The old text must appear exactly once \u2014 include surrounding lines to make it unique. Pass an empty old_text to create a new file.",
     inputSchema: exports_external.object({ path: text("File path relative to the session folder."), old_text: text("Exact text to replace. Empty string creates the file."), new_text: text("Text to put in its place.") }).strict(),
     routes: [{ primitive: "fs.editFile", requiredCapabilities: ["fs.editFile", EFFECT_JOURNAL_FS_EDIT_FILE_CAPABILITY, EFFECT_CANCELLATION_CAPABILITY], map: (input, callId) => ({ op: "fs.editFile", callId, path: input.path, oldText: input.old_text, newText: input.new_text }) }]
   },
   write_file: {
-    version: 1,
+    version: EXECUTOR_CONTRACT_VERSION,
     description: "Write a file, replacing it entirely if it exists. Use this for brand-new files or full rewrites; use edit_file to change part of an existing file.",
     inputSchema: exports_external.object({ path: text("File path relative to the session folder."), content: text("The full contents of the file.") }).strict(),
     routes: [{ primitive: "fs.writeFile", requiredCapabilities: ["fs.writeFile", EFFECT_JOURNAL_CAPABILITY, EFFECT_CANCELLATION_CAPABILITY], map: (input, callId) => ({ op: "fs.writeFile", callId, path: input.path, content: input.content }) }]
   },
   run_command: {
-    version: 1,
+    version: EXECUTOR_CONTRACT_VERSION,
     description: "Run a shell command inside the session folder and return its output. Call this when the task needs something only a real command can do \u2014 running tests, installing packages, checking git status, building the project. Commands time out after 60 seconds.",
     inputSchema: exports_external.object({ command: text("The shell command to run.") }).strict(),
     routes: [{ primitive: "shell.exec", requiredCapabilities: ["shell.exec", EFFECT_JOURNAL_SHELL_EXEC_CAPABILITY, EFFECT_CANCELLATION_CAPABILITY], map: (input, callId) => ({ op: "shell.exec", callId, command: input.command }) }]
   },
   show_artifact: {
-    version: 1,
+    version: EXECUTOR_CONTRACT_VERSION,
     description: "Show a finished result to the user in the Artifact pane beside the conversation. Call this whenever you create or update something the user will read or look at: a brief, report, guide, or summary the user may want to correct themselves (a Lore Document), a work program (markdown), a dashboard, game, or page (self-contained HTML), or an image. The pane also refreshes automatically when you edit the shown file.",
     inputSchema: exports_external.object({
       path: text("Path (relative to the session folder) of the HTML, markdown, text, or image file to display."),
@@ -20348,55 +20340,55 @@ var EXECUTOR_TOOL_CONTRACTS = {
     ]
   },
   browser_open: {
-    version: 1,
+    version: EXECUTOR_CONTRACT_VERSION,
     description: "Start a new browser session on the user\u2019s computer, optionally opening a URL. Returns a sessionId to pass to the other browser tools. Prefer reusing an open session over opening a new one.",
     inputSchema: exports_external.object({ url: text("Optional full https:// URL to open after the session starts. Omit to start blank.").optional() }).strict(),
     routes: [browserRoute("browser_open")]
   },
   browser_navigate: {
-    version: 1,
+    version: EXECUTOR_CONTRACT_VERSION,
     description: "Navigate an open browser tab to a full http:// or https:// URL. Returns the resolved page ID and the page\u2019s resulting URL and title.",
     inputSchema: exports_external.object({ sessionId: text("Session ID from browser_open."), url: text("Full http:// or https:// URL to navigate to."), pageId: text("Optional page ID from browser_status. Defaults to the active tab.").optional() }).strict(),
     routes: [browserRoute("browser_navigate")]
   },
   browser_snapshot: {
-    version: 1,
+    version: EXECUTOR_CONTRACT_VERSION,
     description: "Read the current page in an open browser session as a text accessibility tree \u2014 the fastest way to see what is on the page. Each element is listed with a [ref=eN] handle identifying it, valid only until the page changes.",
     inputSchema: exports_external.object({ sessionId: text("Session ID from browser_open."), pageId: text("Optional page ID from browser_status. Defaults to the most recently opened tab.").optional() }).strict(),
     routes: [browserRoute("browser_snapshot")]
   },
   browser_status: {
-    version: 1,
+    version: EXECUTOR_CONTRACT_VERSION,
     description: "List open browser sessions (no arguments), the tabs in one session (sessionId), or details of one tab (sessionId + pageId).",
     inputSchema: exports_external.object({ sessionId: text("Optional session ID to inspect.").optional(), pageId: text("Optional page ID from a prior browser_status call. Requires sessionId.").optional() }).strict(),
     routes: [browserRoute("browser_status")]
   },
   browser_close: {
-    version: 1,
+    version: EXECUTOR_CONTRACT_VERSION,
     description: "Close a browser session opened with browser_open.",
     inputSchema: exports_external.object({ sessionId: text("Session ID to close.") }).strict(),
     routes: [browserRoute("browser_close")]
   },
   browser_read_text: {
-    version: 1,
+    version: EXECUTOR_CONTRACT_VERSION,
     description: "Read the visible text of the current page, or of one element identified by a [ref=eN] handle from browser_snapshot. Selectors, XPath, and expressions are not accepted.",
     inputSchema: exports_external.object({ sessionId: text("Session ID from browser_open."), ref: exports_external.string().max(BROWSER_REF_MAX_LENGTH).regex(BROWSER_REF_PATTERN).describe("Optional [ref=eN] handle from the latest browser_snapshot.").optional(), pageId: text("Optional page ID from browser_status. Defaults to the active tab.").optional() }).strict(),
     routes: [browserRoute("browser_read_text")]
   },
   browser_click: {
-    version: 1,
-    description: "Click one element identified by a [ref=eN] handle from the latest browser_snapshot. Requires exact approval for the current browser origin.",
+    version: EXECUTOR_CONTRACT_VERSION,
+    description: "Click one element identified by a [ref=eN] handle from the latest browser_snapshot. The page must remain on the server-observed browser origin.",
     inputSchema: exports_external.object({ sessionId: text("Session ID from browser_open."), ref: exports_external.string().max(BROWSER_REF_MAX_LENGTH).regex(BROWSER_REF_PATTERN), pageId: text("Optional page ID. Defaults to the active tab.").optional() }).strict(),
     routes: [browserRoute("browser_click")]
   },
   browser_type: {
-    version: 1,
-    description: "Type text into one element identified by a [ref=eN] handle from the latest browser_snapshot. Requires exact approval for the current browser origin.",
+    version: EXECUTOR_CONTRACT_VERSION,
+    description: "Type text into one element identified by a [ref=eN] handle from the latest browser_snapshot. The page must remain on the server-observed browser origin.",
     inputSchema: exports_external.object({ sessionId: text("Session ID from browser_open."), ref: exports_external.string().max(BROWSER_REF_MAX_LENGTH).regex(BROWSER_REF_PATTERN), text: exports_external.string(), pageId: text("Optional page ID. Defaults to the active tab.").optional() }).strict(),
     routes: [browserRoute("browser_type")]
   },
   browser_screenshot: {
-    version: 1,
+    version: EXECUTOR_CONTRACT_VERSION,
     description: "Take a screenshot of the current page in an open browser session and look at it directly. Use this when the answer depends on how the page renders \u2014 layout, imagery, charts, a visual bug \u2014 rather than on the text browser_snapshot returns; prefer browser_snapshot when reading the page is enough.",
     inputSchema: exports_external.object({ sessionId: text("Session ID from browser_open."), pageId: text("Optional page ID from browser_status. Defaults to the most recently opened tab.").optional() }).strict(),
     routes: [{
@@ -20948,17 +20940,6 @@ var dockHostToolMarkerV1Schema = exports_external.object({
 }).strict();
 var dockHostToolActivityV1Schema = dockHostToolMarkerV1Schema;
 var dockTerminalPresentationV1Schema = dockHostToolMarkerV1Schema;
-var dockApprovalNoticeV1Schema = exports_external.object({
-  version: exports_external.literal(1),
-  approvals: exports_external.array(exports_external.object({
-    approvalId: exports_external.string().min(1),
-    effectId: exports_external.string().min(1),
-    tier: exports_external.string().min(1),
-    scope: exports_external.string().min(1),
-    contentLength: exports_external.number().int().nonnegative()
-  }).strict()).min(1),
-  text: exports_external.string().min(1)
-}).strict();
 var dockTurnOutcomeV1Schema = exports_external.object({
   outcome: dockOutcomeSchema,
   stop_reason: dockWireStopReasonSchema
