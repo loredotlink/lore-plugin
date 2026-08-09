@@ -19603,7 +19603,6 @@ var threadEventTypeSchema = exports_external.enum([
   "thread.block.appended",
   "thread.detail.invalidated",
   "thread.dock.turn_completed",
-  "thread.dock.turn_review_updated",
   "thread.dock.turn_recovery_updated",
   "thread.dock.turn_cancel_requested",
   "thread.participant.joined",
@@ -19699,13 +19698,6 @@ var threadEventSchema = exports_external.discriminatedUnion("type", [
         remaining_set_aside_count: exports_external.number().int().nonnegative()
       }).strict().optional(),
       outcome_detail: exports_external.string().min(1).optional()
-    })
-  }),
-  threadEventBase.extend({
-    type: exports_external.literal("thread.dock.turn_review_updated"),
-    payload: exports_external.object({
-      thread_id: exports_external.string().min(1),
-      prompt_block_id: exports_external.string().min(1)
     })
   }),
   threadEventBase.extend({
@@ -19859,149 +19851,6 @@ var RESERVED_PAYLOAD_KEYS = new Set([
   "retry",
   "data"
 ]);
-// ../contracts/src/dockTurnReview.ts
-var DIFF_SNAPSHOT_MAX_BASELINE_FILE_BYTES = 5 * 1024 * 1024;
-var DIFF_SNAPSHOT_MAX_BASELINE_TOTAL_BYTES = 50 * 1024 * 1024;
-var DIFF_SNAPSHOT_MAX_CHANGED_PATHS = 200;
-var DIFF_SNAPSHOT_MAX_PATCH_CHARS = 50000;
-var DIFF_SNAPSHOT_MAX_TOTAL_PATCH_CHARS = 500000;
-var DIFF_SNAPSHOT_MAX_STRUCTURED_RESPONSE_BYTES = 1024 * 1024;
-var DOCK_TURN_REVIEW_MAX_RESULT_CHARS = 20000;
-var dockTurnReviewModeSchema = exports_external.enum(["git", "file", "ledger_only"]);
-var dockTurnReviewStatusSchema = exports_external.enum(["complete", "partial", "unavailable"]);
-var dockTurnReviewReconciliationSchema = exports_external.enum(["not_required", "pending", "attempted", "installed", "exhausted"]);
-var dockTurnReviewLimitationSchema = exports_external.enum([
-  "baseline_file_too_large",
-  "baseline_budget_exhausted",
-  "baseline_raced",
-  "baseline_path_unavailable",
-  "path_limit",
-  "patch_truncated",
-  "git_finalize_unavailable",
-  "ignored_shell_changes_unobservable",
-  "repository_changed",
-  "path_unavailable",
-  "command_unavailable",
-  "executor_unavailable",
-  "structured_result_budget"
-]);
-var diffSnapshotPathSchema = exports_external.string().min(1).refine((path) => !path.startsWith("/") && !path.startsWith("\\") && !/^[A-Za-z]:[\\/]/.test(path) && !path.split(/[\\/]/).some((part) => part === "" || part === "." || part === ".."), { message: "path must be a normalized repository-relative path" });
-var id2 = exports_external.string().min(1);
-var digest = exports_external.string().regex(/^[0-9a-f]{64}$/);
-var change = exports_external.enum(["created", "modified", "deleted", "renamed"]);
-var effectIds = exports_external.array(id2).max(1000);
-var dockTurnReviewEffectReferenceSchema = exports_external.object({ effectId: id2, toolCallId: id2 }).strict();
-var dockTurnReviewPatchEntrySchema = exports_external.object({
-  kind: exports_external.literal("patch"),
-  path: diffSnapshotPathSchema,
-  change,
-  beforeMode: exports_external.string().min(1).nullable(),
-  afterMode: exports_external.string().min(1).nullable(),
-  patch: exports_external.string().max(DIFF_SNAPSHOT_MAX_PATCH_CHARS),
-  effectIds
-}).strict();
-var dockTurnReviewBinaryEntrySchema = exports_external.object({
-  kind: exports_external.literal("binary"),
-  path: diffSnapshotPathSchema,
-  change,
-  beforeMode: exports_external.string().min(1).nullable(),
-  afterMode: exports_external.string().min(1).nullable(),
-  beforeDigest: digest.nullable(),
-  afterDigest: digest.nullable(),
-  beforeLength: exports_external.number().int().nonnegative().nullable(),
-  afterLength: exports_external.number().int().nonnegative().nullable(),
-  effectIds
-}).strict();
-var dockTurnReviewOmissionEntrySchema = exports_external.object({
-  kind: exports_external.literal("omission"),
-  path: diffSnapshotPathSchema.optional(),
-  change: change.optional(),
-  reason: dockTurnReviewLimitationSchema,
-  effectIds
-}).strict();
-var dockTurnReviewComparisonEntrySchema = exports_external.discriminatedUnion("kind", [
-  dockTurnReviewPatchEntrySchema,
-  dockTurnReviewBinaryEntrySchema,
-  dockTurnReviewOmissionEntrySchema
-]);
-var dockTurnReviewComparisonSchema = exports_external.object({
-  entries: exports_external.array(dockTurnReviewComparisonEntrySchema).max(DIFF_SNAPSHOT_MAX_CHANGED_PATHS),
-  omittedCount: exports_external.number().int().nonnegative(),
-  limitations: exports_external.array(dockTurnReviewLimitationSchema).max(100)
-}).strict().superRefine(({ entries }, ctx) => {
-  const paths = entries.flatMap((entry) => entry.path === undefined ? [] : [entry.path]);
-  if (new Set(paths).size !== paths.length)
-    ctx.addIssue({ code: "custom", path: ["entries"], message: "comparison paths must be unique" });
-  const patchChars = entries.reduce((sum, entry) => sum + (entry.kind === "patch" ? entry.patch.length : 0), 0);
-  if (patchChars > DIFF_SNAPSHOT_MAX_TOTAL_PATCH_CHARS)
-    ctx.addIssue({ code: "custom", path: ["entries"], message: "aggregate patch character budget exceeded" });
-});
-var dockTurnReviewDocumentSchema = exports_external.object({
-  version: exports_external.literal(1),
-  status: dockTurnReviewStatusSchema,
-  mode: dockTurnReviewModeSchema,
-  promptBlockId: id2,
-  workItemRef: id2.nullable(),
-  outcomeId: id2,
-  entries: exports_external.array(dockTurnReviewComparisonEntrySchema).max(DIFF_SNAPSHOT_MAX_CHANGED_PATHS),
-  commandEffects: exports_external.array(dockTurnReviewEffectReferenceSchema).max(1000),
-  attemptedEffects: exports_external.array(dockTurnReviewEffectReferenceSchema).max(1000),
-  omittedCount: exports_external.number().int().nonnegative(),
-  limitations: exports_external.array(dockTurnReviewLimitationSchema).max(100)
-}).strict().superRefine((document, ctx) => {
-  const result = dockTurnReviewComparisonSchema.safeParse({ entries: document.entries, omittedCount: document.omittedCount, limitations: document.limitations });
-  if (!result.success)
-    for (const issue2 of result.error.issues)
-      ctx.addIssue({ ...issue2, path: issue2.path[0] === "entries" ? issue2.path : ["entries", ...issue2.path] });
-});
-var settlement = exports_external.enum(["not_dispatched", "in_flight", "committed", "failed_before_commit", "aborted", "unknown"]);
-var verification2 = exports_external.enum(["passed", "failed", "unchecked", "unknown", "unavailable"]);
-var outcome = exports_external.enum(["verified_success", "unverified_completion", "partial_success", "blocked", "exhausted", "cancelled", "failed", "unknown"]);
-var fileDetail = exports_external.object({
-  path: diffSnapshotPathSchema,
-  association: exports_external.enum(["workbench_effect", "shell_observed_unresolved", "unresolved"]),
-  effectIds,
-  settlement: settlement.nullable(),
-  verification: verification2,
-  comparisonKind: exports_external.enum(["patch", "binary", "omission"]),
-  limitation: dockTurnReviewLimitationSchema.nullable()
-}).strict();
-var reportedCommandResult = exports_external.object({
-  state: exports_external.enum(["success", "error", "unavailable"]),
-  text: exports_external.string().max(DOCK_TURN_REVIEW_MAX_RESULT_CHARS).nullable(),
-  truncated: exports_external.boolean()
-}).strict();
-var commandDetailFields = {
-  effectId: id2,
-  toolCallId: id2,
-  state: exports_external.enum(["run", "requested_not_run"]),
-  settlement,
-  receiptPresent: exports_external.boolean(),
-  reportedResult: reportedCommandResult,
-  verification: verification2
-};
-var commandDetail = exports_external.discriminatedUnion("availability", [
-  exports_external.object({ ...commandDetailFields, availability: exports_external.literal("available"), command: exports_external.string().min(1) }).strict(),
-  exports_external.object({ ...commandDetailFields, availability: exports_external.literal("command_unavailable"), command: exports_external.null() }).strict()
-]);
-var needsReviewDetail = exports_external.object({
-  effectId: id2,
-  toolCallId: id2,
-  primitive: exports_external.enum(["fs.writeFile", "fs.editFile", "shell.exec"]),
-  path: diffSnapshotPathSchema.nullable(),
-  reason: exports_external.enum(["path_unavailable", "not_compared", "non_committed"]),
-  settlement,
-  verification: verification2
-}).strict();
-var dockTurnReviewDetailSchema = exports_external.object({
-  reviewId: id2,
-  reconciliation: dockTurnReviewReconciliationSchema,
-  document: dockTurnReviewDocumentSchema,
-  outcome,
-  files: exports_external.array(fileDetail).max(DIFF_SNAPSHOT_MAX_CHANGED_PATHS),
-  commands: exports_external.array(commandDetail).max(1000),
-  needsReview: exports_external.array(needsReviewDetail).max(1000)
-}).strict();
 // ../contracts/src/dockExecutor.ts
 var EFFECT_JOURNAL_CAPABILITY = "effect.journal";
 var EFFECT_JOURNAL_FS_EDIT_FILE_CAPABILITY = "effect.journal.fs.editFile";
@@ -20071,27 +19920,6 @@ function checkEffectIdentity(value, ctx) {
     });
   }
 }
-var legacyDiffSnapshotRequestSchema = base2.extend({
-  op: exports_external.literal("git.diffSnapshot"),
-  path: exports_external.string().optional(),
-  action: exports_external.never().optional()
-});
-var lifecycleDiffSnapshotRequestSchema = base2.extend({
-  op: exports_external.literal("git.diffSnapshot"),
-  action: exports_external.enum(["begin", "finalize", "retrieve_materialized", "discard"]),
-  turnId: exports_external.string().min(1),
-  snapshotId: exports_external.string().min(1),
-  effectPaths: exports_external.array(diffSnapshotPathSchema).max(DIFF_SNAPSHOT_MAX_CHANGED_PATHS).optional(),
-  includeUnscoped: exports_external.boolean().optional()
-}).strict().superRefine((request, ctx) => {
-  const isFinalize = request.action === "finalize";
-  if (isFinalize !== (request.effectPaths !== undefined))
-    ctx.addIssue({ code: "custom", path: ["effectPaths"], message: "effectPaths is required only for finalize" });
-  if (isFinalize !== (request.includeUnscoped !== undefined))
-    ctx.addIssue({ code: "custom", path: ["includeUnscoped"], message: "includeUnscoped is required only for finalize" });
-  if (request.effectPaths && new Set(request.effectPaths).size !== request.effectPaths.length)
-    ctx.addIssue({ code: "custom", path: ["effectPaths"], message: "effectPaths must be unique" });
-});
 var executorRequestVariantSchemas = {
   "effect.lookupReceipt": base2.extend({
     op: exports_external.literal("effect.lookupReceipt"),
@@ -20110,7 +19938,6 @@ var executorRequestVariantSchemas = {
   }),
   "fs.readDirectory": base2.extend({ op: exports_external.literal("fs.readDirectory"), path: exports_external.string().min(1) }),
   "fs.delete": base2.extend({ op: exports_external.literal("fs.delete"), path: exports_external.string().min(1) }),
-  "git.diffSnapshot": lifecycleDiffSnapshotRequestSchema,
   "git.command": base2.extend({ op: exports_external.literal("git.command"), args: exports_external.array(exports_external.string()).min(1) }),
   "shell.exec": base2.extend({ op: exports_external.literal("shell.exec"), command: exports_external.string().min(1), timeoutMs: exports_external.number().int().positive().max(600000).optional() }),
   uploadAsset: base2.extend({ op: exports_external.literal("uploadAsset"), path: exports_external.string().min(1), kind: exports_external.string().min(1) }),
@@ -20137,21 +19964,11 @@ var executorRequestVariantSchemas = {
 };
 var EXECUTOR_PRIMITIVES = Object.freeze(Object.keys(executorRequestVariantSchemas));
 var executorRequestVariants = Object.values(executorRequestVariantSchemas);
-var executorRequestUnion = exports_external.discriminatedUnion("op", executorRequestVariants);
-var executorRequestSchema = exports_external.union([
-  legacyDiffSnapshotRequestSchema,
-  executorRequestUnion
-]).superRefine((value, ctx) => {
+var executorRequestSchema = exports_external.discriminatedUnion("op", executorRequestVariants).superRefine((value, ctx) => {
   checkEffectIdentity(value, ctx);
   if (value.op === "effect.lookupReceipt" && value.effectId !== undefined) {
     ctx.addIssue({ code: "custom", message: "effect.lookupReceipt must not carry generic Effect identity", path: ["effectId"] });
   }
-  if (value.op === "git.diffSnapshot" && value.effectId !== undefined) {
-    ctx.addIssue({ code: "custom", message: "git.diffSnapshot must not carry generic Effect identity", path: ["effectId"] });
-  }
-});
-Object.defineProperty(executorRequestSchema, "options", {
-  value: executorRequestUnion.options
 });
 var READ_ONLY_BROWSER_ACTIONS = new Set([
   "browser_open",
@@ -20231,23 +20048,12 @@ function checkImageByteBudget(value, ctx) {
     });
   }
 }
-var diffSnapshotResultSchema = exports_external.discriminatedUnion("action", [
-  exports_external.object({
-    action: exports_external.literal("begin"),
-    snapshotId: exports_external.string().min(1),
-    mode: exports_external.enum(["git", "file"]),
-    repositoryIdentity: exports_external.string().regex(/^[0-9a-f]{64}$/),
-    limitations: exports_external.array(dockTurnReviewLimitationSchema).max(100)
-  }).strict(),
-  exports_external.object({ action: exports_external.literal("finalize"), snapshotId: exports_external.string().min(1), comparison: dockTurnReviewComparisonSchema }).strict()
-]);
 var executorResponseSchema = exports_external.union([
   base2.extend({
     ok: exports_external.literal(true),
     output: exports_external.string(),
     receipt: executorReceiptSchema.optional(),
-    images: exports_external.array(executorImageSchema).max(EXECUTOR_MAX_IMAGES_PER_RESPONSE).optional(),
-    diffSnapshot: diffSnapshotResultSchema.optional()
+    images: exports_external.array(executorImageSchema).max(EXECUTOR_MAX_IMAGES_PER_RESPONSE).optional()
   }),
   base2.extend({
     ok: exports_external.literal(false),
@@ -20259,21 +20065,7 @@ var executorResponseSchema = exports_external.union([
     commitStatus: exports_external.enum(["failed_before_commit", "aborted"]).optional(),
     receipt: executorReceiptSchema.optional()
   })
-]).superRefine(checkEffectIdentity).superRefine(checkImageByteBudget).superRefine((response, ctx) => {
-  if (response.ok && response.diffSnapshot !== undefined) {
-    if (response.output !== "")
-      ctx.addIssue({ code: "custom", path: ["output"], message: "snapshot output must be empty" });
-    if (response.effectId !== undefined)
-      ctx.addIssue({ code: "custom", path: ["effectId"], message: "snapshot responses must not carry generic Effect identity" });
-    if (response.receipt !== undefined)
-      ctx.addIssue({ code: "custom", path: ["receipt"], message: "snapshot responses must not carry receipts" });
-    if (response.images !== undefined)
-      ctx.addIssue({ code: "custom", path: ["images"], message: "snapshot responses must not carry images" });
-    if (new TextEncoder().encode(JSON.stringify(response.diffSnapshot)).byteLength > DIFF_SNAPSHOT_MAX_STRUCTURED_RESPONSE_BYTES) {
-      ctx.addIssue({ code: "custom", path: ["diffSnapshot"], message: "encoded snapshot result budget exceeded" });
-    }
-  }
-});
+]).superRefine(checkEffectIdentity).superRefine(checkImageByteBudget);
 var executorContractNegotiationSchema = exports_external.discriminatedUnion("status", [
   exports_external.object({
     status: exports_external.literal("negotiated"),
@@ -27022,9 +26814,9 @@ function readCodexSessionId(transcriptPath) {
   if (firstLine !== null) {
     try {
       const parsed = JSON.parse(firstLine);
-      const id3 = nonBlank(parsed.payload?.id);
-      if (id3 !== null)
-        return id3;
+      const id2 = nonBlank(parsed.payload?.id);
+      if (id2 !== null)
+        return id2;
     } catch {}
   }
   return inferSessionIdFromFilename(transcriptPath);
