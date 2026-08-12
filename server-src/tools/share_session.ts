@@ -53,7 +53,7 @@ import { runReadLocalSession } from './readLocalSession.js';
 import { copyToClipboard } from '../lib/clipboard.js';
 import { readPluginState, writePluginState } from '../lib/pluginState.js';
 
-export const WATCHER_TIP =
+const WATCHER_TIP =
   'Tip: install our macOS app (https://lore.link/docs/overview) to auto-share new sessions in the background.';
 
 export type ShareSessionArgs = {

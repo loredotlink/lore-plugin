@@ -14,7 +14,6 @@ import {
   runShareSession,
   shareSessionFromDisk,
   shareSessionTool,
-  WATCHER_TIP,
 } from './share_session';
 import { AuthRequiredError, AUTH_REQUIRED_MESSAGE } from '../lib/errors';
 import { writeTokens, readTokens, type Tokens } from '../lib/auth/store';
@@ -74,7 +73,12 @@ function readPluginShareResult(result: unknown): McpShareSessionPluginResult {
 function includesWatcherTip(result: unknown): boolean {
   return mcpTextCallToolResultSchema
     .parse(result)
-    .content.some((block) => block.text === WATCHER_TIP);
+    .content.some((block) =>
+      block.text.startsWith('Tip:')
+      && block.text.includes('macOS app')
+      && block.text.includes('/docs/overview')
+      && block.text.includes('auto-share')
+    );
 }
 
 interface Captured {
