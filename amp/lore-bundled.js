@@ -11800,7 +11800,7 @@ function finalize(ctx, schema) {
     result.$schema = "http://json-schema.org/draft-07/schema#";
   } else if (ctx.target === "draft-04") {
     result.$schema = "http://json-schema.org/draft-04/schema#";
-  } else if (ctx.target === "openapi-3.0") {} else {}
+  } else if (ctx.target === "openapi-3.0") {}
   if (ctx.external?.uri) {
     const id = ctx.external.registry.get(schema)?.id;
     if (!id)
@@ -12044,7 +12044,7 @@ var literalProcessor = (schema, ctx, json, _params) => {
     if (val === undefined) {
       if (ctx.unrepresentable === "throw") {
         throw new Error("Literal `undefined` cannot be represented in JSON Schema");
-      } else {}
+      }
     } else if (typeof val === "bigint") {
       if (ctx.unrepresentable === "throw") {
         throw new Error("BigInt literals cannot be represented in JSON Schema");
@@ -18511,64 +18511,6 @@ var decisionPayloadSchema = exports_external.object({
   sourceThreadDecisionIds: exports_external.array(exports_external.string()),
   authority: exports_external.literal("extracted")
 });
-// ../contracts/src/adminEntityGraph.ts
-var adminEntityGraphQuerySchema = exports_external.object({
-  includeThreads: exports_external.union([exports_external.boolean(), exports_external.stringbool()]).optional().default(true).describe("Include thread nodes and their attachment edges. Defaults to true.")
-});
-var adminEntityGraphPathParamsSchema = exports_external.object({
-  organizationId: exports_external.string().min(1).describe("Id of the organization to graph")
-});
-var adminEntityGraphOrganizationSchema = exports_external.object({
-  id: exports_external.string(),
-  name: exports_external.string()
-});
-var adminEntityGraphEntityNodeSchema = exports_external.object({
-  id: exports_external.string(),
-  type: exports_external.literal("entity"),
-  kind: entityKindSchema,
-  name: exports_external.string(),
-  slug: exports_external.string().nullable(),
-  blurb: exports_external.string().nullable(),
-  status: exports_external.string(),
-  lifecycle: exports_external.string().nullable(),
-  threadCount: exports_external.number().int().nonnegative(),
-  payload: exports_external.unknown()
-});
-var adminEntityGraphThreadNodeSchema = exports_external.object({
-  id: exports_external.string(),
-  type: exports_external.literal("thread"),
-  title: exports_external.string()
-});
-var adminEntityGraphNodeSchema = exports_external.discriminatedUnion("type", [
-  adminEntityGraphEntityNodeSchema,
-  adminEntityGraphThreadNodeSchema
-]);
-var adminEntityGraphEdgeKindValues = [
-  ...entityEdgeKindValues,
-  "attached_to"
-];
-var adminEntityGraphEdgeKindSchema = exports_external.enum(adminEntityGraphEdgeKindValues);
-var adminEntityGraphEdgeSchema = exports_external.object({
-  source: exports_external.string(),
-  target: exports_external.string(),
-  kind: adminEntityGraphEdgeKindSchema,
-  role: exports_external.string().nullable()
-});
-var adminEntityGraphCountsSchema = exports_external.object({
-  persons: exports_external.number().int().nonnegative(),
-  footGuns: exports_external.number().int().nonnegative(),
-  decisions: exports_external.number().int().nonnegative(),
-  threads: exports_external.number().int().nonnegative(),
-  edges: exports_external.number().int().nonnegative()
-});
-var adminEntityGraphResponseSchema = exports_external.object({
-  organization: adminEntityGraphOrganizationSchema,
-  nodes: exports_external.array(adminEntityGraphNodeSchema),
-  edges: exports_external.array(adminEntityGraphEdgeSchema),
-  counts: adminEntityGraphCountsSchema,
-  truncated: exports_external.boolean()
-});
-
 // ../contracts/src/entities.ts
 var c = initContract();
 var errorSchema = exports_external.object({ message: exports_external.string() });
@@ -20019,6 +19961,7 @@ var EFFECT_JOURNAL_CAPABILITY = "effect.journal";
 var EFFECT_JOURNAL_FS_EDIT_FILE_CAPABILITY = "effect.journal.fs.editFile";
 var EFFECT_JOURNAL_SHELL_EXEC_CAPABILITY = "effect.journal.shell.exec";
 var EFFECT_JOURNAL_FS_DELETE_CAPABILITY = "effect.journal.fs.delete";
+var FS_DELETE_HUMAN_EDIT_SUBTREE_GUARD_CAPABILITY = "fs.delete.humanEditSubtreeGuard.v1";
 var EFFECT_JOURNAL_UPLOAD_ASSET_CAPABILITY = "effect.journal.uploadAsset";
 var EFFECT_JOURNAL_BROWSER_ACT_CAPABILITY = "effect.journal.browser.act";
 var BROWSER_NAVIGATE_READ_CAPABILITY = "browser.navigateRead.v1";
@@ -20045,6 +19988,7 @@ var browserStatusPageSuccessSchema = exports_external.object({
 }).strict();
 var isEffectJournalCapability = (capability) => capability === EFFECT_JOURNAL_CAPABILITY || capability === EFFECT_JOURNAL_FS_EDIT_FILE_CAPABILITY || capability === EFFECT_JOURNAL_SHELL_EXEC_CAPABILITY || capability === EFFECT_JOURNAL_FS_DELETE_CAPABILITY || capability === EFFECT_JOURNAL_UPLOAD_ASSET_CAPABILITY || capability === EFFECT_JOURNAL_BROWSER_ACT_CAPABILITY;
 var EFFECT_CANCELLATION_CAPABILITY = "effect.cancel";
+var EXECUTOR_MAX_OUTPUT_CHARS = 20000;
 var EXECUTOR_CONTRACT_VERSION = 2;
 var digestSchema = exports_external.object({ algorithm: exports_external.literal("sha256"), value: exports_external.string().regex(/^[0-9a-f]{64}$/) }).strict();
 var observationIdentitySchema = exports_external.object({ contractVersion: exports_external.literal(1), requestedPath: exports_external.string().min(1), target: exports_external.string().min(1) });
@@ -20325,6 +20269,12 @@ var EXECUTOR_TOOL_CONTRACTS = {
     inputSchema: exports_external.object({ path: text("File path relative to the session folder."), content: text("The full contents of the file.") }).strict(),
     routes: [{ primitive: "fs.writeFile", requiredCapabilities: ["fs.writeFile", EFFECT_JOURNAL_CAPABILITY, EFFECT_CANCELLATION_CAPABILITY], map: (input, callId) => ({ op: "fs.writeFile", callId, path: input.path, content: input.content }) }]
   },
+  delete_file: {
+    version: EXECUTOR_CONTRACT_VERSION,
+    description: "Permanently delete a file or folder and all of its contents from the session folder.",
+    inputSchema: exports_external.object({ path: text("File or folder path relative to the session folder.") }).strict(),
+    routes: [{ primitive: "fs.delete", requiredCapabilities: ["fs.delete", EFFECT_JOURNAL_FS_DELETE_CAPABILITY, EFFECT_CANCELLATION_CAPABILITY, "fs.inspectPath", FS_DELETE_HUMAN_EDIT_SUBTREE_GUARD_CAPABILITY], map: (input, callId) => ({ op: "fs.delete", callId, path: input.path }) }]
+  },
   run_command: {
     version: EXECUTOR_CONTRACT_VERSION,
     description: "Run a shell command inside the session folder and return its output. Call this when the task needs something only a real command can do \u2014 running tests, installing packages, checking git status, building the project. Commands time out after 60 seconds.",
@@ -20428,6 +20378,1175 @@ assertNonBrowserPrimitiveRouteRequirements(executorToolRoutes);
 for (const route of executorToolRoutes) {
   if (!routeRequirementsByPrimitive.has(route.primitive)) {
     routeRequirementsByPrimitive.set(route.primitive, route.requiredCapabilities);
+  }
+}
+// ../contracts/src/wb-executor/primitiveRequest.ts
+var EXECUTOR_OPERATION_PROTOCOL_VERSION = 1;
+var boundedIdentity = exports_external.string().min(1).max(512);
+var positiveInteger = exports_external.number().int().positive();
+var nonNegativeInteger = exports_external.number().int().nonnegative();
+var organizationIdSchema = typeIdSchema("org");
+var executorUserIdSchema = typeIdSchema("user");
+var executorThreadIdSchema = typeIdSchema("th");
+var executorTurnIdSchema = typeIdSchema("tb");
+var executorModelStepIdSchema = typeIdSchema("dms");
+var executorEffectIdSchema = typeIdSchema("dfx");
+var executorEffectAttemptIdSchema = typeIdSchema("dfxa");
+var executorTargetIdSchema = typeIdSchema("etg");
+var executorTargetScopeIdSchema = typeIdSchema("ets");
+var executorOperationRequestIdSchema = typeIdSchema("eor");
+var executorTargetOperationIdSchema = typeIdSchema("eto");
+var executorOperationAttemptIdSchema = typeIdSchema("eoa");
+var executorWorkspaceIdSchema = typeIdSchema("ews");
+var executorReceiptIdSchema = typeIdSchema("erc");
+var executorCapabilityIdSchema = typeIdSchema("ecp");
+var rivetExecutorIdSchema = exports_external.string().min(1).max(512);
+var executorArgumentDigestSchema = exports_external.string().regex(/^[0-9a-f]{64}$/);
+var NON_TARGET_PRIMITIVES = new Set([
+  "effect.lookupReceipt",
+  "ui.progress",
+  "ui.textDelta"
+]);
+var EXECUTOR_TARGET_PRIMITIVES = Object.freeze(EXECUTOR_PRIMITIVES.filter((primitive) => !NON_TARGET_PRIMITIVES.has(primitive)));
+var executorTargetPrimitiveSchema = exports_external.enum(EXECUTOR_TARGET_PRIMITIVES);
+var executorExecutionClassSchema = exports_external.enum(["read_only", "mutation_receipt_required"]);
+function isCanonicalLoreTypeId(value, prefix) {
+  const marker = `${prefix}_`;
+  if (!value.startsWith(marker))
+    return false;
+  const suffix = value.slice(marker.length);
+  if (suffix.length !== TYPE_ID_SUFFIX_LENGTH)
+    return false;
+  let decoded = 0n;
+  for (const character of suffix) {
+    const digit = TYPE_ID_BASE62_LOOKUP.get(character);
+    if (digit === undefined)
+      return false;
+    decoded = decoded * 62n + digit;
+    if (decoded > TYPE_ID_MAX_UUID_VALUE)
+      return false;
+  }
+  return true;
+}
+function executionClassForExecutorRequest(request) {
+  switch (request.op) {
+    case "fs.readFile":
+    case "fs.inspectPath":
+    case "fs.previewEdit":
+    case "fs.readDirectory":
+    case "browser.capture":
+      return "read_only";
+    case "browser.act":
+      return isReadOnlyBrowserAction(request.action) ? "read_only" : "mutation_receipt_required";
+    case "fs.writeFile":
+    case "fs.editFile":
+    case "fs.delete":
+    case "git.command":
+    case "shell.exec":
+    case "uploadAsset":
+      return "mutation_receipt_required";
+    case "effect.lookupReceipt":
+    case "ui.progress":
+    case "ui.textDelta":
+      throw new Error(`${request.op} is not a target Operation Primitive`);
+  }
+}
+function canonicalExecutorJson(value) {
+  if (value === null || typeof value !== "object")
+    return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value))
+    return `[${value.map(canonicalExecutorJson).join(",")}]`;
+  const entries = Object.entries(value).filter(([, entry]) => entry !== undefined).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
+  return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalExecutorJson(entry)}`).join(",")}}`;
+}
+var TYPE_ID_SUFFIX_LENGTH = 22;
+var TYPE_ID_BASE62_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+var TYPE_ID_MAX_UUID_VALUE = (1n << 128n) - 1n;
+var TYPE_ID_BASE62_LOOKUP = new Map([...TYPE_ID_BASE62_ALPHABET].map((character, index) => [character, BigInt(index)]));
+function typeIdSchema(prefix) {
+  return exports_external.string().refine((value) => isCanonicalLoreTypeId(value, prefix), `must be a canonical ${prefix} TypeID`);
+}
+// ../contracts/src/wb-executor/targetOperation.ts
+var executorTargetIdentitySchema = exports_external.strictObject({
+  targetId: executorTargetIdSchema,
+  targetGeneration: positiveInteger
+});
+var executorTargetScopeIdentitySchema = exports_external.strictObject({
+  targetScopeId: executorTargetScopeIdSchema,
+  targetScopeGeneration: positiveInteger
+});
+var executorRemoteTargetIdentitySchema = exports_external.strictObject({
+  organizationId: organizationIdSchema,
+  ...executorTargetIdentitySchema.shape,
+  rivetExecutorId: rivetExecutorIdSchema,
+  workspaceId: executorWorkspaceIdSchema
+});
+var executorExecutionSiteSchema = exports_external.discriminatedUnion("kind", [
+  exports_external.object({ kind: exports_external.literal("desktop") }),
+  exports_external.object({
+    kind: exports_external.literal("rivet"),
+    rivetExecutorId: rivetExecutorIdSchema,
+    workspaceId: executorWorkspaceIdSchema
+  })
+]);
+var executorTargetRecordV1Schema = exports_external.strictObject({
+  schemaVersion: exports_external.literal(1),
+  organizationId: organizationIdSchema.nullable(),
+  ownerUserId: executorUserIdSchema.nullable(),
+  targetId: executorTargetIdSchema,
+  transport: exports_external.enum(["desktop", "rivet"]),
+  currentGeneration: positiveInteger,
+  createdAt: exports_external.string().datetime()
+}).superRefine((target, context) => {
+  if (target.organizationId === null === (target.ownerUserId === null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["organizationId"],
+      message: "a target must have exactly one organization or user owner"
+    });
+  }
+  if (target.transport === "rivet" && target.organizationId === null) {
+    context.addIssue({
+      code: "custom",
+      path: ["organizationId"],
+      message: "Rivet targets must be organization-owned"
+    });
+  }
+  if (target.transport === "desktop" && target.ownerUserId === null) {
+    context.addIssue({
+      code: "custom",
+      path: ["ownerUserId"],
+      message: "Desktop targets must be user-owned in Operation protocol v1"
+    });
+  }
+});
+var executorTargetGenerationRecordV1Schema = exports_external.strictObject({
+  schemaVersion: exports_external.literal(1),
+  organizationId: organizationIdSchema.nullable(),
+  ownerUserId: executorUserIdSchema.nullable(),
+  ...executorTargetIdentitySchema.shape,
+  transport: exports_external.discriminatedUnion("kind", [
+    exports_external.strictObject({ kind: exports_external.literal("desktop") }),
+    exports_external.strictObject({
+      kind: exports_external.literal("rivet"),
+      rivetExecutorId: rivetExecutorIdSchema,
+      workspaceId: executorWorkspaceIdSchema
+    })
+  ]),
+  lifecycle: exports_external.enum(["active", "retired", "recovery_required"]),
+  createdAt: exports_external.string().datetime(),
+  retiredAt: exports_external.string().datetime().nullable()
+}).superRefine((target, context) => {
+  if (target.organizationId === null === (target.ownerUserId === null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["organizationId"],
+      message: "a target generation must project exactly one organization or user owner"
+    });
+  }
+  if (target.transport.kind === "rivet" && target.organizationId === null) {
+    context.addIssue({
+      code: "custom",
+      path: ["organizationId"],
+      message: "Rivet target generations must be organization-owned"
+    });
+  }
+  if (target.transport.kind === "desktop" && target.ownerUserId === null) {
+    context.addIssue({
+      code: "custom",
+      path: ["ownerUserId"],
+      message: "Desktop target generations must be user-owned"
+    });
+  }
+});
+var executorTargetScopeRecordV1Schema = exports_external.strictObject({
+  schemaVersion: exports_external.literal(1),
+  targetScopeId: executorTargetScopeIdSchema,
+  targetId: executorTargetIdSchema,
+  currentGeneration: positiveInteger,
+  createdAt: exports_external.string().datetime()
+});
+var executorTargetScopeGenerationRecordV1Schema = exports_external.strictObject({
+  schemaVersion: exports_external.literal(1),
+  ...executorTargetIdentitySchema.shape,
+  ...executorTargetScopeIdentitySchema.shape,
+  lifecycle: exports_external.enum(["ready", "quarantined", "recovery_required", "retired"]),
+  blockingTargetOperationId: executorTargetOperationIdSchema.nullable(),
+  createdAt: exports_external.string().datetime(),
+  retiredAt: exports_external.string().datetime().nullable()
+}).superRefine((scope, context) => {
+  const requiresBlocker = scope.lifecycle === "quarantined" || scope.lifecycle === "recovery_required";
+  if (requiresBlocker !== (scope.blockingTargetOperationId !== null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["blockingTargetOperationId"],
+      message: requiresBlocker ? `${scope.lifecycle} requires a blocking target Operation` : `${scope.lifecycle} must not have a blocking target Operation`
+    });
+  }
+});
+var executorTargetOperationRecordV1Schema = exports_external.strictObject({
+  schemaVersion: exports_external.literal(1),
+  protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+  primitiveContractVersion: exports_external.literal(EXECUTOR_CONTRACT_VERSION),
+  operationRequestId: executorOperationRequestIdSchema,
+  targetOperationId: executorTargetOperationIdSchema,
+  organizationId: organizationIdSchema.nullable(),
+  ...executorTargetIdentitySchema.shape,
+  ...executorTargetScopeIdentitySchema.shape,
+  primitive: executorTargetPrimitiveSchema,
+  executionClass: executorExecutionClassSchema,
+  argumentDigest: executorArgumentDigestSchema,
+  effectId: executorEffectIdSchema.nullable(),
+  boundBy: exports_external.enum(["automatic", "user", "hard_affinity"]),
+  boundAt: exports_external.string().datetime()
+}).superRefine(checkOperationEffectCardinality);
+var executorOperationIdentitySchema = exports_external.object({
+  operationRequestId: executorOperationRequestIdSchema,
+  targetOperationId: executorTargetOperationIdSchema,
+  organizationId: organizationIdSchema.nullable(),
+  ...executorTargetIdentitySchema.shape,
+  ...executorTargetScopeIdentitySchema.shape,
+  primitiveContractVersion: exports_external.literal(EXECUTOR_CONTRACT_VERSION),
+  primitive: executorTargetPrimitiveSchema,
+  executionClass: executorExecutionClassSchema,
+  argumentDigest: executorArgumentDigestSchema,
+  effectId: executorEffectIdSchema.nullable()
+}).superRefine(checkOperationEffectCardinality);
+var executorRemoteOperationIdentitySchema = executorOperationIdentitySchema.safeExtend({
+  organizationId: organizationIdSchema
+});
+var executorTargetStatusRequestV1Schema = exports_external.object({
+  protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+  action: exports_external.literal("status"),
+  expectedTarget: executorRemoteTargetIdentitySchema,
+  scope: executorTargetScopeIdentitySchema.optional()
+});
+var executorTargetStatusResponseV1Schema = exports_external.object({
+  protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+  action: exports_external.literal("status"),
+  target: executorRemoteTargetIdentitySchema,
+  protocolVersions: executorContractVersionRangeSchema,
+  primitiveContractVersions: executorContractVersionRangeSchema,
+  capabilities: exports_external.array(exports_external.string()),
+  workspaceStatus: exports_external.enum(["ready", "unavailable", "recovery_required"]),
+  scope: exports_external.object({
+    ...executorTargetScopeIdentitySchema.shape,
+    status: exports_external.enum(["ready", "busy", "quarantined", "recovery_required"]),
+    blockingTargetOperationId: executorTargetOperationIdSchema.nullable()
+  }).optional()
+});
+var rivetExecutorKeySchema = exports_external.tuple([organizationIdSchema, executorTargetIdSchema]);
+var rivetExecutorLookupRequestV1Schema = exports_external.object({
+  protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+  rivetExecutorKey: rivetExecutorKeySchema,
+  expectedTarget: executorRemoteTargetIdentitySchema
+}).superRefine((request, context) => {
+  if (request.rivetExecutorKey[0] !== request.expectedTarget.organizationId || request.rivetExecutorKey[1] !== request.expectedTarget.targetId) {
+    context.addIssue({ code: "custom", path: ["rivetExecutorKey"], message: "Rivet Executor key must equal [organizationId, targetId]" });
+  }
+});
+var rivetExecutorLookupResponseV1Schema = exports_external.discriminatedUnion("status", [
+  exports_external.object({
+    protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+    status: exports_external.literal("found"),
+    target: executorRemoteTargetIdentitySchema
+  }),
+  exports_external.object({
+    protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+    status: exports_external.literal("not_found"),
+    rivetExecutorKey: rivetExecutorKeySchema
+  })
+]);
+var rivetExecutorAllocationRequestV1Schema = exports_external.object({
+  protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+  action: exports_external.literal("allocate"),
+  rivetExecutorKey: rivetExecutorKeySchema,
+  target: executorRemoteTargetIdentitySchema
+}).superRefine((request, context) => {
+  if (request.rivetExecutorKey[0] !== request.target.organizationId || request.rivetExecutorKey[1] !== request.target.targetId) {
+    context.addIssue({ code: "custom", path: ["rivetExecutorKey"], message: "Rivet Executor key must equal [organizationId, targetId]" });
+  }
+});
+var rivetExecutorAllocationResponseV1Schema = exports_external.discriminatedUnion("status", [
+  exports_external.object({
+    protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+    action: exports_external.literal("allocate"),
+    status: exports_external.enum(["allocated", "existing"]),
+    target: executorRemoteTargetIdentitySchema
+  }),
+  exports_external.object({
+    protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+    action: exports_external.literal("allocate"),
+    status: exports_external.literal("rejected"),
+    reason: exports_external.literal("rivet_executor_replaced"),
+    rivetExecutorKey: rivetExecutorKeySchema,
+    requestedTarget: executorRemoteTargetIdentitySchema,
+    observedTarget: executorRemoteTargetIdentitySchema.nullable()
+  })
+]).superRefine((response, context) => {
+  if (response.status !== "rejected")
+    return;
+  if (response.rivetExecutorKey[0] !== response.requestedTarget.organizationId || response.rivetExecutorKey[1] !== response.requestedTarget.targetId) {
+    context.addIssue({
+      code: "custom",
+      path: ["rivetExecutorKey"],
+      message: "rejected allocation Rivet Executor key must identify the requested target"
+    });
+  }
+});
+var executorOperationNegotiationRequestV1Schema = exports_external.object({
+  protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+  action: exports_external.literal("negotiate"),
+  apiProtocolVersions: executorContractVersionRangeSchema,
+  apiPrimitiveContractVersions: executorContractVersionRangeSchema,
+  expectedTarget: executorRemoteTargetIdentitySchema
+});
+var executorOperationNegotiationResponseV1Schema = exports_external.discriminatedUnion("status", [
+  exports_external.object({
+    protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+    action: exports_external.literal("negotiate"),
+    status: exports_external.literal("negotiated"),
+    version: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+    primitiveContractVersion: exports_external.literal(EXECUTOR_CONTRACT_VERSION),
+    target: executorRemoteTargetIdentitySchema,
+    capabilities: exports_external.array(exports_external.string())
+  }),
+  exports_external.object({
+    protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+    action: exports_external.literal("negotiate"),
+    status: exports_external.literal("rejected"),
+    reason: exports_external.enum(["version_no_overlap", "primitive_version_no_overlap", "target_mismatch", "rivet_executor_replaced"])
+  })
+]);
+function checkOperationEffectCardinality(operation, context) {
+  const shouldHaveEffect = operation.executionClass === "mutation_receipt_required";
+  const hasEffect = operation.effectId !== null && operation.effectId !== undefined;
+  if (shouldHaveEffect !== hasEffect) {
+    context.addIssue({
+      code: "custom",
+      path: ["effectId"],
+      message: "mutation Operations require one Effect and read-only Operations have none"
+    });
+  }
+}
+
+// ../contracts/src/wb-executor/operationRequest.ts
+var executorOperationAffinitySchema = exports_external.discriminatedUnion("kind", [
+  exports_external.strictObject({ kind: exports_external.literal("unbound") }),
+  exports_external.strictObject({
+    kind: exports_external.literal("hard"),
+    ...executorTargetIdentitySchema.shape,
+    ...executorTargetScopeIdentitySchema.shape
+  })
+]);
+var executorOperationRequestRecordV1Schema = exports_external.strictObject({
+  schemaVersion: exports_external.literal(1),
+  operationRequestId: executorOperationRequestIdSchema,
+  organizationId: organizationIdSchema.nullable(),
+  requestingUserId: executorUserIdSchema,
+  threadId: executorThreadIdSchema,
+  turnId: executorTurnIdSchema,
+  modelStepId: executorModelStepIdSchema,
+  toolCallId: boundedIdentity.nullable(),
+  operationSequence: nonNegativeInteger,
+  purpose: exports_external.enum(["model_tool", "support", "verification", "reconciliation"]),
+  primitive: executorTargetPrimitiveSchema,
+  executionClass: executorExecutionClassSchema,
+  argumentDigest: executorArgumentDigestSchema,
+  affinity: executorOperationAffinitySchema,
+  resolutionStatus: exports_external.enum(["awaiting_target", "bound", "not_dispatched"]),
+  createdAt: exports_external.string().datetime()
+}).superRefine((request, context) => {
+  if (request.purpose === "model_tool" && request.toolCallId === null) {
+    context.addIssue({ code: "custom", path: ["toolCallId"], message: "model Tool Operations require toolCallId" });
+  }
+});
+// ../contracts/src/wb-executor/attempt.ts
+var EXECUTOR_CAPABILITY_TYPE = "lore-executor-capability+jwt";
+var EXECUTOR_CAPABILITY_MAX_TTL_SECONDS = 60;
+var EXECUTOR_OPERATION_ATTEMPT_STATES = [
+  "created",
+  "not_admitted",
+  "not_dispatched",
+  "admitted",
+  "read_only_succeeded",
+  "committed",
+  "failed_before_commit",
+  "aborted_before_commit",
+  "admitted_unknown"
+];
+var executorOperationAttemptIdentitySchema = exports_external.object({
+  attemptId: executorOperationAttemptIdSchema,
+  attemptOrdinal: positiveInteger,
+  admittedThreadId: executorThreadIdSchema,
+  admittedTurnId: executorTurnIdSchema,
+  admittedOwnershipEpoch: positiveInteger,
+  admittedTurnRunEpoch: positiveInteger
+}).superRefine((attempt, context) => {
+  if (attempt.admittedOwnershipEpoch !== attempt.admittedTurnRunEpoch) {
+    context.addIssue({
+      code: "custom",
+      path: ["admittedTurnRunEpoch"],
+      message: "Operation protocol v1 admits an attempt only under an exact live Turn claim"
+    });
+  }
+});
+var executorTurnFenceSchema = exports_external.object({
+  threadId: executorThreadIdSchema,
+  turnId: executorTurnIdSchema,
+  ownershipEpoch: positiveInteger,
+  turnRunEpoch: positiveInteger
+}).superRefine((fence, context) => {
+  if (fence.ownershipEpoch !== fence.turnRunEpoch) {
+    context.addIssue({
+      code: "custom",
+      path: ["turnRunEpoch"],
+      message: "Operation protocol v1 actions require an exact live Turn claim"
+    });
+  }
+});
+var executorCapabilityActionSchema = exports_external.enum([
+  "dispatch",
+  "cancel",
+  "lookup_attempt_outcome",
+  "advance_turn_fence"
+]);
+var operationActionBase = {
+  protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+  operation: executorOperationIdentitySchema,
+  attempt: executorOperationAttemptIdentitySchema,
+  executionSite: executorExecutionSiteSchema,
+  fence: executorTurnFenceSchema
+};
+var executorOperationDispatchRequestV1Schema = exports_external.object({
+  ...operationActionBase,
+  action: exports_external.literal("dispatch"),
+  request: executorRequestSchema
+}).superRefine((action, context) => {
+  checkOperationAction(action, context);
+  if (action.request.op !== action.operation.primitive) {
+    context.addIssue({ code: "custom", path: ["request", "op"], message: "Primitive must match immutable Operation binding" });
+  }
+  let executionClass;
+  try {
+    executionClass = executionClassForExecutorRequest(action.request);
+  } catch {
+    context.addIssue({ code: "custom", path: ["request", "op"], message: "request is not a target Operation Primitive" });
+  }
+  if (executionClass !== undefined && executionClass !== action.operation.executionClass) {
+    context.addIssue({ code: "custom", path: ["operation", "executionClass"], message: "executionClass must match the complete Primitive request" });
+  }
+  if (action.request.effectId !== undefined || action.request.attemptOrdinal !== undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["request", "effectId"],
+      message: "common Operation requests must not carry legacy Desktop Effect attempt identity"
+    });
+  }
+});
+var cancellationReasonSchema = exports_external.enum(["turn_cancelled", "operator_requested", "deadline_exceeded"]);
+var executorOperationCancelRequestV1Schema = exports_external.object({
+  ...operationActionBase,
+  action: exports_external.literal("cancel"),
+  reason: cancellationReasonSchema
+}).superRefine(checkOperationAction);
+var executorAttemptOutcomeLookupRequestV1Schema = exports_external.object({
+  ...operationActionBase,
+  action: exports_external.literal("lookup_attempt_outcome")
+}).superRefine(checkOperationAction);
+var executorAdvanceTurnFenceRequestV1Schema = exports_external.object({
+  ...operationActionBase,
+  action: exports_external.literal("advance_turn_fence")
+}).superRefine(checkOperationAction);
+var executorOperationActionRequestV1Schema = exports_external.union([
+  executorOperationDispatchRequestV1Schema,
+  executorOperationCancelRequestV1Schema,
+  executorAttemptOutcomeLookupRequestV1Schema,
+  executorAdvanceTurnFenceRequestV1Schema
+]);
+var executorCapabilityProtectedHeaderSchema = exports_external.strictObject({
+  alg: exports_external.literal("RS256"),
+  typ: exports_external.literal(EXECUTOR_CAPABILITY_TYPE),
+  kid: exports_external.string().regex(/^[A-Za-z0-9._-]{1,128}$/)
+});
+var executorCapabilityClaimsV1Schema = exports_external.object({
+  capabilityVersion: exports_external.literal(1),
+  iss: exports_external.string().min(1),
+  aud: exports_external.array(exports_external.string().min(1)).min(1),
+  sub: executorTargetOperationIdSchema,
+  jti: executorCapabilityIdSchema,
+  iat: nonNegativeInteger,
+  exp: positiveInteger,
+  action: executorCapabilityActionSchema,
+  operationRequestId: executorOperationRequestIdSchema,
+  targetOperationId: executorTargetOperationIdSchema,
+  attemptId: executorOperationAttemptIdSchema,
+  attemptOrdinal: positiveInteger,
+  admittedThreadId: executorThreadIdSchema,
+  admittedTurnId: executorTurnIdSchema,
+  admittedOwnershipEpoch: positiveInteger,
+  admittedTurnRunEpoch: positiveInteger,
+  ownershipEpoch: positiveInteger,
+  turnRunEpoch: positiveInteger,
+  organizationId: organizationIdSchema,
+  ...executorTargetIdentitySchema.shape,
+  ...executorTargetScopeIdentitySchema.shape,
+  rivetExecutorId: rivetExecutorIdSchema,
+  workspaceId: executorWorkspaceIdSchema,
+  primitiveContractVersion: exports_external.literal(EXECUTOR_CONTRACT_VERSION),
+  primitive: boundedIdentity,
+  executionClass: executorExecutionClassSchema,
+  argumentDigest: executorArgumentDigestSchema,
+  effectId: executorEffectIdSchema.nullable(),
+  threadId: executorThreadIdSchema,
+  turnId: executorTurnIdSchema
+}).superRefine((claims, context) => {
+  if (claims.sub !== claims.targetOperationId) {
+    context.addIssue({ code: "custom", path: ["sub"], message: "subject must equal targetOperationId" });
+  }
+  if (claims.exp <= claims.iat || claims.exp - claims.iat > EXECUTOR_CAPABILITY_MAX_TTL_SECONDS) {
+    context.addIssue({ code: "custom", path: ["exp"], message: `capability lifetime must be 1-${EXECUTOR_CAPABILITY_MAX_TTL_SECONDS} seconds` });
+  }
+  if (claims.threadId !== claims.admittedThreadId || claims.turnId !== claims.admittedTurnId) {
+    context.addIssue({ code: "custom", path: ["threadId"], message: "authorization must name the admitted Thread and Turn" });
+  }
+  if (claims.admittedOwnershipEpoch !== claims.admittedTurnRunEpoch) {
+    context.addIssue({ code: "custom", path: ["admittedTurnRunEpoch"], message: "admitted Turn epochs must identify one exact claim" });
+  }
+  if (claims.ownershipEpoch !== claims.turnRunEpoch) {
+    context.addIssue({ code: "custom", path: ["turnRunEpoch"], message: "authorizing Turn epochs must identify one exact live claim" });
+  }
+  if (claims.ownershipEpoch < claims.admittedOwnershipEpoch || claims.turnRunEpoch < claims.admittedTurnRunEpoch) {
+    context.addIssue({ code: "custom", path: ["ownershipEpoch"], message: "authorizing Turn epochs cannot precede admitted Turn epochs" });
+  }
+  if (claims.action === "dispatch" && (claims.ownershipEpoch !== claims.admittedOwnershipEpoch || claims.turnRunEpoch !== claims.admittedTurnRunEpoch)) {
+    context.addIssue({ code: "custom", path: ["ownershipEpoch"], message: "dispatch Turn epochs must match the admission epochs" });
+  }
+});
+var executorCapabilityCredentialSchema = exports_external.object({
+  scheme: exports_external.literal("lore-rs256-capability"),
+  token: exports_external.string().min(1)
+});
+var executorAuthorizedOperationActionV1Schema = exports_external.object({
+  request: executorOperationActionRequestV1Schema,
+  authorization: executorCapabilityCredentialSchema
+});
+function checkOperationAction(action, context) {
+  if (action.fence.threadId !== action.attempt.admittedThreadId || action.fence.turnId !== action.attempt.admittedTurnId) {
+    context.addIssue({
+      code: "custom",
+      path: ["fence"],
+      message: "current authorization must name the same Thread and Turn as attempt admission"
+    });
+  }
+  if (action.fence.ownershipEpoch < action.attempt.admittedOwnershipEpoch) {
+    context.addIssue({
+      code: "custom",
+      path: ["fence", "ownershipEpoch"],
+      message: "the authorizing ownership epoch cannot precede the admitted ownership epoch"
+    });
+  }
+  if (action.fence.turnRunEpoch < action.attempt.admittedTurnRunEpoch) {
+    context.addIssue({
+      code: "custom",
+      path: ["fence", "turnRunEpoch"],
+      message: "the authorizing Turn-run epoch cannot precede the admitted Turn-run epoch"
+    });
+  }
+  if (action.action === "dispatch" && (action.fence.ownershipEpoch !== action.attempt.admittedOwnershipEpoch || action.fence.turnRunEpoch !== action.attempt.admittedTurnRunEpoch)) {
+    context.addIssue({
+      code: "custom",
+      path: ["fence"],
+      message: "dispatch requires the current Turn claim to equal the attempt admission claim"
+    });
+  }
+}
+// ../contracts/src/wb-executor/exactOutcome.ts
+var EXECUTOR_MAX_RETAINED_OUTPUT_CHARS = EXECUTOR_MAX_OUTPUT_CHARS + 128;
+var executorPrimitiveResultSchema = exports_external.discriminatedUnion("ok", [
+  exports_external.object({
+    ok: exports_external.literal(true),
+    output: exports_external.string().max(EXECUTOR_MAX_RETAINED_OUTPUT_CHARS),
+    images: exports_external.array(executorImageSchema).max(EXECUTOR_MAX_IMAGES_PER_RESPONSE).optional()
+  }),
+  exports_external.object({
+    ok: exports_external.literal(false),
+    error: exports_external.object({ code: boundedIdentity, message: exports_external.string().max(2000) })
+  })
+]).superRefine((result, context) => {
+  if (!result.ok || result.images === undefined)
+    return;
+  const byteLength = result.images.reduce((sum, image) => sum + image.byteLength, 0);
+  if (byteLength > EXECUTOR_MAX_IMAGE_BYTES) {
+    context.addIssue({
+      code: "custom",
+      path: ["images"],
+      message: `total decoded image bytes exceed ${EXECUTOR_MAX_IMAGE_BYTES}`
+    });
+  }
+});
+var attemptOutcomeBase = {
+  schemaVersion: exports_external.literal(1),
+  operation: executorOperationIdentitySchema,
+  attempt: executorOperationAttemptIdentitySchema,
+  executionSite: executorExecutionSiteSchema
+};
+var executorOperationReceiptV1Schema = exports_external.object({
+  ...attemptOutcomeBase,
+  disposition: exports_external.literal("committed"),
+  receiptId: executorReceiptIdSchema,
+  committedAt: exports_external.string().datetime(),
+  resultDigest: executorArgumentDigestSchema
+});
+var EXECUTOR_NOT_ADMITTED_RETRY_DIRECTIVES = {
+  invalid_request: "never",
+  unauthorized: "never",
+  capability_expired: "same_attempt",
+  target_mismatch: "never",
+  stale_target_generation: "never",
+  scope_mismatch: "never",
+  stale_scope_generation: "never",
+  stale_turn_ownership: "never",
+  rivet_executor_replaced: "never",
+  scope_quarantined: "after_recovery",
+  workspace_unavailable: "same_attempt",
+  overloaded: "same_attempt"
+};
+var executorNotAdmittedCodeSchema = exports_external.enum(Object.keys(EXECUTOR_NOT_ADMITTED_RETRY_DIRECTIVES));
+var executorNotAdmittedErrorSchema = exports_external.object({
+  code: executorNotAdmittedCodeSchema,
+  message: exports_external.string().max(2000),
+  retry: exports_external.enum(["same_attempt", "after_recovery", "never"])
+}).superRefine((error51, context) => {
+  if (error51.retry !== EXECUTOR_NOT_ADMITTED_RETRY_DIRECTIVES[error51.code]) {
+    context.addIssue({ code: "custom", path: ["retry"], message: `retry must be ${EXECUTOR_NOT_ADMITTED_RETRY_DIRECTIVES[error51.code]} for ${error51.code}` });
+  }
+});
+var executorAttemptOutcomeV1Schema = exports_external.union([
+  exports_external.object({
+    ...attemptOutcomeBase,
+    disposition: exports_external.literal("not_admitted"),
+    error: executorNotAdmittedErrorSchema
+  }),
+  exports_external.object({
+    ...attemptOutcomeBase,
+    disposition: exports_external.literal("admitted_unknown"),
+    reason: exports_external.enum(["executing", "response_lost", "admission_unknown", "workspace_lost_after_admission"])
+  }),
+  exports_external.object({
+    ...attemptOutcomeBase,
+    disposition: exports_external.literal("read_only_succeeded"),
+    result: executorPrimitiveResultSchema,
+    resultDigest: executorArgumentDigestSchema
+  }),
+  executorOperationReceiptV1Schema.extend({ result: executorPrimitiveResultSchema }),
+  exports_external.object({
+    ...attemptOutcomeBase,
+    disposition: exports_external.literal("failed_before_commit"),
+    result: executorPrimitiveResultSchema,
+    resultDigest: executorArgumentDigestSchema
+  }),
+  exports_external.object({
+    ...attemptOutcomeBase,
+    disposition: exports_external.literal("aborted_before_commit"),
+    result: executorPrimitiveResultSchema,
+    resultDigest: executorArgumentDigestSchema
+  })
+]).superRefine((outcome, context) => {
+  if (outcome.disposition === "read_only_succeeded" && outcome.operation.executionClass !== "read_only") {
+    context.addIssue({ code: "custom", path: ["operation", "executionClass"], message: "read-only outcome requires read_only executionClass" });
+  }
+  if (outcome.disposition === "read_only_succeeded" && !outcome.result.ok) {
+    context.addIssue({ code: "custom", path: ["result", "ok"], message: "read-only success requires a successful Primitive result" });
+  }
+  if (outcome.disposition === "committed" && outcome.operation.executionClass !== "mutation_receipt_required") {
+    context.addIssue({ code: "custom", path: ["operation", "executionClass"], message: "committed Receipt requires mutation executionClass" });
+  }
+  if ((outcome.disposition === "failed_before_commit" || outcome.disposition === "aborted_before_commit") && outcome.result.ok) {
+    context.addIssue({ code: "custom", path: ["result", "ok"], message: `${outcome.disposition} requires a failed Primitive result` });
+  }
+});
+var executorPersistedAttemptOutcomeV1Schema = exports_external.unknown().superRefine((input, context) => {
+  const parsed = executorAttemptOutcomeV1Schema.safeParse(input);
+  if (!parsed.success) {
+    context.addIssue({ code: "custom", message: "must be a valid Executor attempt outcome v1" });
+    return;
+  }
+  if (canonicalExecutorJson(input) !== canonicalExecutorJson(parsed.data)) {
+    context.addIssue({ code: "custom", message: "persisted outcome v1 contains unknown fields" });
+  }
+}).transform((input) => executorAttemptOutcomeV1Schema.parse(input));
+var executorOperationAttemptRecordV1Schema = exports_external.strictObject({
+  schemaVersion: exports_external.literal(1),
+  attemptId: executorOperationAttemptIdSchema,
+  targetOperationId: executorTargetOperationIdSchema,
+  attemptOrdinal: positiveInteger,
+  admittedThreadId: executorThreadIdSchema,
+  admittedTurnId: executorTurnIdSchema,
+  admittedOwnershipEpoch: positiveInteger,
+  admittedTurnRunEpoch: positiveInteger,
+  effectAttemptId: executorEffectAttemptIdSchema.nullable(),
+  state: exports_external.enum(EXECUTOR_OPERATION_ATTEMPT_STATES),
+  lastOutcome: executorPersistedAttemptOutcomeV1Schema.nullable(),
+  createdAt: exports_external.string().datetime(),
+  settledAt: exports_external.string().datetime().nullable()
+}).superRefine((attemptRecord, context) => {
+  if (attemptRecord.admittedOwnershipEpoch !== attemptRecord.admittedTurnRunEpoch) {
+    context.addIssue({
+      code: "custom",
+      path: ["admittedTurnRunEpoch"],
+      message: "Operation protocol v1 admits an attempt only under an exact live Turn claim"
+    });
+  }
+  const terminalStates = [
+    "not_dispatched",
+    "read_only_succeeded",
+    "committed",
+    "failed_before_commit",
+    "aborted_before_commit",
+    "admitted_unknown"
+  ];
+  const mustHaveSettledAt = terminalStates.includes(attemptRecord.state);
+  if (mustHaveSettledAt !== (attemptRecord.settledAt !== null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["settledAt"],
+      message: mustHaveSettledAt ? `${attemptRecord.state} requires settledAt` : `${attemptRecord.state} must not have settledAt`
+    });
+  }
+  const outcome = attemptRecord.lastOutcome;
+  if (attemptRecord.state === "created" && outcome !== null) {
+    context.addIssue({ code: "custom", path: ["lastOutcome"], message: "created has no outcome" });
+    return;
+  }
+  if (outcome === null) {
+    if (attemptRecord.state !== "created" && attemptRecord.state !== "admitted") {
+      context.addIssue({
+        code: "custom",
+        path: ["lastOutcome"],
+        message: `${attemptRecord.state} requires lastOutcome`
+      });
+    }
+    return;
+  }
+  const exactAttempt = outcome.attempt;
+  if (outcome.operation.targetOperationId !== attemptRecord.targetOperationId || exactAttempt.attemptId !== attemptRecord.attemptId || exactAttempt.attemptOrdinal !== attemptRecord.attemptOrdinal || exactAttempt.admittedThreadId !== attemptRecord.admittedThreadId || exactAttempt.admittedTurnId !== attemptRecord.admittedTurnId || exactAttempt.admittedOwnershipEpoch !== attemptRecord.admittedOwnershipEpoch || exactAttempt.admittedTurnRunEpoch !== attemptRecord.admittedTurnRunEpoch) {
+    context.addIssue({
+      code: "custom",
+      path: ["lastOutcome"],
+      message: "lastOutcome must name the exact persisted target Operation attempt"
+    });
+  }
+  const mutation = outcome.operation.executionClass === "mutation_receipt_required";
+  if (mutation !== (attemptRecord.effectAttemptId !== null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["effectAttemptId"],
+      message: "mutation attempts require an Effect attempt and read-only attempts have none"
+    });
+  }
+  if (attemptRecord.state === "not_admitted") {
+    if (outcome.disposition !== "not_admitted" || outcome.error.retry === "never") {
+      context.addIssue({
+        code: "custom",
+        path: ["lastOutcome"],
+        message: "not_admitted requires a retryable not-admitted outcome"
+      });
+    }
+    return;
+  }
+  if (attemptRecord.state === "not_dispatched") {
+    if (outcome.disposition !== "not_admitted" || outcome.error.retry !== "never") {
+      context.addIssue({
+        code: "custom",
+        path: ["lastOutcome"],
+        message: "not_dispatched requires a permanent not-admitted outcome"
+      });
+    }
+    return;
+  }
+  if (attemptRecord.state === "admitted") {
+    if (outcome.disposition !== "not_admitted" || outcome.error.retry === "never") {
+      context.addIssue({
+        code: "custom",
+        path: ["lastOutcome"],
+        message: "admitted may retain only a prior retryable not-admitted outcome"
+      });
+    }
+    return;
+  }
+  if (outcome.disposition !== attemptRecord.state) {
+    context.addIssue({
+      code: "custom",
+      path: ["lastOutcome", "disposition"],
+      message: `outcome disposition must match ${attemptRecord.state}`
+    });
+  }
+});
+var lookupResponseBase = {
+  protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+  action: exports_external.literal("lookup_attempt_outcome"),
+  operation: executorOperationIdentitySchema,
+  attempt: executorOperationAttemptIdentitySchema,
+  executionSite: executorExecutionSiteSchema
+};
+var executorAttemptOutcomeLookupResponseV1Schema = exports_external.union([
+  exports_external.object({
+    ...lookupResponseBase,
+    status: exports_external.literal("found"),
+    outcome: executorAttemptOutcomeV1Schema
+  }),
+  exports_external.object({
+    ...lookupResponseBase,
+    status: exports_external.literal("unknown"),
+    reason: exports_external.enum(["no_journal_record", "journal_unavailable"]),
+    nextAction: exports_external.literal("lookup_or_reconcile_only")
+  }),
+  exports_external.object({
+    ...lookupResponseBase,
+    status: exports_external.enum(["argument_mismatch", "identity_mismatch"]),
+    nextAction: exports_external.literal("recovery_required")
+  })
+]).superRefine((response, context) => {
+  if (response.status !== "found")
+    return;
+  if (canonicalExecutorJson(response.operation) !== canonicalExecutorJson(response.outcome.operation) || canonicalExecutorJson(response.attempt) !== canonicalExecutorJson(response.outcome.attempt) || canonicalExecutorJson(response.executionSite) !== canonicalExecutorJson(response.outcome.executionSite)) {
+    context.addIssue({
+      code: "custom",
+      path: ["outcome"],
+      message: "found outcome must match the exact lookup response identity"
+    });
+  }
+});
+var executorAttemptNextActionSchema = exports_external.enum([
+  "retry_same_attempt",
+  "wait_for_recovery",
+  "settle_not_dispatched",
+  "lookup_or_reconcile_only",
+  "settle_read_only_succeeded",
+  "settle_committed",
+  "settle_failed_before_commit",
+  "settle_aborted_before_commit",
+  "recovery_required"
+]);
+var executorOperationCancelResponseV1Schema = exports_external.object({
+  protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+  action: exports_external.literal("cancel"),
+  status: exports_external.enum(["requested", "already_requested"]),
+  operation: executorOperationIdentitySchema,
+  attempt: executorOperationAttemptIdentitySchema,
+  executionSite: executorExecutionSiteSchema
+});
+var executorAdvanceTurnFenceResponseV1Schema = exports_external.object({
+  protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+  action: exports_external.literal("advance_turn_fence"),
+  status: exports_external.enum(["installed", "already_installed"]),
+  operation: executorOperationIdentitySchema,
+  attempt: executorOperationAttemptIdentitySchema,
+  executionSite: executorExecutionSiteSchema,
+  fence: executorTurnFenceSchema
+});
+var EXECUTOR_ACTION_REJECTION_RETRY_DIRECTIVES = {
+  invalid_envelope: "never",
+  unsupported_protocol: "never",
+  unsupported_primitive_contract: "never",
+  unknown_action: "never",
+  missing_capability: "never",
+  invalid_capability: "never",
+  capability_expired: "retry_same_action",
+  unauthorized: "never",
+  target_mismatch: "never",
+  stale_target_generation: "never",
+  scope_mismatch: "never",
+  stale_scope_generation: "never",
+  stale_turn_ownership: "never",
+  rivet_executor_replaced: "never",
+  scope_quarantined: "after_recovery",
+  workspace_unavailable: "retry_same_action",
+  overloaded: "retry_same_action"
+};
+var EXECUTOR_TRANSPORT_ONLY_REJECTION_CODES = new Set([
+  "invalid_envelope",
+  "unsupported_protocol",
+  "unsupported_primitive_contract",
+  "unknown_action",
+  "missing_capability"
+]);
+var executorActionRejectionCodeSchema = exports_external.enum(Object.keys(EXECUTOR_ACTION_REJECTION_RETRY_DIRECTIVES));
+var executorActionRejectionCorrelationV1Schema = exports_external.discriminatedUnion("kind", [
+  exports_external.object({ kind: exports_external.literal("transport_only") }),
+  exports_external.object({
+    kind: exports_external.literal("exact"),
+    operation: executorOperationIdentitySchema,
+    attempt: executorOperationAttemptIdentitySchema,
+    executionSite: executorExecutionSiteSchema
+  })
+]);
+var executorActionRejectionV1Schema = exports_external.object({
+  protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+  status: exports_external.literal("rejected"),
+  action: exports_external.union([executorCapabilityActionSchema, exports_external.literal("unknown")]),
+  receivedAction: boundedIdentity.nullable(),
+  correlation: executorActionRejectionCorrelationV1Schema,
+  error: exports_external.object({
+    code: executorActionRejectionCodeSchema,
+    message: exports_external.string().max(2000),
+    retry: exports_external.enum(["retry_same_action", "after_recovery", "never"])
+  })
+}).superRefine((rejection, context) => {
+  if (rejection.action === "unknown" !== (rejection.receivedAction !== null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["receivedAction"],
+      message: "receivedAction is required only when the action name is unknown"
+    });
+  }
+  if (rejection.action === "dispatch" && rejection.correlation.kind === "exact") {
+    context.addIssue({
+      code: "custom",
+      path: ["correlation"],
+      message: "a parsed dispatch identity must use an exact not-admitted attempt outcome"
+    });
+  }
+  if (rejection.correlation.kind === "transport_only" && !EXECUTOR_TRANSPORT_ONLY_REJECTION_CODES.has(rejection.error.code)) {
+    context.addIssue({
+      code: "custom",
+      path: ["error", "code"],
+      message: "transport-only rejection is limited to unparseable envelope failures"
+    });
+  }
+  if (rejection.action === "unknown" && rejection.correlation.kind !== "transport_only") {
+    context.addIssue({
+      code: "custom",
+      path: ["correlation"],
+      message: "an unknown action cannot claim exact Operation identity"
+    });
+  }
+  const expected = EXECUTOR_ACTION_REJECTION_RETRY_DIRECTIVES[rejection.error.code];
+  if (rejection.error.retry !== expected) {
+    context.addIssue({
+      code: "custom",
+      path: ["error", "retry"],
+      message: `retry must be ${expected} for ${rejection.error.code}`
+    });
+  }
+});
+var executorOperationActionSuccessV1Schema = exports_external.discriminatedUnion("action", [
+  exports_external.object({
+    protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+    action: exports_external.literal("dispatch"),
+    outcome: executorAttemptOutcomeV1Schema
+  }),
+  exports_external.object({
+    protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+    action: exports_external.literal("cancel"),
+    response: executorOperationCancelResponseV1Schema
+  }),
+  exports_external.object({
+    protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+    action: exports_external.literal("lookup_attempt_outcome"),
+    response: executorAttemptOutcomeLookupResponseV1Schema
+  }),
+  exports_external.object({
+    protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+    action: exports_external.literal("advance_turn_fence"),
+    response: executorAdvanceTurnFenceResponseV1Schema
+  })
+]);
+var executorOperationActionResultV1Schema = exports_external.union([
+  executorOperationActionSuccessV1Schema,
+  executorActionRejectionV1Schema
+]);
+var executorWorkspaceActionFrameV1Schema = exports_external.object({
+  kind: exports_external.literal("executor_action"),
+  action: executorAuthorizedOperationActionV1Schema
+}).superRefine((frame, context) => {
+  checkExecutionTransport(frame.action.request, "rivet", context, ["action", "request"]);
+});
+var executorWorkspaceActionResultFrameV1Schema = exports_external.object({
+  kind: exports_external.literal("executor_action_result"),
+  result: executorOperationActionResultV1Schema
+}).superRefine((frame, context) => {
+  if ("correlation" in frame.result) {
+    if (frame.result.correlation.kind === "exact") {
+      checkExecutionTransport(frame.result.correlation, "rivet", context, ["result"]);
+    }
+  } else if ("outcome" in frame.result) {
+    checkExecutionTransport(frame.result.outcome, "rivet", context, ["result"]);
+  } else if ("response" in frame.result) {
+    checkExecutionTransport(frame.result.response, "rivet", context, ["result"]);
+  }
+});
+var rivetExecutorActionEnvelopeSchema = exports_external.object({
+  name: boundedIdentity,
+  args: exports_external.array(exports_external.unknown()).max(8)
+});
+var rivetExecutorActionFrameV1Schema = exports_external.discriminatedUnion("name", [
+  exports_external.object({ name: exports_external.literal("allocate"), args: exports_external.tuple([rivetExecutorAllocationRequestV1Schema]) }),
+  exports_external.object({ name: exports_external.literal("negotiate"), args: exports_external.tuple([executorOperationNegotiationRequestV1Schema]) }),
+  exports_external.object({ name: exports_external.literal("dispatch"), args: exports_external.tuple([executorAuthorizedOperationActionV1Schema]) }),
+  exports_external.object({ name: exports_external.literal("cancel"), args: exports_external.tuple([executorAuthorizedOperationActionV1Schema]) }),
+  exports_external.object({ name: exports_external.literal("lookupAttemptOutcome"), args: exports_external.tuple([executorAuthorizedOperationActionV1Schema]) }),
+  exports_external.object({ name: exports_external.literal("advanceTurnFence"), args: exports_external.tuple([executorAuthorizedOperationActionV1Schema]) }),
+  exports_external.object({ name: exports_external.literal("status"), args: exports_external.tuple([executorTargetStatusRequestV1Schema]) })
+]).superRefine((frame, context) => {
+  switch (frame.name) {
+    case "dispatch":
+    case "cancel":
+    case "lookupAttemptOutcome":
+    case "advanceTurnFence":
+      checkExecutionTransport(frame.args[0].request, "rivet", context, ["args", 0, "request"]);
+      if (frame.name === "dispatch" && frame.args[0].request.action !== "dispatch" || frame.name === "cancel" && frame.args[0].request.action !== "cancel" || frame.name === "lookupAttemptOutcome" && frame.args[0].request.action !== "lookup_attempt_outcome" || frame.name === "advanceTurnFence" && frame.args[0].request.action !== "advance_turn_fence") {
+        context.addIssue({
+          code: "custom",
+          path: ["args", 0, "request", "action"],
+          message: "Rivet action name must match the authorized Operation action"
+        });
+      }
+      break;
+    case "allocate":
+    case "negotiate":
+    case "status":
+      break;
+  }
+});
+var RIVET_CONTROL_ACTION_NAMES = new Set([
+  "allocate",
+  "negotiate",
+  "status"
+]);
+var rivetExecutorActionSuccessResultFrameV1Schema = exports_external.discriminatedUnion("name", [
+  exports_external.object({ name: exports_external.literal("allocate"), result: rivetExecutorAllocationResponseV1Schema }),
+  exports_external.object({ name: exports_external.literal("negotiate"), result: executorOperationNegotiationResponseV1Schema }),
+  exports_external.object({ name: exports_external.literal("dispatch"), result: executorAttemptOutcomeV1Schema }),
+  exports_external.object({ name: exports_external.literal("cancel"), result: executorOperationCancelResponseV1Schema }),
+  exports_external.object({ name: exports_external.literal("lookupAttemptOutcome"), result: executorAttemptOutcomeLookupResponseV1Schema }),
+  exports_external.object({ name: exports_external.literal("advanceTurnFence"), result: executorAdvanceTurnFenceResponseV1Schema }),
+  exports_external.object({ name: exports_external.literal("status"), result: executorTargetStatusResponseV1Schema })
+]);
+var rivetExecutorActionRejectionResultFrameV1Schema = exports_external.object({
+  name: boundedIdentity,
+  result: executorActionRejectionV1Schema
+}).superRefine((frame, context) => {
+  const expectedName = frame.result.action === "lookup_attempt_outcome" ? "lookupAttemptOutcome" : frame.result.action === "advance_turn_fence" ? "advanceTurnFence" : frame.result.action === "unknown" ? frame.result.receivedAction : frame.result.action;
+  if (frame.name !== expectedName) {
+    context.addIssue({
+      code: "custom",
+      path: ["name"],
+      message: "Rivet result name must match the rejected Operation action"
+    });
+  }
+});
+var rivetExecutorActionResultFrameV1Schema = exports_external.union([
+  rivetExecutorActionSuccessResultFrameV1Schema,
+  rivetExecutorActionRejectionResultFrameV1Schema
+]).superRefine((frame, context) => {
+  if ("correlation" in frame.result) {
+    if (frame.result.correlation.kind === "exact") {
+      checkExecutionTransport(frame.result.correlation, "rivet", context, ["result", "correlation"]);
+    }
+    return;
+  }
+  if (!("operation" in frame.result))
+    return;
+  switch (frame.name) {
+    case "dispatch":
+    case "cancel":
+    case "lookupAttemptOutcome":
+    case "advanceTurnFence":
+      checkExecutionTransport(frame.result, "rivet", context, ["result"]);
+      break;
+    case "allocate":
+    case "negotiate":
+    case "status":
+      break;
+  }
+});
+var desktopExecutorOperationHelloV1Schema = exports_external.object({
+  protocolVersions: executorContractVersionRangeSchema,
+  primitiveContractVersions: executorContractVersionRangeSchema,
+  capabilities: exports_external.array(exports_external.string()),
+  threadId: executorThreadIdSchema,
+  ownerUserId: executorUserIdSchema,
+  target: exports_external.object({
+    ...executorTargetIdentitySchema.shape,
+    ...executorTargetScopeIdentitySchema.shape
+  })
+});
+var desktopExecutorOperationHelloAckV1Schema = exports_external.discriminatedUnion("status", [
+  exports_external.object({
+    status: exports_external.literal("negotiated"),
+    protocolVersion: exports_external.literal(EXECUTOR_OPERATION_PROTOCOL_VERSION),
+    primitiveContractVersion: exports_external.literal(EXECUTOR_CONTRACT_VERSION),
+    target: exports_external.object({
+      ...executorTargetIdentitySchema.shape,
+      ...executorTargetScopeIdentitySchema.shape
+    })
+  }),
+  exports_external.object({
+    status: exports_external.literal("rejected"),
+    reason: exports_external.enum([
+      "version_no_overlap",
+      "primitive_version_no_overlap",
+      "missing_capability",
+      "target_mismatch",
+      "scope_mismatch",
+      "owner_mismatch"
+    ])
+  })
+]);
+var desktopExecutorOperationFrameV1Schema = exports_external.discriminatedUnion("kind", [
+  exports_external.object({ kind: exports_external.literal("operation_hello"), hello: desktopExecutorOperationHelloV1Schema }),
+  exports_external.object({ kind: exports_external.literal("operation_hello_ack"), hello: desktopExecutorOperationHelloAckV1Schema }),
+  exports_external.object({ kind: exports_external.literal("operation_request"), request: executorOperationDispatchRequestV1Schema }),
+  exports_external.object({ kind: exports_external.literal("operation_cancel"), request: executorOperationCancelRequestV1Schema }),
+  exports_external.object({ kind: exports_external.literal("operation_lookup"), request: executorAttemptOutcomeLookupRequestV1Schema }),
+  exports_external.object({ kind: exports_external.literal("operation_advance_fence"), request: executorAdvanceTurnFenceRequestV1Schema }),
+  exports_external.object({ kind: exports_external.literal("operation_outcome"), outcome: executorAttemptOutcomeV1Schema }),
+  exports_external.object({ kind: exports_external.literal("operation_cancel_ack"), response: executorOperationCancelResponseV1Schema }),
+  exports_external.object({ kind: exports_external.literal("operation_lookup_result"), response: executorAttemptOutcomeLookupResponseV1Schema }),
+  exports_external.object({ kind: exports_external.literal("operation_advance_fence_ack"), response: executorAdvanceTurnFenceResponseV1Schema }),
+  exports_external.object({ kind: exports_external.literal("operation_rejected"), rejection: executorActionRejectionV1Schema })
+]).superRefine((frame, context) => {
+  switch (frame.kind) {
+    case "operation_hello":
+    case "operation_hello_ack":
+      break;
+    case "operation_request":
+    case "operation_cancel":
+    case "operation_lookup":
+    case "operation_advance_fence":
+      checkExecutionTransport(frame.request, "desktop", context, ["request"]);
+      break;
+    case "operation_outcome":
+      checkExecutionTransport(frame.outcome, "desktop", context, ["outcome"]);
+      break;
+    case "operation_cancel_ack":
+    case "operation_lookup_result":
+    case "operation_advance_fence_ack":
+      checkExecutionTransport(frame.response, "desktop", context, ["response"]);
+      break;
+    case "operation_rejected":
+      if (frame.rejection.correlation.kind === "exact") {
+        checkExecutionTransport(frame.rejection.correlation, "desktop", context, ["rejection"]);
+      }
+      break;
+  }
+});
+function checkExecutionTransport(value, transport, context, path) {
+  if (value.executionSite?.kind !== transport) {
+    context.addIssue({
+      code: "custom",
+      path: [...path, "executionSite", "kind"],
+      message: `${transport} frames require a ${transport} execution site`
+    });
+  }
+  if (transport === "rivet" && value.operation.organizationId === null) {
+    context.addIssue({
+      code: "custom",
+      path: [...path, "operation", "organizationId"],
+      message: "Rivet Operations must be organization-scoped"
+    });
   }
 }
 // ../contracts/src/dockFork.ts
@@ -21202,9 +22321,23 @@ var askThreadsRequestSchema = exports_external.object({
   context_items: exports_external.array(askThreadsContextItemSchema).max(20).optional().describe("Visible exploration labels available to resolve a scoped follow-up")
 });
 var loreThreadMessageTextSchema = exports_external.string().trim().min(1).max(20000);
+var MAX_PROMPT_ATTACHMENTS = 4;
+var MAX_PROMPT_ATTACHMENT_TOTAL_BYTES = 5000000;
+var loreThreadMessageAttachmentSchema = exports_external.object({
+  name: exports_external.string().min(1).max(255),
+  media_type: exports_external.enum(["image/png", "image/jpeg", "image/webp"]),
+  digest: exports_external.string().regex(/^[0-9a-f]{64}$/, "digest must be a lowercase hex SHA-256 digest"),
+  byte_length: exports_external.number().int().positive().max(MAX_PROMPT_ATTACHMENT_TOTAL_BYTES),
+  width: exports_external.number().int().positive(),
+  height: exports_external.number().int().positive(),
+  artifact_ref: exports_external.string().min(1).max(2048)
+}).strict();
 var loreThreadMessageRequestSchema = askThreadsRequestSchema.omit({ question: true }).extend({
-  message: loreThreadMessageTextSchema
-});
+  message: exports_external.string().trim().max(20000),
+  attachments: exports_external.array(loreThreadMessageAttachmentSchema).max(MAX_PROMPT_ATTACHMENTS).optional()
+}).refine((body) => body.message.length > 0 || (body.attachments?.length ?? 0) > 0, {
+  message: "A message needs text or at least one attachment"
+}).refine((body) => (body.attachments ?? []).reduce((sum, attachment) => sum + attachment.byte_length, 0) <= MAX_PROMPT_ATTACHMENT_TOTAL_BYTES, { message: "Attachments exceed the per-message byte budget" });
 var askThreadsOutcomeClasses = [
   "served",
   "abstained",
@@ -21755,7 +22888,8 @@ var skillSummarySchema = exports_external.object({
   author_count: exports_external.number().int().nonnegative(),
   first_used_at: exports_external.string().nullable(),
   last_used_at: exports_external.string().nullable(),
-  workbench_enabled: exports_external.boolean().optional()
+  workbench_enabled: exports_external.boolean().optional(),
+  workbench_turn_count: exports_external.number().int().nonnegative().optional()
 });
 var skillIndexResponseSchema = exports_external.object({
   type: exports_external.literal("list"),
@@ -21845,7 +22979,8 @@ var skillDetailResponseSchema = exports_external.object({
   share_token: exports_external.string().nullable(),
   viewer_access: exports_external.enum(["owner", "workspace", "grant", "public"]).optional(),
   share_count: exports_external.number().int().nonnegative().optional(),
-  workbench_enabled: exports_external.boolean().optional()
+  workbench_enabled: exports_external.boolean().optional(),
+  workbench_turn_count: exports_external.number().int().nonnegative().optional()
 });
 var workbenchSkillBindingSchema = exports_external.object({
   binding_id: exports_external.string(),
@@ -22006,10 +23141,13 @@ var sharedSkillTemplateSchema = exports_external.object({
   is_templatized: exports_external.literal(true)
 });
 var artifactSourceSchema = exports_external.enum(["cowork", "native"]);
-var artifactCreationOriginSchema = exports_external.enum(["deliberate_output", "browser_capture"]);
+var artifactCreationOriginSchema = exports_external.enum(["deliberate_output", "browser_capture", "prompt_attachment"]);
 var artifactKindSchema = exports_external.enum(["upload", "output", "workbench_output"]);
 var coworkArtifactKindSchema = artifactKindSchema.extract(["upload", "output"]);
 var artifactVisibilitySchema = exports_external.enum(["private", "workspace", "public"]);
+var setArtifactVisibilityRequestSchema = exports_external.object({
+  visibility: artifactVisibilitySchema
+});
 var artifactAuthorSchema = exports_external.object({
   id: exports_external.string(),
   display_name: exports_external.string(),
@@ -22023,6 +23161,12 @@ var listArtifactsQuerySchema = exports_external.object({
   after: exports_external.string().min(1).optional().describe("Artifact ID cursor. Returns artifacts older than this cursor in descending created_at order.")
 });
 var documentFormatSchema = exports_external.enum(["lore_document_v1"]);
+var documentRejectionSchema = exports_external.object({
+  reason: exports_external.string().describe("Why the document cannot be represented, in a sentence an agent can act on."),
+  construct: exports_external.string().describe('The first offending construct, e.g. "<script>", "@import", "style".'),
+  line: exports_external.number().int().nullable().describe("1-based line in the submitted bytes, or null."),
+  column: exports_external.number().int().nullable().describe("1-based column in the submitted bytes, or null.")
+});
 var artifactSummarySchema = exports_external.object({
   id: exports_external.string(),
   thread_id: exports_external.string(),
@@ -22033,6 +23177,7 @@ var artifactSummarySchema = exports_external.object({
   file_name: exports_external.string(),
   mime_type: exports_external.string().nullable(),
   document_format: documentFormatSchema.nullable().describe("The document class these bytes conform to, or null when the artifact is not a document."),
+  document_rejection: documentRejectionSchema.nullable().optional().describe("Why these bytes declared a document class but could not be stored as one, or null when they never claimed to be a document or are a valid one."),
   size_in_bytes: exports_external.number().int().nonnegative().nullable(),
   content_hash: exports_external.string().nullable(),
   visibility: artifactVisibilitySchema,
@@ -22091,7 +23236,11 @@ var artifactDetailResponseSchema = artifactSummarySchema.extend({
   preview_url: exports_external.string().nullable().describe("Presigned, time-limited URL that serves the bytes inline for embedding (iframe/img). null when the type is not previewable."),
   provenance: artifactOutputProvenanceSchema.nullable(),
   current_version_id: exports_external.string().nullable().describe("The version id these bytes are, or null when the artifact has no version history. Pass it as `base_version_id` when saving an edit."),
-  document_content: exports_external.string().nullable().describe("A Lore Document's stored canonical HTML, inline. null for every artifact that is not a document, and for a document whose bytes could not be read.")
+  current_version_ordinal: exports_external.number().int().positive().nullable().describe("The current version's position in the history (1 is the first save), or null when the artifact has no version history."),
+  current_version_saved_at: exports_external.string().nullable().describe("ISO-8601 time the current version was written, or null when the artifact has no version history."),
+  document_content: exports_external.string().nullable().describe("A Lore Document's stored canonical HTML, inline. null for every artifact that is not a document, and for a document whose bytes could not be read."),
+  artifact_visibility: artifactVisibilitySchema.describe("The artifact's own published visibility \u2014 what `setArtifactVisibility` edits."),
+  thread_visibility: artifactVisibilitySchema.describe("The owning thread's visibility, which always applies in addition to the artifact's own.")
 });
 var backfillArtifactFileSchema = exports_external.object({
   kind: coworkArtifactKindSchema,
@@ -22130,7 +23279,7 @@ var commitBackfillArtifactsResponseSchema = exports_external.object({
   thread_id: exports_external.string(),
   created: exports_external.number().int().nonnegative().describe("Number of artifact rows created or updated.")
 });
-var shareArtifactRequestSchema = exports_external.object({
+var publishArtifactRequestSchema = exports_external.object({
   harness: exports_external.string().describe("Harness of the source session, e.g. claudeCode"),
   harness_internal_id: exports_external.string().describe("Source session id (threads.harness_internal_id)"),
   file_name: exports_external.string().min(1).describe("Artifact file name, e.g. dashboard.html"),
@@ -22138,10 +23287,21 @@ var shareArtifactRequestSchema = exports_external.object({
   content_type: exports_external.string().nullable().optional().describe("MIME type, e.g. text/html"),
   creation_origin: artifactCreationOriginSchema.optional()
 });
-var shareArtifactResponseSchema = exports_external.object({
+var publishArtifactResponseSchema = exports_external.object({
   artifact_id: exports_external.string(),
   thread_id: exports_external.string(),
   web_url: exports_external.string().describe("Lore web URL that opens this artifact for the team.")
+});
+var uploadThreadAttachmentRequestSchema = exports_external.object({
+  file_name: exports_external.string().min(1).max(255).describe("The person's file name, carried on the message descriptor \u2014 not the stored name."),
+  media_type: exports_external.enum(["image/png", "image/jpeg", "image/webp"]),
+  content_base64: exports_external.string().min(1).describe("Image bytes, base64-encoded. Max 5 MB decoded (the per-message attachment budget).")
+});
+var uploadThreadAttachmentResponseSchema = exports_external.object({
+  artifact_id: exports_external.string(),
+  artifact_ref: exports_external.string().describe("Lore web URL reference (\u2026/artifacts/workspace?a=art_\u2026) to carry on the message attachment descriptor."),
+  digest: exports_external.string().describe("Lowercase hex SHA-256 of the stored bytes, server-derived."),
+  byte_length: exports_external.number().int().positive().describe("Decoded byte length, server-derived.")
 });
 var recordDockOutputRequestSchema = exports_external.object({
   harness: exports_external.string().describe("Harness of the source session, e.g. dock"),
@@ -22159,12 +23319,6 @@ var recordDockOutputResponseSchema = exports_external.object({
   version_created: exports_external.boolean().describe("False when the bytes matched the current version: no upload, no new version."),
   version_ordinal: exports_external.number().int().positive().describe("Ordinal of the current version after this call \u2014 a number a person can say out loud."),
   web_url: exports_external.string().describe("Lore web URL that opens this Output for the team (the mirrored artifact page).")
-});
-var documentRejectionSchema = exports_external.object({
-  reason: exports_external.string().describe("Why the document cannot be represented, in a sentence an agent can act on."),
-  construct: exports_external.string().describe('The first offending construct, e.g. "<script>", "@import", "style".'),
-  line: exports_external.number().int().nullable().describe("1-based line in the submitted bytes, or null."),
-  column: exports_external.number().int().nullable().describe("1-based column in the submitted bytes, or null.")
 });
 var recordDockOutputErrorResponseSchema = errorSchema7.extend({
   document_rejection: documentRejectionSchema.optional()
@@ -22212,6 +23366,34 @@ var dockOutputSummarySchema = exports_external.object({
 var listDockOutputsResponseSchema = exports_external.object({
   objects: exports_external.array(dockOutputSummarySchema),
   has_more: exports_external.boolean().describe("True when the thread has more Outputs than this bounded read returned. There is no cursor: the cap is a ceiling, not a page size, and demoted Outputs are included in it \u2014 so a demote-heavy thread needs this flag to say the tail was dropped rather than hiding it.")
+});
+var dockOutputVersionOriginSchema = exports_external.enum(["model", "human"]).describe("Who authored the bytes: the model, or a person who typed them.");
+var dockOutputVersionSummarySchema = exports_external.object({
+  id: exports_external.string().describe("Version id, e.g. dovr_... \u2014 the value a document save passes as base_version_id."),
+  ordinal: exports_external.number().int().positive().describe("The small, monotonic number a person can say out loud; never reused."),
+  origin: dockOutputVersionOriginSchema,
+  editor: exports_external.object({ id: exports_external.string(), display_name: exports_external.string().nullable() }).nullable().describe("Who typed this version's bytes. null for model versions, and for human versions whose editor's account is gone."),
+  created_at: exports_external.string(),
+  size_in_bytes: exports_external.number().int().nonnegative(),
+  mime_type: exports_external.string().nullable(),
+  is_current: exports_external.boolean().describe("True for the version the Output currently points at."),
+  content_reclaimed: exports_external.boolean().describe("True when retention reclaimed the bytes: the version existed, its record remains, its content is gone. Distinct from a version that never existed, which is a 404.")
+});
+var listDockOutputVersionsResponseSchema = exports_external.object({
+  output: exports_external.object({
+    id: exports_external.string(),
+    thread_id: exports_external.string(),
+    path: exports_external.string(),
+    title: exports_external.string(),
+    current_version_id: exports_external.string()
+  }),
+  objects: exports_external.array(dockOutputVersionSummarySchema).describe("Newest first. Pruned versions are flagged, never omitted."),
+  has_more: exports_external.boolean().describe("True when the history is longer than this bounded read returned.")
+});
+var dockOutputVersionContentResponseSchema = dockOutputVersionSummarySchema.extend({
+  content: exports_external.string().nullable().describe("The version bytes inline, for text content the API can read. null when the content was reclaimed, is binary, or could not be read \u2014 the metadata around it still answers what the version was."),
+  download_url: exports_external.string().nullable().describe("Presigned, time-limited URL for the version bytes. null when the content was reclaimed."),
+  download_url_expires_at: exports_external.string().nullable().describe("ISO-8601 expiry for download_url.")
 });
 var skillInstallationSkillSchema = exports_external.object({
   id: exports_external.string(),
@@ -23560,7 +24742,7 @@ var apiContract = c7.router({
     path: "/skills/:id/workbench-binding",
     pathParams: exports_external.object({ id: exports_external.string().min(1) }),
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
-    body: exports_external.object({}).optional(),
+    body: exports_external.object({}).nullish(),
     responses: {
       200: workbenchSkillBindingSchema,
       401: errorSchema7,
@@ -23574,7 +24756,7 @@ var apiContract = c7.router({
     path: "/skills/:id/workbench-binding",
     pathParams: exports_external.object({ id: exports_external.string().min(1) }),
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
-    body: exports_external.object({}).optional(),
+    body: exports_external.object({}).nullish(),
     responses: {
       200: exports_external.object({ disabled: exports_external.literal(true) }),
       401: errorSchema7
@@ -23855,21 +25037,57 @@ var apiContract = c7.router({
     },
     summary: "Promote backfilled artifact bytes into artifact rows"
   },
-  shareArtifact: {
+  publishArtifact: {
     method: "POST",
     path: "/artifacts/share",
     headers: exports_external.object({
       authorization: exports_external.string().min(1).optional()
     }),
-    body: shareArtifactRequestSchema,
+    body: publishArtifactRequestSchema,
     responses: {
-      200: shareArtifactResponseSchema,
+      200: publishArtifactResponseSchema,
       400: errorSchema7,
       401: errorSchema7,
       404: errorSchema7,
       413: errorSchema7
     },
     summary: "Publish a live local artifact to its session thread and get a shareable web URL"
+  },
+  setArtifactVisibility: {
+    method: "PUT",
+    path: "/artifacts/:id/visibility",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1).describe("Stable artifact ID, e.g. art_...")
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: setArtifactVisibilityRequestSchema,
+    responses: {
+      200: artifactDetailResponseSchema,
+      401: errorSchema7,
+      403: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "Set an artifact's own visibility (author only); the thread's visibility always still applies"
+  },
+  uploadThreadAttachment: {
+    method: "POST",
+    path: "/threads/:threadId/attachments",
+    pathParams: exports_external.object({ threadId: exports_external.string() }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: uploadThreadAttachmentRequestSchema,
+    responses: {
+      200: uploadThreadAttachmentResponseSchema,
+      400: errorSchema7,
+      401: errorSchema7,
+      403: errorSchema7,
+      404: errorSchema7,
+      413: errorSchema7
+    },
+    summary: "Upload one image for a Lore thread message attachment and get its artifact reference"
   },
   recordDockOutput: {
     method: "POST",
@@ -23908,6 +25126,39 @@ var apiContract = c7.router({
       401: errorSchema7
     },
     summary: "List a visible thread's durable Outputs, newest-updated first, demoted ones flagged"
+  },
+  listDockOutputVersions: {
+    method: "GET",
+    path: "/dock/outputs/:id/versions",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1).describe("Output id, e.g. dout_...")
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    responses: {
+      200: listDockOutputVersionsResponseSchema,
+      401: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "List one Output's version history, newest first, pruned versions flagged rather than omitted"
+  },
+  getDockOutputVersion: {
+    method: "GET",
+    path: "/dock/outputs/:id/versions/:ordinal",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1).describe("Output id, e.g. dout_..."),
+      ordinal: exports_external.coerce.number().int().positive().describe("The version's ordinal.")
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    responses: {
+      200: dockOutputVersionContentResponseSchema,
+      401: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "Read one version of an Output: inline text content when readable, plus a presigned download URL"
   },
   getSkillPackage: {
     method: "GET",
@@ -24307,6 +25558,9 @@ var apiContract = c7.router({
     path: "/threads/:id/preview",
     pathParams: exports_external.object({
       id: exports_external.string().min(1)
+    }),
+    query: exports_external.object({
+      viewer_only: exports_external.union([exports_external.boolean(), exports_external.stringbool()]).optional()
     }),
     headers: exports_external.object({
       authorization: exports_external.string().min(1).optional()
@@ -24768,22 +26022,6 @@ var apiContract = c7.router({
       403: errorSchema7
     },
     summary: "List every organization with member and thread counts. Tanagram admins only."
-  },
-  adminEntityGraph: {
-    method: "GET",
-    path: "/admin/organizations/:organizationId/entity-graph",
-    pathParams: adminEntityGraphPathParamsSchema,
-    query: adminEntityGraphQuerySchema,
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    responses: {
-      200: adminEntityGraphResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
-    },
-    summary: "Entity graph (persons, foot guns, decisions, and optionally threads) for one organization. Tanagram admins only."
   },
   adminListUsers: {
     method: "GET",
