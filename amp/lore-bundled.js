@@ -11800,7 +11800,7 @@ function finalize(ctx, schema) {
     result.$schema = "http://json-schema.org/draft-07/schema#";
   } else if (ctx.target === "draft-04") {
     result.$schema = "http://json-schema.org/draft-04/schema#";
-  } else if (ctx.target === "openapi-3.0") {}
+  } else if (ctx.target === "openapi-3.0") {} else {}
   if (ctx.external?.uri) {
     const id = ctx.external.registry.get(schema)?.id;
     if (!id)
@@ -12044,7 +12044,7 @@ var literalProcessor = (schema, ctx, json, _params) => {
     if (val === undefined) {
       if (ctx.unrepresentable === "throw") {
         throw new Error("Literal `undefined` cannot be represented in JSON Schema");
-      }
+      } else {}
     } else if (typeof val === "bigint") {
       if (ctx.unrepresentable === "throw") {
         throw new Error("BigInt literals cannot be represented in JSON Schema");
@@ -20389,7 +20389,6 @@ var organizationIdSchema = typeIdSchema("org");
 var executorUserIdSchema = typeIdSchema("user");
 var executorThreadIdSchema = typeIdSchema("th");
 var executorTurnIdSchema = typeIdSchema("tb");
-var executorModelStepIdSchema = typeIdSchema("dms");
 var executorEffectIdSchema = typeIdSchema("dfx");
 var executorEffectAttemptIdSchema = typeIdSchema("dfxa");
 var executorTargetIdSchema = typeIdSchema("etg");
@@ -20729,38 +20728,6 @@ function checkOperationEffectCardinality(operation, context) {
     });
   }
 }
-
-// ../contracts/src/wb-executor/operationRequest.ts
-var executorOperationAffinitySchema = exports_external.discriminatedUnion("kind", [
-  exports_external.strictObject({ kind: exports_external.literal("unbound") }),
-  exports_external.strictObject({
-    kind: exports_external.literal("hard"),
-    ...executorTargetIdentitySchema.shape,
-    ...executorTargetScopeIdentitySchema.shape
-  })
-]);
-var executorOperationRequestRecordV1Schema = exports_external.strictObject({
-  schemaVersion: exports_external.literal(1),
-  operationRequestId: executorOperationRequestIdSchema,
-  organizationId: organizationIdSchema.nullable(),
-  requestingUserId: executorUserIdSchema,
-  threadId: executorThreadIdSchema,
-  turnId: executorTurnIdSchema,
-  modelStepId: executorModelStepIdSchema,
-  toolCallId: boundedIdentity.nullable(),
-  operationSequence: nonNegativeInteger,
-  purpose: exports_external.enum(["model_tool", "support", "verification", "reconciliation"]),
-  primitive: executorTargetPrimitiveSchema,
-  executionClass: executorExecutionClassSchema,
-  argumentDigest: executorArgumentDigestSchema,
-  affinity: executorOperationAffinitySchema,
-  resolutionStatus: exports_external.enum(["awaiting_target", "bound", "not_dispatched"]),
-  createdAt: exports_external.string().datetime()
-}).superRefine((request, context) => {
-  if (request.purpose === "model_tool" && request.toolCallId === null) {
-    context.addIssue({ code: "custom", path: ["toolCallId"], message: "model Tool Operations require toolCallId" });
-  }
-});
 // ../contracts/src/wb-executor/attempt.ts
 var EXECUTOR_CAPABILITY_TYPE = "lore-executor-capability+jwt";
 var EXECUTOR_CAPABILITY_MAX_TTL_SECONDS = 60;
