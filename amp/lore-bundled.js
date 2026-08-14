@@ -22234,34 +22234,6 @@ var threadDecisionListResponseSchema = exports_external.object({
   objects: exports_external.array(threadDecisionResourceSchema),
   block_statuses: exports_external.array(threadDecisionBlockStatusSchema)
 });
-var decisionGraphQuerySchema = exports_external.object({
-  since: exports_external.coerce.number().int().describe("Inclusive start of the activity range, as a Unix timestamp in seconds."),
-  until: exports_external.coerce.number().int().describe("Exclusive end of the activity range, as a Unix timestamp in seconds.")
-});
-var decisionGraphDecisionSchema = exports_external.object({
-  id: exports_external.string().min(1),
-  kind: threadDecisionKindSchema,
-  summary: exports_external.string().min(1),
-  block_id: exports_external.string().min(1),
-  created_at: exports_external.string()
-});
-var decisionGraphThreadSchema = exports_external.object({
-  id: exports_external.string().min(1),
-  title: exports_external.string(),
-  last_activity_at: exports_external.string(),
-  decisions: exports_external.array(decisionGraphDecisionSchema)
-});
-var decisionGraphAuthorSchema = exports_external.object({
-  author_id: exports_external.string().min(1),
-  display_name: exports_external.string(),
-  avatar_url: exports_external.string().nullable(),
-  threads: exports_external.array(decisionGraphThreadSchema)
-});
-var decisionGraphResponseSchema = exports_external.object({
-  type: exports_external.literal("decision_graph"),
-  truncated: exports_external.boolean(),
-  authors: exports_external.array(decisionGraphAuthorSchema)
-});
 var forkThreadRequestSchema = exports_external.object({
   forker_intent: exports_external.string().min(1).max(2000).describe("What the forking user wants to do next with this session")
 });
@@ -25370,19 +25342,6 @@ var apiContract = c7.router({
       404: errorSchema7
     },
     summary: "List AI-extracted user decisions for a thread, in chronological order"
-  },
-  getDecisionGraph: {
-    method: "GET",
-    path: "/decisions/graph",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    query: decisionGraphQuerySchema,
-    responses: {
-      200: decisionGraphResponseSchema,
-      401: errorSchema7
-    },
-    summary: "Visible threads active in a date range with their extracted decisions, grouped by thread author"
   },
   updateThread: {
     method: "PATCH",
