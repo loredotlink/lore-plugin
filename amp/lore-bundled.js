@@ -19080,169 +19080,9 @@ var referencesContract = c4.router({
   }
 });
 
-// ../contracts/src/quests.ts
+// ../contracts/src/search.ts
 var c5 = initContract();
 var errorSchema5 = exports_external.object({ message: exports_external.string() });
-var questIdSchema = exports_external.string().regex(/^quest_[0-9A-Za-z]{22}$/);
-var questStatusValues = ["active", "archived"];
-var questStatusSchema = exports_external.enum(questStatusValues);
-var questListObjectSchema = exports_external.object({
-  id: questIdSchema,
-  name: exports_external.string().min(1),
-  description: exports_external.string().nullable(),
-  status: questStatusSchema,
-  created_at: exports_external.string().datetime(),
-  updated_at: exports_external.string().datetime()
-});
-var questListResponseSchema = exports_external.object({
-  type: exports_external.literal("list"),
-  list_type: exports_external.literal("quest"),
-  objects: exports_external.array(questListObjectSchema)
-});
-var listQuestsQuerySchema = exports_external.object({
-  status: questStatusSchema.optional()
-});
-var createQuestRequestSchema = exports_external.object({
-  name: exports_external.string().trim().min(1).max(200),
-  description: exports_external.string().trim().max(1e4).optional()
-});
-var createQuestResponseSchema = exports_external.object({
-  id: questIdSchema,
-  created_at: exports_external.string().datetime()
-});
-var questCaptureFileKindValues = ["capture_markdown", "capture_screenshot"];
-var questCaptureFileKindSchema = exports_external.enum(questCaptureFileKindValues);
-var captureGroupIdSchema = exports_external.string().min(1).max(40);
-var questCaptureUploadRequestSchema = exports_external.object({
-  capture_group_id: captureGroupIdSchema.describe("Client-minted id shared by the md + png rows of one capture"),
-  quest_id: questIdSchema,
-  thread_id: exports_external.string().min(1).nullable().optional().describe("The Lore thread (coding session) the capture was routed to, if any"),
-  file_kind: questCaptureFileKindSchema,
-  filename: exports_external.string().min(1),
-  md5: exports_external.string().min(1).describe("Raw hex MD5 of the file bytes"),
-  captured_at: exports_external.string().datetime(),
-  note: exports_external.string().max(2000).nullable().optional()
-});
-var questCaptureUploadResponseSchema = exports_external.object({
-  id: exports_external.string(),
-  capture_group_id: exports_external.string(),
-  presigned_url: exports_external.string().nullable(),
-  presigned_url_expires_at: exports_external.string().nullable(),
-  storage_url: exports_external.string(),
-  expected_md5: exports_external.string(),
-  error: exports_external.string().nullable()
-});
-var completeQuestCaptureRequestSchema = exports_external.object({
-  storage_url: exports_external.string().min(1)
-});
-var completeQuestCaptureResponseSchema = exports_external.object({
-  storage_url: exports_external.string(),
-  id: exports_external.string(),
-  capture_group_id: exports_external.string(),
-  quest_id: questIdSchema,
-  thread_id: exports_external.string().nullable()
-});
-var questCaptureFileSchema = exports_external.object({
-  id: exports_external.string(),
-  file_kind: questCaptureFileKindSchema,
-  storage_url: exports_external.string(),
-  size_in_bytes: exports_external.number().int().nonnegative().nullable(),
-  download_url: exports_external.string().nullable()
-});
-var questCaptureGroupSchema = exports_external.object({
-  capture_group_id: exports_external.string(),
-  quest_id: questIdSchema,
-  thread_id: exports_external.string().nullable(),
-  harness: exports_external.string().nullable(),
-  harness_internal_id: exports_external.string().nullable(),
-  note: exports_external.string().nullable(),
-  captured_at: exports_external.string().datetime(),
-  files: exports_external.array(questCaptureFileSchema)
-});
-var listQuestCapturesQuerySchema = exports_external.object({
-  thread_id: exports_external.string().min(1).optional().describe("Only captures routed to this thread"),
-  before: exports_external.string().min(1).optional().describe("capture_group_id cursor (exclusive, newer-than)"),
-  after: exports_external.string().min(1).optional().describe("capture_group_id cursor (exclusive, older-than)")
-});
-var questCaptureListResponseSchema = exports_external.object({
-  type: exports_external.literal("list"),
-  list_type: exports_external.literal("quest_capture"),
-  has_more: exports_external.boolean(),
-  objects: exports_external.array(questCaptureGroupSchema)
-});
-var updateQuestCaptureRequestSchema = exports_external.object({
-  thread_id: exports_external.string().min(1).nullable().describe("Reassign the capture to this thread; null unassigns it")
-});
-var questsContract = c5.router({
-  listQuests: {
-    method: "GET",
-    path: "/quests",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    query: listQuestsQuerySchema,
-    responses: {
-      200: questListResponseSchema,
-      401: errorSchema5
-    },
-    summary: "List the authenticated user\u2019s quests"
-  },
-  createQuest: {
-    method: "POST",
-    path: "/quests",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: createQuestRequestSchema,
-    responses: {
-      201: createQuestResponseSchema,
-      401: errorSchema5,
-      403: errorSchema5,
-      409: errorSchema5,
-      422: errorSchema5
-    },
-    summary: "Create a quest owned by the authenticated user"
-  },
-  listQuestCaptures: {
-    method: "GET",
-    path: "/quests/:questId/captures",
-    pathParams: exports_external.object({
-      questId: questIdSchema
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    query: listQuestCapturesQuerySchema,
-    responses: {
-      200: questCaptureListResponseSchema,
-      401: errorSchema5,
-      404: errorSchema5
-    },
-    summary: "List the background agent\u2019s captures for a quest (author-only), with fresh presigned download URLs"
-  },
-  updateQuestCapture: {
-    method: "PATCH",
-    path: "/quest_captures/:captureGroupId",
-    pathParams: exports_external.object({
-      captureGroupId: exports_external.string().min(1)
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: updateQuestCaptureRequestSchema,
-    responses: {
-      200: questCaptureGroupSchema,
-      401: errorSchema5,
-      404: errorSchema5,
-      422: errorSchema5
-    },
-    summary: "Reassign a capture to a different coding session (thread), or unassign it"
-  }
-});
-
-// ../contracts/src/search.ts
-var c6 = initContract();
-var errorSchema6 = exports_external.object({ message: exports_external.string() });
 var globalSearchThreadResultSchema = exports_external.object({
   id: exports_external.string().min(1),
   title: exports_external.string(),
@@ -19271,7 +19111,7 @@ var globalSearchResponseSchema = exports_external.object({
 var globalSearchQuerySchema = exports_external.object({
   q: exports_external.string().trim().min(1).max(80)
 });
-var searchContract = c6.router({
+var searchContract = c5.router({
   globalSearch: {
     method: "GET",
     path: "/search",
@@ -19281,8 +19121,8 @@ var searchContract = c6.router({
     query: globalSearchQuerySchema,
     responses: {
       200: globalSearchResponseSchema,
-      401: errorSchema6,
-      422: errorSchema6
+      401: errorSchema5,
+      422: errorSchema5
     },
     summary: "Global navbar search. Threads and people are searched globally (subject to thread visibility); skills are scoped to the viewer workspace. Max 5 results per kind."
   }
@@ -21527,19 +21367,7 @@ var forkDockThreadResponseSchema = exports_external.object({
 
 // ../contracts/src/index.ts
 var defaultThreadFileParseSizeLimitInBytes = 50 * 1024 * 1024;
-var dockTurnToolSchema = exports_external.looseObject({
-  name: exports_external.string().min(1).max(128)
-}).describe("An Anthropic tool definition, passed through verbatim");
-var dockTurnMessageSchema = exports_external.looseObject({
-  role: exports_external.enum(["user", "assistant"]),
-  content: exports_external.unknown()
-}).describe("An Anthropic MessageParam, passed through verbatim");
-var dockTurnRequestSchema = exports_external.object({
-  system: exports_external.string().min(1).max(50000),
-  tools: exports_external.array(dockTurnToolSchema).max(64),
-  messages: exports_external.array(dockTurnMessageSchema).min(1).max(2000)
-});
-var c7 = initContract();
+var c6 = initContract();
 var publicEmailDomains = [
   "gmail.com",
   "googlemail.com",
@@ -21636,7 +21464,7 @@ var threadSummarySchema = exports_external.object({
 var threadDetailsSchema = threadSummarySchema.extend({
   messages: exports_external.array(messageSchema)
 });
-var errorSchema7 = exports_external.object({
+var errorSchema6 = exports_external.object({
   message: exports_external.string()
 });
 var demoNotSeededResponseSchema = exports_external.object({
@@ -21856,6 +21684,7 @@ var harnessSchema = exports_external.enum([
   "cursor",
   "cowork",
   "dock",
+  "workbench",
   "unspecified"
 ]);
 var transcriptUploadHarnessSchema = exports_external.enum([
@@ -22021,6 +21850,66 @@ var threadBlockCommentThreadBaseSchema = exports_external.object({
 });
 var threadBlockCommentThreadSchema = threadBlockCommentThreadBaseSchema.extend({
   comments: exports_external.array(threadBlockCommentSchema)
+});
+var loreDocumentTextAnchorSchema = exports_external.object({
+  target_kind: exports_external.literal("text"),
+  block_data_id: exports_external.string().min(1),
+  quote_exact: exports_external.string().min(1),
+  quote_prefix: exports_external.string().nullable(),
+  quote_suffix: exports_external.string().nullable(),
+  start_offset: exports_external.number().int().nonnegative(),
+  end_offset: exports_external.number().int().positive()
+}).refine((anchor) => anchor.end_offset > anchor.start_offset, {
+  message: "end_offset must be greater than start_offset",
+  path: ["end_offset"]
+});
+var loreDocumentBlockAnchorSchema = exports_external.object({
+  target_kind: exports_external.literal("block"),
+  block_data_id: exports_external.string().min(1)
+});
+var loreDocumentCommentAnchorSchema = exports_external.discriminatedUnion("target_kind", [
+  loreDocumentTextAnchorSchema,
+  loreDocumentBlockAnchorSchema
+]);
+var artifactCommentAuthorSchema = exports_external.object({
+  id: exports_external.string().min(1),
+  display_name: exports_external.string().min(1),
+  avatar_url: exports_external.string().nullable()
+});
+var artifactCommentSchema = exports_external.object({
+  id: exports_external.string().min(1),
+  author: artifactCommentAuthorSchema.nullable(),
+  created_at: exports_external.string().datetime(),
+  deleted_at: exports_external.string().datetime().nullable(),
+  content: exports_external.string()
+});
+var artifactCommentThreadSchema = exports_external.object({
+  id: exports_external.string().min(1),
+  artifact_id: exports_external.string().min(1),
+  created_at: exports_external.string().datetime(),
+  resolved_at: exports_external.string().datetime().nullable(),
+  anchor: loreDocumentCommentAnchorSchema.nullable(),
+  comments: exports_external.array(artifactCommentSchema)
+});
+var listArtifactCommentThreadsResponseSchema = exports_external.object({
+  comment_threads: exports_external.array(artifactCommentThreadSchema)
+});
+var createArtifactCommentThreadRequestSchema = exports_external.object({
+  content: exports_external.string().trim().min(1),
+  anchor: loreDocumentCommentAnchorSchema.nullable()
+});
+var createArtifactCommentRequestSchema = exports_external.object({
+  content: exports_external.string().trim().min(1)
+});
+var updateArtifactCommentRequestSchema = exports_external.object({
+  content: exports_external.string().trim().min(1)
+});
+var updateArtifactCommentThreadRequestSchema = exports_external.object({
+  resolved: exports_external.boolean()
+});
+var updateArtifactCommentThreadResponseSchema = exports_external.object({
+  id: exports_external.string().min(1),
+  resolved_at: exports_external.string().datetime().nullable()
 });
 var dockHostToolMarkerV1Schema = exports_external.object({
   version: exports_external.literal(1),
@@ -22628,8 +22517,7 @@ var completeUploadSessionResponseSchema = exports_external.object({
       exports_external.object({ kind: exports_external.literal("version"), skill: skillPackageVersionResourceSchema }),
       exports_external.object({ kind: exports_external.literal("proposal"), proposal: skillProposalResourceSchema })
     ])
-  })).optional(),
-  quest_captures: exports_external.array(completeQuestCaptureResponseSchema).optional()
+  })).optional()
 });
 var claudeCodeSyncStatusRequestSchema = exports_external.object({
   threads: exports_external.array(exports_external.object({
@@ -22690,8 +22578,7 @@ var uploadSessionResponseSchema = exports_external.object({
   substrate: exports_external.enum(["s3", "filesystem"]),
   status: exports_external.enum(["incomplete", "locked_for_parsing", "complete", "error"]),
   thread_files: exports_external.array(threadFileResponseSchema),
-  skill_packages: exports_external.array(skillPackageUploadResponseSchema).optional(),
-  quest_captures: exports_external.array(questCaptureUploadResponseSchema).optional()
+  skill_packages: exports_external.array(skillPackageUploadResponseSchema).optional()
 });
 var resolveThreadShareHighlightRequestSchema = exports_external.object({
   query: exports_external.string().min(1).describe("Natural-language description of the block or block range to highlight")
@@ -22707,8 +22594,20 @@ var requestThreadAccessResponseSchema = exports_external.object({
   status: exports_external.literal("ok")
 });
 var createThreadRequestSchema = exports_external.object({});
+var wbCoreActorDescriptorSchema = exports_external.object({
+  name: exports_external.literal("wbCore"),
+  key: exports_external.tuple([exports_external.string().min(1)]),
+  client: exports_external.object({
+    endpoint: exports_external.string().url(),
+    namespace: exports_external.string().min(1),
+    poolName: exports_external.string().min(1),
+    disableMetadataLookup: exports_external.literal(true),
+    gateway: exports_external.object({ skipReadyWait: exports_external.literal(true) })
+  })
+});
 var createThreadResponseSchema = exports_external.object({
-  thread_id: exports_external.string().min(1)
+  thread_id: exports_external.string().min(1),
+  actor: wbCoreActorDescriptorSchema
 });
 var updateThreadRequestSchema = exports_external.object({
   visibility: exports_external.enum(["private", "workspace", "public"]).optional(),
@@ -23222,6 +23121,8 @@ var publishArtifactRequestSchema = exports_external.object({
   harness: exports_external.string().describe("Harness of the source session, e.g. claudeCode"),
   harness_internal_id: exports_external.string().describe("Source session id (threads.harness_internal_id)"),
   file_name: exports_external.string().min(1).describe("Artifact file name, e.g. dashboard.html"),
+  path: exports_external.string().min(1).optional().describe("Root-relative path of the file inside the session folder, e.g. docs/plan.html. " + "When present and the bytes are a valid Lore Document, publish registers the " + "Workbench Output for this path instead of a bare catalog row, so the shared " + "link opens the editable document."),
+  title: exports_external.string().min(1).optional().describe("Display title for the Output when publish registers one; defaults to file_name."),
   content_base64: exports_external.string().min(1).describe("Artifact bytes, base64-encoded. Max 10 MiB decoded."),
   content_type: exports_external.string().nullable().optional().describe("MIME type, e.g. text/html"),
   creation_origin: artifactCreationOriginSchema.optional()
@@ -23259,9 +23160,22 @@ var recordDockOutputResponseSchema = exports_external.object({
   version_ordinal: exports_external.number().int().positive().describe("Ordinal of the current version after this call \u2014 a number a person can say out loud."),
   web_url: exports_external.string().describe("Lore web URL that opens this Output for the team (the mirrored artifact page).")
 });
-var recordDockOutputErrorResponseSchema = errorSchema7.extend({
+var recordDockOutputErrorResponseSchema = errorSchema6.extend({
   document_rejection: documentRejectionSchema.optional()
 });
+var judgeDockOutputPromotionRequestSchema = exports_external.object({
+  content_base64: exports_external.string().min(1).describe("The shown bytes, base64-encoded. Max 10 MiB decoded."),
+  content_type: exports_external.string().nullable().optional().describe("The MIME type the mirror will state for this path, e.g. text/html. A type that contradicts HTML (text/markdown) makes the verdict not_a_document, exactly as it would at the mirror.")
+});
+var judgeDockOutputPromotionResponseSchema = exports_external.discriminatedUnion("promotion", [
+  exports_external.object({ promotion: exports_external.literal("storable") }),
+  exports_external.object({ promotion: exports_external.literal("not_a_document") }),
+  exports_external.object({
+    promotion: exports_external.literal("rejected"),
+    document_rejection: documentRejectionSchema,
+    notice: exports_external.string().describe("The refusal as one sentence for the model, appended to the show Observation verbatim.")
+  })
+]);
 var saveDocumentArtifactRequestSchema = exports_external.object({
   content: exports_external.string().min(1).describe("The edited document as HTML. Canonicalized server-side before storage, so what comes back in `canonical_html` is what was stored and may differ from what was sent."),
   base_version_id: exports_external.string().min(1).describe("The version this edit was made against, e.g. dovr_... \u2014 the `current_version_id` the editor loaded. Re-checked under the write lock: if it no longer names the current version someone else wrote meanwhile and this save is refused with 409 rather than silently overwriting them.")
@@ -23272,10 +23186,10 @@ var saveDocumentArtifactResponseSchema = exports_external.object({
   no_op: exports_external.boolean().describe("True when the canonical form of `content` was identical to the current version: no version row, no upload, and `version_id` is unchanged. Cosmetic differences canonicalization undoes land here, which is why the editor cannot decide this for itself."),
   canonical_html: exports_external.string().describe("The bytes that are now stored. Returned so the editor can reconcile to the canonical form \u2014 freshly minted block ids, scoped styles \u2014 without a refetch.")
 });
-var saveDocumentArtifactConflictResponseSchema = errorSchema7.extend({
+var saveDocumentArtifactConflictResponseSchema = errorSchema6.extend({
   current_version_id: exports_external.string().describe("The version the document is actually at now; refetch and rebase on it.")
 });
-var saveDocumentArtifactRejectionResponseSchema = errorSchema7.extend({
+var saveDocumentArtifactRejectionResponseSchema = errorSchema6.extend({
   document_rejection: documentRejectionSchema
 });
 var setDockOutputDemotedRequestSchema = exports_external.object({
@@ -24237,7 +24151,7 @@ var ampEnrollmentErrorSchema = exports_external.object({
 var ampAuthorizationHeadersSchema = exports_external.object({
   authorization: exports_external.string().min(1).optional()
 });
-var apiContract = c7.router({
+var apiContract = c6.router({
   health: {
     method: "GET",
     path: "/health",
@@ -24294,9 +24208,9 @@ var apiContract = c7.router({
     }),
     responses: {
       200: whoAmIResponseSchema,
-      401: errorSchema7,
-      500: errorSchema7,
-      502: errorSchema7,
+      401: errorSchema6,
+      500: errorSchema6,
+      502: errorSchema6,
       503: demoNotSeededResponseSchema
     },
     summary: "Validate a WorkOS Bearer token and return member plus user fields"
@@ -24306,7 +24220,7 @@ var apiContract = c7.router({
     path: "/amp/enrollment/challenges",
     headers: ampAuthorizationHeadersSchema,
     body: exports_external.strictObject({}),
-    responses: { 201: ampEnrollmentChallengeSchema, 401: errorSchema7, 403: ampEnrollmentErrorSchema, 503: ampEnrollmentErrorSchema },
+    responses: { 201: ampEnrollmentChallengeSchema, 401: errorSchema6, 403: ampEnrollmentErrorSchema, 503: ampEnrollmentErrorSchema },
     summary: "Create an Amp enrollment challenge for the authenticated Lore member"
   },
   completeAmpEnrollmentChallenge: {
@@ -24321,7 +24235,7 @@ var apiContract = c7.router({
     method: "GET",
     path: "/amp/connection",
     headers: ampAuthorizationHeadersSchema,
-    responses: { 200: ampConnectionSchema, 401: errorSchema7, 403: ampEnrollmentErrorSchema, 503: ampEnrollmentErrorSchema },
+    responses: { 200: ampConnectionSchema, 401: errorSchema6, 403: ampEnrollmentErrorSchema, 503: ampEnrollmentErrorSchema },
     summary: "Get the authenticated Lore member connection state"
   },
   revokeAmpConnection: {
@@ -24329,7 +24243,7 @@ var apiContract = c7.router({
     path: "/amp/connection",
     headers: ampAuthorizationHeadersSchema,
     body: exports_external.undefined(),
-    responses: { 200: ampConnectionSchema, 401: errorSchema7, 403: ampEnrollmentErrorSchema, 503: ampEnrollmentErrorSchema },
+    responses: { 200: ampConnectionSchema, 401: errorSchema6, 403: ampEnrollmentErrorSchema, 503: ampEnrollmentErrorSchema },
     summary: "Revoke the authenticated Lore member connection"
   },
   createAmpSyncRun: {
@@ -24337,7 +24251,7 @@ var apiContract = c7.router({
     path: "/amp/sync-runs",
     headers: ampAuthorizationHeadersSchema,
     body: exports_external.strictObject({ kind: ampSyncRunKindSchema, selection: exports_external.literal("all") }),
-    responses: { 201: ampSyncRunSchema, 401: errorSchema7, 403: ampSyncRunErrorSchema, 503: ampSyncRunErrorSchema },
+    responses: { 201: ampSyncRunSchema, 401: errorSchema6, 403: ampSyncRunErrorSchema, 503: ampSyncRunErrorSchema },
     summary: "Create an aggregate Amp history sync run for the authenticated member"
   },
   updateAmpSyncRun: {
@@ -24351,14 +24265,14 @@ var apiContract = c7.router({
       inventory_cutoff_at: exports_external.iso.datetime().nullable().optional(),
       inventory_cursor: exports_external.string().max(256).nullable().optional()
     }),
-    responses: { 200: ampSyncRunSchema, 400: ampSyncRunErrorSchema, 401: errorSchema7, 403: ampSyncRunErrorSchema, 404: ampSyncRunErrorSchema, 409: ampSyncRunErrorSchema, 503: ampSyncRunErrorSchema },
+    responses: { 200: ampSyncRunSchema, 400: ampSyncRunErrorSchema, 401: errorSchema6, 403: ampSyncRunErrorSchema, 404: ampSyncRunErrorSchema, 409: ampSyncRunErrorSchema, 503: ampSyncRunErrorSchema },
     summary: "Monotonically update an authenticated member Amp sync run"
   },
   listAmpCohortStatus: {
     method: "GET",
     path: "/amp/cohort-status",
     headers: ampAuthorizationHeadersSchema,
-    responses: { 200: ampCohortStatusSchema, 401: errorSchema7, 403: ampSyncRunErrorSchema, 503: ampSyncRunErrorSchema },
+    responses: { 200: ampCohortStatusSchema, 401: errorSchema6, 403: ampSyncRunErrorSchema, 503: ampSyncRunErrorSchema },
     summary: "List aggregate Amp enrollment and backfill status for the active cohort (admin only)"
   },
   getCliAuthConfig: {
@@ -24366,7 +24280,7 @@ var apiContract = c7.router({
     path: "/cli-auth/config",
     responses: {
       200: cliAuthConfigResponseSchema,
-      503: errorSchema7
+      503: errorSchema6
     },
     summary: "Return public WorkOS CLI Auth configuration for the Lore CLI"
   },
@@ -24375,7 +24289,7 @@ var apiContract = c7.router({
     path: "/desktop-auth/config",
     responses: {
       200: cliAuthConfigResponseSchema,
-      503: errorSchema7
+      503: errorSchema6
     },
     summary: "Return public WorkOS configuration for the Lore desktop app (dedicated native client, separate from the web/CLI client)"
   },
@@ -24387,7 +24301,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: cliStatusResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "Return whether the viewer has connected the Lore CLI (i.e., uploaded any thread under a non-unspecified harness), plus the latest upload timestamp and the desktop app equivalent (installed/connected/last upload)."
   },
@@ -24400,10 +24314,10 @@ var apiContract = c7.router({
     body: recordHeartbeatRequestSchema,
     responses: {
       200: recordHeartbeatResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      422: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
+      422: errorSchema6
     },
     summary: "Record (or refresh) a presence heartbeat for the authenticated user against one of their own threads. Idempotent; the daemon should call this every ~30s while a session is open."
   },
@@ -24416,7 +24330,7 @@ var apiContract = c7.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: recordProductPresenceResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "Record (or refresh) an authenticated Lore web-app presence heartbeat for the current user. Browser clients call this while the product is open."
   },
@@ -24429,7 +24343,7 @@ var apiContract = c7.router({
     body: recordUploadHeartbeatRequestSchema,
     responses: {
       200: recordUploadHeartbeatResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "Record a liveness heartbeat for the authenticated user's upload watch daemon (standalone CLI or the desktop app's embedded import loop). Idempotent; the daemon calls this ~every 60s and on each completed upload (upload_completed:true). Daemon-internal \u2014 not a `lore` subcommand."
   },
@@ -24443,7 +24357,7 @@ var apiContract = c7.router({
     body: recordUploadHeartbeatRequestSchema,
     responses: {
       200: recordUploadHeartbeatResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "Deprecated alias of recordUploadHeartbeat for pre-rename CLI/desktop builds."
   },
@@ -24455,8 +24369,8 @@ var apiContract = c7.router({
     }),
     responses: {
       200: liveThreadListResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6
     },
     summary: "List people with user-block activity in the last 10 minutes. Includes the viewer\u2019s workspace and followed authors, deduped per author, max 10."
   },
@@ -24469,7 +24383,7 @@ var apiContract = c7.router({
     query: listThreadsQuerySchema,
     responses: {
       200: threadListResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "List threads visible to the authenticated user"
   },
@@ -24482,9 +24396,10 @@ var apiContract = c7.router({
     body: createThreadRequestSchema,
     responses: {
       201: createThreadResponseSchema,
-      401: errorSchema7
+      401: errorSchema6,
+      503: errorSchema6
     },
-    summary: "Create an empty Lore-native thread for the authenticated user"
+    summary: "Create a Workbench thread and its keyed Workbench Core actor"
   },
   getThread: {
     method: "GET",
@@ -24497,7 +24412,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: threadResourceSchema,
-      404: errorSchema7
+      404: errorSchema6
     },
     summary: "Load a visible thread by id"
   },
@@ -24512,7 +24427,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: threadParseStatusResponseSchema,
-      404: errorSchema7
+      404: errorSchema6
     },
     summary: "Load only the transcript parsing status for a visible thread"
   },
@@ -24528,9 +24443,9 @@ var apiContract = c7.router({
     body: resolveThreadShareHighlightRequestSchema,
     responses: {
       200: resolveThreadShareHighlightResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7,
-      409: errorSchema7
+      401: errorSchema6,
+      404: errorSchema6,
+      409: errorSchema6
     },
     summary: "Resolve a natural-language share highlight to a canonical /thread URL with block anchors"
   },
@@ -24546,7 +24461,7 @@ var apiContract = c7.router({
     body: exports_external.object({}),
     responses: {
       202: requestThreadAccessResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "Notify a thread owner that a signed-in viewer is requesting access"
   },
@@ -24559,7 +24474,7 @@ var apiContract = c7.router({
     body: askThreadsRequestSchema,
     responses: {
       200: askThreadsResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "Answer a question from the top 20 visible decision matches, grouped back into threads"
   },
@@ -24575,8 +24490,8 @@ var apiContract = c7.router({
     body: forkThreadRequestSchema,
     responses: {
       200: forkSummarySchema,
-      403: errorSchema7,
-      404: errorSchema7
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Generate a distilled source handoff for continuing a visible coding-assistant session"
   },
@@ -24592,7 +24507,7 @@ var apiContract = c7.router({
     query: threadBlockListQuerySchema,
     responses: {
       200: threadBlockListResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "List blocks for a visible thread"
   },
@@ -24609,8 +24524,8 @@ var apiContract = c7.router({
     body: createThreadBlockCommentThreadRequestSchema,
     responses: {
       201: createThreadBlockCommentThreadResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      404: errorSchema6
     },
     summary: "Create a new block-level comment thread on a visible thread block"
   },
@@ -24628,9 +24543,9 @@ var apiContract = c7.router({
     body: createThreadBlockCommentRequestSchema,
     responses: {
       201: createThreadBlockCommentResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7,
-      409: errorSchema7
+      401: errorSchema6,
+      404: errorSchema6,
+      409: errorSchema6
     },
     summary: "Reply to a block-level comment thread on a visible thread block"
   },
@@ -24648,8 +24563,8 @@ var apiContract = c7.router({
     body: updateThreadBlockCommentThreadRequestSchema,
     responses: {
       200: updateThreadBlockCommentThreadResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      404: errorSchema6
     },
     summary: "Resolve or reopen a block-level comment thread on a visible thread block"
   },
@@ -24662,7 +24577,7 @@ var apiContract = c7.router({
     query: listSkillsQuerySchema,
     responses: {
       200: skillIndexResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "List visible workspace skills"
   },
@@ -24672,7 +24587,7 @@ var apiContract = c7.router({
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
     responses: {
       200: workbenchSkillBindingsResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "List skills enabled for the current user in Workbench"
   },
@@ -24684,9 +24599,9 @@ var apiContract = c7.router({
     body: exports_external.object({}).nullish(),
     responses: {
       200: workbenchSkillBindingSchema,
-      401: errorSchema7,
-      404: errorSchema7,
-      409: errorSchema7
+      401: errorSchema6,
+      404: errorSchema6,
+      409: errorSchema6
     },
     summary: "Pin the current accepted skill version for Workbench"
   },
@@ -24698,7 +24613,7 @@ var apiContract = c7.router({
     body: exports_external.object({}).nullish(),
     responses: {
       200: exports_external.object({ disabled: exports_external.literal(true) }),
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "Disable a skill for the current user in Workbench"
   },
@@ -24711,7 +24626,7 @@ var apiContract = c7.router({
     query: reconcileLocalSkillsQuerySchema,
     responses: {
       200: localSkillReconciliationResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "Reconcile scanned local skills with visible server-side skills by ID or content hash"
   },
@@ -24723,7 +24638,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: sharedSkillsResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "List public skills the viewer installed or copied (Shared with you)"
   },
@@ -24741,8 +24656,8 @@ var apiContract = c7.router({
     }),
     responses: {
       200: skillDetailResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      404: errorSchema6
     },
     summary: "Get visible skill details by stable skill ID"
   },
@@ -24757,7 +24672,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: exports_external.union([sharedSkillTemplateSchema, sharedSkillPreviewSchema]),
-      404: errorSchema7
+      404: errorSchema6
     },
     summary: "Public no-login preview of a skill shared by link (install requires auth)"
   },
@@ -24772,7 +24687,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: sharedSkillPreviewSchema,
-      404: errorSchema7
+      404: errorSchema6
     },
     summary: "Public no-login metadata preview of a skill by id (install requires auth)"
   },
@@ -24789,9 +24704,9 @@ var apiContract = c7.router({
     responses: {
       200: skillVersionDraftResponseSchema,
       202: skillVersionDraftResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
       409: skillVersionDraftConflictSchema
     },
     summary: "Start or resume background templatization of a shared skill"
@@ -24803,9 +24718,9 @@ var apiContract = c7.router({
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
     responses: {
       200: skillVersionDraftResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Get the current viewer's templatization draft for a skill"
   },
@@ -24821,9 +24736,9 @@ var apiContract = c7.router({
     body: publishSkillShareTemplateRequestSchema,
     responses: {
       200: skillShareTemplateSubmissionResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
       409: skillVersionDraftConflictSchema
     },
     summary: "Publish an immutable templatized skill version"
@@ -24841,10 +24756,10 @@ var apiContract = c7.router({
     body: updateSkillVersionDraftRequestSchema,
     responses: {
       200: skillVersionDraftResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
       409: skillVersionDraftConflictSchema
     },
     summary: "Autosave a templatization draft with optimistic concurrency"
@@ -24859,9 +24774,9 @@ var apiContract = c7.router({
     }),
     responses: {
       200: skillVersionDraftResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
       409: skillVersionDraftConflictSchema
     },
     summary: "Atomically rebase a templatization draft onto the current skill version"
@@ -24874,9 +24789,9 @@ var apiContract = c7.router({
     body: exports_external.object({}),
     responses: {
       200: skillVersionDraftResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
       409: skillVersionDraftConflictSchema
     },
     summary: "Retry persistence of a retained generated result without rerunning the model"
@@ -24893,9 +24808,9 @@ var apiContract = c7.router({
     body: setSkillVisibilityRequestSchema,
     responses: {
       200: skillDetailResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Set a skill's visibility (owner only); minting a share link when set to public"
   },
@@ -24908,7 +24823,7 @@ var apiContract = c7.router({
     query: listArtifactsQuerySchema,
     responses: {
       200: artifactIndexResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "List visible artifacts (files produced by Cowork or native threads)"
   },
@@ -24923,8 +24838,8 @@ var apiContract = c7.router({
     }),
     responses: {
       200: artifactDetailResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      404: errorSchema6
     },
     summary: "Get a visible artifact with a presigned download URL"
   },
@@ -24940,10 +24855,10 @@ var apiContract = c7.router({
     body: saveDocumentArtifactRequestSchema,
     responses: {
       200: saveDocumentArtifactResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7,
+      401: errorSchema6,
+      404: errorSchema6,
       409: saveDocumentArtifactConflictResponseSchema,
-      413: errorSchema7,
+      413: errorSchema6,
       422: saveDocumentArtifactRejectionResponseSchema
     },
     summary: "Save an edited Lore Document as a new human-authored version"
@@ -24957,8 +24872,8 @@ var apiContract = c7.router({
     body: presignBackfillArtifactsRequestSchema,
     responses: {
       200: presignBackfillArtifactsResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      404: errorSchema6
     },
     summary: "Presign artifact-byte uploads for an existing session thread (backfill)"
   },
@@ -24971,8 +24886,8 @@ var apiContract = c7.router({
     body: commitBackfillArtifactsRequestSchema,
     responses: {
       200: commitBackfillArtifactsResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      404: errorSchema6
     },
     summary: "Promote backfilled artifact bytes into artifact rows"
   },
@@ -24985,10 +24900,10 @@ var apiContract = c7.router({
     body: publishArtifactRequestSchema,
     responses: {
       200: publishArtifactResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      404: errorSchema7,
-      413: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      404: errorSchema6,
+      413: errorSchema6
     },
     summary: "Publish a live local artifact to its session thread and get a shareable web URL"
   },
@@ -25004,11 +24919,122 @@ var apiContract = c7.router({
     body: setArtifactVisibilityRequestSchema,
     responses: {
       200: artifactDetailResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Set an artifact's own visibility (author only); the thread's visibility always still applies"
+  },
+  listArtifactCommentThreads: {
+    method: "GET",
+    path: "/artifacts/:id/comment-threads",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1).describe("Stable artifact ID, e.g. art_...")
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    responses: {
+      200: listArtifactCommentThreadsResponseSchema,
+      401: errorSchema6,
+      404: errorSchema6
+    },
+    summary: "List comment threads on a visible artifact, anchors and replies included"
+  },
+  createArtifactCommentThread: {
+    method: "POST",
+    path: "/artifacts/:id/comment-threads",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1).describe("Stable artifact ID, e.g. art_...")
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: createArtifactCommentThreadRequestSchema,
+    responses: {
+      201: artifactCommentThreadSchema,
+      401: errorSchema6,
+      404: errorSchema6
+    },
+    summary: "Start a comment thread on a visible artifact, optionally anchored inside its document"
+  },
+  createArtifactComment: {
+    method: "POST",
+    path: "/artifacts/:id/comment-threads/:commentThreadId/comments",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1),
+      commentThreadId: exports_external.string().min(1)
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: createArtifactCommentRequestSchema,
+    responses: {
+      201: artifactCommentSchema,
+      401: errorSchema6,
+      404: errorSchema6,
+      409: errorSchema6
+    },
+    summary: "Reply to a comment thread on a visible artifact"
+  },
+  updateArtifactComment: {
+    method: "PATCH",
+    path: "/artifacts/:id/comment-threads/:commentThreadId/comments/:commentId",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1),
+      commentThreadId: exports_external.string().min(1),
+      commentId: exports_external.string().min(1)
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: updateArtifactCommentRequestSchema,
+    responses: {
+      200: artifactCommentSchema,
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
+      409: errorSchema6
+    },
+    summary: "Edit your own comment on a visible artifact (the comment's author only)"
+  },
+  deleteArtifactComment: {
+    method: "DELETE",
+    path: "/artifacts/:id/comment-threads/:commentThreadId/comments/:commentId",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1),
+      commentThreadId: exports_external.string().min(1),
+      commentId: exports_external.string().min(1)
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: exports_external.undefined(),
+    responses: {
+      200: artifactCommentSchema,
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
+    },
+    summary: "Soft-delete your own comment on a visible artifact (the comment's author only); the comment keeps its slot"
+  },
+  updateArtifactCommentThread: {
+    method: "PATCH",
+    path: "/artifacts/:id/comment-threads/:commentThreadId",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1),
+      commentThreadId: exports_external.string().min(1)
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: updateArtifactCommentThreadRequestSchema,
+    responses: {
+      200: updateArtifactCommentThreadResponseSchema,
+      401: errorSchema6,
+      404: errorSchema6
+    },
+    summary: "Resolve or reopen a comment thread on a visible artifact"
   },
   uploadThreadAttachment: {
     method: "POST",
@@ -25020,11 +25046,11 @@ var apiContract = c7.router({
     body: uploadThreadAttachmentRequestSchema,
     responses: {
       200: uploadThreadAttachmentResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      413: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
+      413: errorSchema6
     },
     summary: "Upload one image for a Lore thread message attachment and get its artifact reference"
   },
@@ -25038,19 +25064,34 @@ var apiContract = c7.router({
     responses: {
       200: recordDockOutputResponseSchema,
       400: recordDockOutputErrorResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7,
-      409: errorSchema7,
-      413: errorSchema7
+      401: errorSchema6,
+      404: errorSchema6,
+      409: errorSchema6,
+      413: errorSchema6
     },
     summary: "Mirror a promoted Workbench Output to its session thread, versioned and deduped"
+  },
+  judgeDockOutputPromotion: {
+    method: "POST",
+    path: "/dock/outputs/promotion-verdict",
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: judgeDockOutputPromotionRequestSchema,
+    responses: {
+      200: judgeDockOutputPromotionResponseSchema,
+      400: errorSchema6,
+      401: errorSchema6,
+      413: errorSchema6
+    },
+    summary: "Judge whether shown bytes would promote as a Lore Document, without writing anything \u2014 the show-time half of the mirror's verdict"
   },
   setDockOutputDemoted: {
     method: "POST",
     path: "/dock/outputs/demotion",
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
     body: setDockOutputDemotedRequestSchema,
-    responses: { 200: setDockOutputDemotedResponseSchema, 400: errorSchema7, 401: errorSchema7, 404: setDockOutputDemotedNotFoundResponseSchema },
+    responses: { 200: setDockOutputDemotedResponseSchema, 400: errorSchema6, 401: errorSchema6, 404: setDockOutputDemotedNotFoundResponseSchema },
     summary: "Remove or restore a durable Output for the authenticated Dock session"
   },
   listDockOutputs: {
@@ -25062,7 +25103,7 @@ var apiContract = c7.router({
     query: listDockOutputsQuerySchema,
     responses: {
       200: listDockOutputsResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "List a visible thread's durable Outputs, newest-updated first, demoted ones flagged"
   },
@@ -25077,8 +25118,8 @@ var apiContract = c7.router({
     }),
     responses: {
       200: listDockOutputVersionsResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      404: errorSchema6
     },
     summary: "List one Output's version history, newest first, pruned versions flagged rather than omitted"
   },
@@ -25094,8 +25135,8 @@ var apiContract = c7.router({
     }),
     responses: {
       200: dockOutputVersionContentResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      404: errorSchema6
     },
     summary: "Read one version of an Output: inline text content when readable, plus a presigned download URL"
   },
@@ -25115,10 +25156,10 @@ var apiContract = c7.router({
     }),
     responses: {
       200: skillPackageDownloadResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      409: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
+      409: errorSchema6
     },
     summary: "Download metadata for an accepted skill package or visible proposal package"
   },
@@ -25134,9 +25175,9 @@ var apiContract = c7.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: skillInstallationResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Register the current user as an installer of a visible skill"
   },
@@ -25152,7 +25193,7 @@ var apiContract = c7.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: skillInstallationSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "Unregister the current user installation for a skill (idempotent)"
   },
@@ -25168,9 +25209,9 @@ var apiContract = c7.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: unpublishSkillResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Unpublish an owned workspace skill and remove it from the team catalog"
   },
@@ -25186,11 +25227,11 @@ var apiContract = c7.router({
     body: createSkillShareRequestSchema,
     responses: {
       200: skillShareResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      422: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
+      422: errorSchema6
     },
     summary: "Grant a person view access to a skill by Lore user id or email (owner only). Re-adding a revoked grantee un-revokes; capped at 50 active grants per skill."
   },
@@ -25205,9 +25246,9 @@ var apiContract = c7.router({
     }),
     responses: {
       200: skillSharesListResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "List the active per-person grants on a skill with pending/active status (owner only)."
   },
@@ -25224,9 +25265,9 @@ var apiContract = c7.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: skillShareResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Soft-revoke a per-person grant on a skill (owner only)."
   },
@@ -25242,9 +25283,9 @@ var apiContract = c7.router({
     body: updateSkillInstallationRequestSchema,
     responses: {
       200: skillInstallationSchema,
-      401: errorSchema7,
-      404: errorSchema7,
-      422: errorSchema7
+      401: errorSchema6,
+      404: errorSchema6,
+      422: errorSchema6
     },
     summary: "Record the accepted skill version installed by the current user"
   },
@@ -25256,7 +25297,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: skillInstallationSyncResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "List installed skills with latest accepted version metadata"
   },
@@ -25272,8 +25313,8 @@ var apiContract = c7.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: skillCopyResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      404: errorSchema6
     },
     summary: "Record that the viewer copied a public skill (for the Shared with you tab)"
   },
@@ -25284,9 +25325,9 @@ var apiContract = c7.router({
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
     responses: {
       200: skillProposalListResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "List package proposals visible to the current user for a skill"
   },
@@ -25301,11 +25342,11 @@ var apiContract = c7.router({
     body: approveSkillProposalRequestSchema,
     responses: {
       200: skillPackageVersionResourceSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      409: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
+      409: errorSchema6
     },
     summary: "Approve a package proposal by proposal ID"
   },
@@ -25320,10 +25361,10 @@ var apiContract = c7.router({
     body: rejectSkillProposalRequestSchema.optional(),
     responses: {
       200: skillProposalResourceSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Reject a package proposal by proposal ID"
   },
@@ -25338,8 +25379,8 @@ var apiContract = c7.router({
     }),
     responses: {
       200: threadDecisionListResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      404: errorSchema6
     },
     summary: "List AI-extracted user decisions for a thread, in chronological order"
   },
@@ -25355,9 +25396,9 @@ var apiContract = c7.router({
     body: updateThreadRequestSchema,
     responses: {
       200: threadResourceSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Update thread visibility (author only)"
   },
@@ -25373,9 +25414,9 @@ var apiContract = c7.router({
     body: exports_external.object({}).optional(),
     responses: {
       204: exports_external.null(),
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Soft-delete a thread (author only)"
   },
@@ -25394,10 +25435,10 @@ var apiContract = c7.router({
         cover_status: threadCoverStatusSchema,
         how_to_status: threadHowToStatusSchema
       }),
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      429: errorSchema7.extend({
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
+      429: errorSchema6.extend({
         retry_after_seconds: exports_external.number().int().nonnegative()
       })
     },
@@ -25415,11 +25456,11 @@ var apiContract = c7.router({
     body: threadCoverUploadRequestSchema,
     responses: {
       200: threadCoverUploadResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      413: errorSchema7,
-      422: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
+      413: errorSchema6,
+      422: errorSchema6
     },
     summary: "Upload a custom cover image for a thread. Author or Tanagram admin only. Bytes go to the same storage substrate the AI cover uses (S3 in prod, filesystem in dev), and the threads row is updated atomically with the new cover_storage_url, cover_status='ready', cover_generated_at=now, cover_model='user-uploaded' so subsequent re-rolls / how-to fan-outs treat the upload like any other ready cover."
   },
@@ -25435,11 +25476,11 @@ var apiContract = c7.router({
     body: createThreadShareRequestSchema,
     responses: {
       200: threadShareResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      422: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
+      422: errorSchema6
     },
     summary: "Grant a person view access to a thread by Lore user id or email (author only). Re-adding a revoked grantee un-revokes; capped at 50 active grants per thread."
   },
@@ -25454,9 +25495,9 @@ var apiContract = c7.router({
     }),
     responses: {
       200: threadSharesListResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "List the active per-person grants on a thread with pending/active status (author only)."
   },
@@ -25473,9 +25514,9 @@ var apiContract = c7.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: threadShareResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Soft-revoke a per-person grant on a thread (author only)."
   },
@@ -25493,7 +25534,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: threadPreviewResponseSchema,
-      404: errorSchema7
+      404: errorSchema6
     },
     summary: "Visibility-redacted metadata for OG / social preview consumers. Optional auth: a viewer to whom the thread is visible (including via a share) gets the full preview; others get the private/workspace stub."
   },
@@ -25508,7 +25549,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: userProfileResourceSchema,
-      404: errorSchema7
+      404: errorSchema6
     },
     summary: "Public profile for a user. Optional auth \u2014 unauthenticated viewers see only public thread metadata; signed-in viewers see counts scoped to the threads they'd normally be able to access."
   },
@@ -25521,9 +25562,9 @@ var apiContract = c7.router({
     body: updateCurrentUserRequestSchema,
     responses: {
       200: userSchema,
-      401: errorSchema7,
-      409: errorSchema7,
-      422: errorSchema7
+      401: errorSchema6,
+      409: errorSchema6,
+      422: errorSchema6
     },
     summary: "Update the authenticated user profile"
   },
@@ -25536,7 +25577,7 @@ var apiContract = c7.router({
     body: exports_external.object({}),
     responses: {
       202: deleteMyThreadDataResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "Queue deletion of the authenticated user\u2019s Lore threads, parsed thread content, and related uploaded thread storage objects."
   },
@@ -25549,7 +25590,7 @@ var apiContract = c7.router({
     body: exports_external.object({}),
     responses: {
       200: reenableMyThreadUploadsResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "Clear the authenticated user\u2019s thread upload disable marker."
   },
@@ -25562,7 +25603,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: profileByHandleResponseSchema,
-      404: errorSchema7
+      404: errorSchema6
     },
     summary: "Resolve a public profile by handle \u2014 same shape as GET /users/:id but keyed on the user's chosen handle."
   },
@@ -25574,7 +25615,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: referralListResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "Total count plus the most-recent referees the authenticated user has attributed via `/?invited_by=\u2026` invite links. Mirrors the inviter side of users.referred_by_user_id."
   },
@@ -25590,7 +25631,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: userActivityListResponseSchema,
-      404: errorSchema7
+      404: errorSchema6
     },
     summary: "Reverse-chronological activity feed for a user, scoped to what the viewer can see (same visibility rules as listThreads)."
   },
@@ -25603,7 +25644,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: userContributionsResponseSchema,
-      404: errorSchema7
+      404: errorSchema6
     },
     summary: "Daily contribution counts for the trailing 365 days \u2014 counts thread blocks the user authored on threads visible to the viewer."
   },
@@ -25616,7 +25657,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: userFollowListResponseSchema,
-      404: errorSchema7
+      404: errorSchema6
     },
     summary: "List the users following a given user."
   },
@@ -25629,7 +25670,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: userFollowListResponseSchema,
-      404: errorSchema7
+      404: errorSchema6
     },
     summary: "List the users a given user is following."
   },
@@ -25642,7 +25683,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: followSuggestionListResponseSchema,
-      404: errorSchema7
+      404: errorSchema6
     },
     summary: "Mutual-follow suggestions for a viewer: walks the viewer's followees one hop further and ranks candidates by mutual count. Replaces a 1 \u2192 24 client-side fan-out across `/users/:seed/following`."
   },
@@ -25656,10 +25697,10 @@ var apiContract = c7.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: followUserResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7,
-      409: errorSchema7,
-      422: errorSchema7
+      401: errorSchema6,
+      404: errorSchema6,
+      409: errorSchema6,
+      422: errorSchema6
     },
     summary: "Follow another user. Idempotent \u2014 repeating the call is a no-op."
   },
@@ -25673,8 +25714,8 @@ var apiContract = c7.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: unfollowUserResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      404: errorSchema6
     },
     summary: "Unfollow a user. Idempotent \u2014 repeating the call is a no-op."
   },
@@ -25687,9 +25728,9 @@ var apiContract = c7.router({
     body: profileImageUploadRequestSchema,
     responses: {
       200: profileImageUploadResponseSchema,
-      401: errorSchema7,
-      413: errorSchema7,
-      422: errorSchema7
+      401: errorSchema6,
+      413: errorSchema6,
+      422: errorSchema6
     },
     summary: "Upload an avatar or banner image (base64-encoded JSON body). The API streams the bytes to its configured storage substrate using its own credentials and returns the canonical storage URL the client passes to PATCH /users/me."
   },
@@ -25701,7 +25742,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: organizationMemberListResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "List members of the authenticated user\u2019s organization"
   },
@@ -25714,10 +25755,10 @@ var apiContract = c7.router({
     body: createOrganizationInviteRequestSchema,
     responses: {
       201: createOrganizationInviteResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      409: errorSchema7,
-      422: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      409: errorSchema6,
+      422: errorSchema6
     },
     summary: "Invite a teammate to the authenticated user\u2019s workspace via WorkOS AuthKit"
   },
@@ -25730,9 +25771,9 @@ var apiContract = c7.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: ensureWorkOSOrganizationResponseSchema,
-      401: errorSchema7,
-      422: errorSchema7,
-      503: errorSchema7
+      401: errorSchema6,
+      422: errorSchema6,
+      503: errorSchema6
     },
     summary: "Create or reuse a WorkOS organization for the authenticated user\u2019s non-public email domain and add the user as a member."
   },
@@ -25744,7 +25785,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: uploadSessionListResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "List recent upload sessions for the authenticated user"
   },
@@ -25757,8 +25798,8 @@ var apiContract = c7.router({
     query: listUploadApiKeysQuerySchema,
     responses: {
       200: uploadApiKeyListResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6
     },
     summary: "List Upload API keys owned by the authenticated user in a workspace"
   },
@@ -25771,9 +25812,9 @@ var apiContract = c7.router({
     body: createUploadApiKeyRequestSchema,
     responses: {
       201: createUploadApiKeyResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6
     },
     summary: "Create an Upload API key and return the raw key exactly once"
   },
@@ -25789,9 +25830,9 @@ var apiContract = c7.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: uploadApiKeyResourceSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Revoke an Upload API key owned by the authenticated user"
   },
@@ -25804,9 +25845,9 @@ var apiContract = c7.router({
     query: listWorkosUserApiKeysQuerySchema,
     responses: {
       200: workosUserApiKeyListResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      502: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      502: errorSchema6
     },
     summary: "List WorkOS user API keys owned by the authenticated user in a workspace"
   },
@@ -25819,10 +25860,10 @@ var apiContract = c7.router({
     body: createWorkosUserApiKeyRequestSchema,
     responses: {
       201: createWorkosUserApiKeyResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7,
-      502: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6,
+      502: errorSchema6
     },
     summary: "Create a WorkOS user API key and return the raw key exactly once"
   },
@@ -25838,10 +25879,10 @@ var apiContract = c7.router({
     body: expireWorkosUserApiKeyRequestSchema.optional(),
     responses: {
       200: workosUserApiKeyResourceSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      502: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
+      502: errorSchema6
     },
     summary: "Expire a WorkOS user API key owned by the authenticated user"
   },
@@ -25857,10 +25898,10 @@ var apiContract = c7.router({
     body: deleteWorkosUserApiKeyRequestSchema.optional(),
     responses: {
       204: exports_external.undefined(),
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      502: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
+      502: errorSchema6
     },
     summary: "Delete a WorkOS user API key owned by the authenticated user"
   },
@@ -25873,14 +25914,13 @@ var apiContract = c7.router({
     body: exports_external.object({
       thread_files: exports_external.array(threadFileRequestSchema).optional(),
       upload_metadata: uploadMetadataSchema.optional(),
-      skill_packages: exports_external.array(skillPackageUploadRequestSchema).optional(),
-      quest_captures: exports_external.array(questCaptureUploadRequestSchema).optional()
+      skill_packages: exports_external.array(skillPackageUploadRequestSchema).optional()
     }),
     responses: {
       201: uploadSessionResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      409: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      409: errorSchema6
     },
     summary: "Create an upload session with presigned URLs for file uploads"
   },
@@ -25895,17 +25935,16 @@ var apiContract = c7.router({
     }),
     body: exports_external.object({
       thread_files: exports_external.array(completeThreadFileRequestSchema).optional(),
-      skill_packages: exports_external.array(completeSkillPackageRequestSchema).optional(),
-      quest_captures: exports_external.array(completeQuestCaptureRequestSchema).optional()
+      skill_packages: exports_external.array(completeSkillPackageRequestSchema).optional()
     }),
     responses: {
       200: completeUploadSessionResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      409: errorSchema7,
-      422: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
+      409: errorSchema6,
+      422: errorSchema6
     },
     summary: "Complete an upload session after files have been uploaded to storage"
   },
@@ -25918,8 +25957,8 @@ var apiContract = c7.router({
     body: claudeCodeSyncStatusRequestSchema,
     responses: {
       200: claudeCodeSyncStatusResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6
     },
     summary: "Return server-side Claude Code block sync status for Spanner JSONL replay"
   },
@@ -25931,8 +25970,8 @@ var apiContract = c7.router({
     }),
     responses: {
       200: adminStatsSchema,
-      401: errorSchema7,
-      403: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6
     },
     summary: "Cross-org operational counts. Tanagram admins only."
   },
@@ -25944,8 +25983,8 @@ var apiContract = c7.router({
     }),
     responses: {
       200: adminOrganizationListResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6
     },
     summary: "List every organization with member and thread counts. Tanagram admins only."
   },
@@ -25958,8 +25997,8 @@ var apiContract = c7.router({
     }),
     responses: {
       200: adminUserListResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6
     },
     summary: "List every user with their org memberships and thread count. Tanagram admins only."
   },
@@ -25972,8 +26011,8 @@ var apiContract = c7.router({
     query: adminListThreadsQuerySchema,
     responses: {
       200: adminThreadListResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6
     },
     summary: "List live threads across every organization. Tanagram admins only."
   },
@@ -25985,8 +26024,8 @@ var apiContract = c7.router({
     }),
     responses: {
       200: adminTweetLeadListResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6
     },
     summary: "List unreplied tweet leads from the last 24h, ranked by relevance. Tanagram admins only."
   },
@@ -26000,9 +26039,9 @@ var apiContract = c7.router({
     body: adminUpdateTweetLeadRequestSchema,
     responses: {
       200: tweetLeadSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Update a tweet lead status (replied/dismissed/new). Tanagram admins only."
   },
@@ -26015,10 +26054,10 @@ var apiContract = c7.router({
     query: adminLookupThreadQuerySchema,
     responses: {
       200: adminThreadLookupResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Look up a thread by thread id, thread file id, or harness session id. Tanagram admins only."
   },
@@ -26029,10 +26068,10 @@ var apiContract = c7.router({
     body: adminForceFollowRequestSchema,
     responses: {
       200: adminForceFollowResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      422: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
+      422: errorSchema6
     },
     summary: "Force follower->followee edge. Admin-only and non-destructive."
   },
@@ -26048,9 +26087,9 @@ var apiContract = c7.router({
     body: exports_external.object({}).optional(),
     responses: {
       204: exports_external.null(),
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Permanently remove a thread. Tanagram admins only."
   },
@@ -26066,9 +26105,9 @@ var apiContract = c7.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: adminDeleteSkillResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Permanently remove a skill and its sync records. Tanagram admins only."
   },
@@ -26081,9 +26120,9 @@ var apiContract = c7.router({
     query: adminSkillLookupQuerySchema,
     responses: {
       200: adminSkillLookupResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6
     },
     summary: "Find skills by owner email and exact skill name. Tanagram admins only."
   },
@@ -26098,9 +26137,9 @@ var apiContract = c7.router({
     }),
     responses: {
       200: adminSkillRootKindResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Read the stored root kind for a skill. Tanagram admins only."
   },
@@ -26116,10 +26155,10 @@ var apiContract = c7.router({
     body: adminUpdateSkillRootKindRequestSchema,
     responses: {
       200: adminUpdateSkillRootKindResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Change only the stored root kind for a skill. Tanagram admins only."
   },
@@ -26135,9 +26174,9 @@ var apiContract = c7.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: adminReparseThreadFileResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Re-enqueue parsing for a thread file. Tanagram admins only."
   },
@@ -26153,11 +26192,11 @@ var apiContract = c7.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: adminReprojectThreadResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      409: errorSchema7,
-      500: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
+      409: errorSchema6,
+      500: errorSchema6
     },
     summary: "Re-project a thread from its current uploaded transcript or OTEL session. Tanagram admins only."
   },
@@ -26173,9 +26212,9 @@ var apiContract = c7.router({
     query: adminThreadReprojectionStatusQuerySchema,
     responses: {
       200: adminThreadReprojectionStatusResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Get the outcome of an admin-triggered thread re-projection."
   },
@@ -26196,7 +26235,7 @@ var apiContract = c7.router({
     body: createWaitlistEntryRequestSchema,
     responses: {
       201: waitlistEntrySchema,
-      409: errorSchema7
+      409: errorSchema6
     },
     summary: "Create an unauthenticated waitlist entry keyed by (location, contact)."
   },
@@ -26206,8 +26245,8 @@ var apiContract = c7.router({
     body: submitContactMessageRequestSchema,
     responses: {
       200: submitContactMessageResponseSchema,
-      429: errorSchema7,
-      503: errorSchema7
+      429: errorSchema6,
+      503: errorSchema6
     },
     summary: "Submit a contact-form message from the marketing site; emails the Lore team."
   },
@@ -26220,9 +26259,9 @@ var apiContract = c7.router({
     body: createFeedbackRequestSchema,
     responses: {
       201: feedbackEntrySchema,
-      401: errorSchema7,
-      422: errorSchema7,
-      429: errorSchema7
+      401: errorSchema6,
+      422: errorSchema6,
+      429: errorSchema6
     },
     summary: "Submit in-app feedback. Persists to lore.feedback_entries and best-effort posts to the #lore-feedback Slack channel. Rate-limited to 30 submissions/hour per user."
   },
@@ -26238,10 +26277,10 @@ var apiContract = c7.router({
     body: exports_external.object({}).optional(),
     responses: {
       201: shareTokenResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      409: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
+      409: errorSchema6
     },
     summary: "Mint a short share-link token for a public thread. Author only. The token powers `/s/:token` short URLs and enables k-factor attribution."
   },
@@ -26257,7 +26296,7 @@ var apiContract = c7.router({
     query: resolveShareTokenQuerySchema,
     responses: {
       200: shareTokenResponseSchema,
-      404: errorSchema7
+      404: errorSchema6
     },
     summary: "Resolve a share-link token to its thread and record the view. Works for signed-out viewers; if a bearer token is present we attribute the view to that Lore user for analytics."
   },
@@ -26269,8 +26308,8 @@ var apiContract = c7.router({
     }),
     responses: {
       200: adminGrowthResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6
     },
     summary: "Share-link k-factor, funnel, sparkline, and top sharers by window. Tanagram admins only."
   },
@@ -26282,8 +26321,8 @@ var apiContract = c7.router({
     }),
     responses: {
       200: adminActiveUsersResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6
     },
     summary: "DAU/WAU/MAU/all-time active-user buckets \u2014 distinct users with product usage: CLI/plugin publishes and web writes + presence on the thread-event spine, plus desktop-app daily activity touches (user_activity_daily); auth/token issuance excluded. Tanagram admins only."
   },
@@ -26298,9 +26337,9 @@ var apiContract = c7.router({
     }),
     responses: {
       200: adminUserPipelineResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Per-user upload-pipeline health drilldown: heartbeat/web presence, 14-day OTEL ingest + rejections, projection ledger, upload sessions, thread parsing, and a computed verdict. Tanagram admins only."
   },
@@ -26312,8 +26351,8 @@ var apiContract = c7.router({
     }),
     responses: {
       200: adminReferralsAnalyticsResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6
     },
     summary: "Cross-organization invite-link funnel: lifetime + 30-day counts, 60-day daily timeseries, top inviters, recent attributions. Tanagram admins only."
   },
@@ -26325,8 +26364,8 @@ var apiContract = c7.router({
     }),
     responses: {
       200: adminOnboardingSourcesResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6
     },
     summary: "Signed-up persons grouped by PostHog `initial_source` first-touch attribution. Powers bucket 1 of /admin's Onboarding flow tab; sourced via HogQL."
   },
@@ -26338,8 +26377,8 @@ var apiContract = c7.router({
     }),
     responses: {
       200: adminEmailTemplateListResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6
     },
     summary: "List transactional email templates and their editable preview fields. Tanagram admins only."
   },
@@ -26355,10 +26394,10 @@ var apiContract = c7.router({
     body: adminEmailTemplatePreviewRequestSchema,
     responses: {
       200: renderedEmailSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Render a transactional email template with supplied values. Tanagram admins only."
   },
@@ -26374,11 +26413,11 @@ var apiContract = c7.router({
     body: adminEmailTemplateSendRequestSchema,
     responses: {
       200: adminEmailTemplateSendResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      503: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
+      503: errorSchema6
     },
     summary: "Send a transactional email template through Resend. Tanagram admins only."
   },
@@ -26390,7 +26429,7 @@ var apiContract = c7.router({
     }),
     responses: {
       200: billingStateResponseSchema,
-      401: errorSchema7
+      401: errorSchema6
     },
     summary: "Resolve the caller's plan, features, seat count, and any admin override."
   },
@@ -26403,10 +26442,10 @@ var apiContract = c7.router({
     body: createCheckoutSessionRequestSchema,
     responses: {
       200: createCheckoutSessionResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7,
-      503: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6,
+      503: errorSchema6
     },
     summary: "Start a Stripe Checkout session for Team ($20/seat/mo, min 2)."
   },
@@ -26421,9 +26460,9 @@ var apiContract = c7.router({
     }).optional(),
     responses: {
       200: createBillingPortalResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7,
-      503: errorSchema7
+      401: errorSchema6,
+      404: errorSchema6,
+      503: errorSchema6
     },
     summary: "Open the Stripe customer portal so the subject can manage their subscription."
   },
@@ -26436,11 +26475,11 @@ var apiContract = c7.router({
     body: updateTeamSeatsRequestSchema,
     responses: {
       200: billingSubjectSummarySchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      503: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
+      503: errorSchema6
     },
     summary: "Adjust the caller-organization's Team seat quantity (admin of that org only)."
   },
@@ -26452,10 +26491,10 @@ var apiContract = c7.router({
     }),
     responses: {
       200: creditSettingsResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7,
-      503: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6,
+      503: errorSchema6
     },
     summary: "Get the caller-organization's credit pool balance + auto-recharge settings."
   },
@@ -26468,10 +26507,10 @@ var apiContract = c7.router({
     body: updateCreditSettingsRequestSchema,
     responses: {
       200: creditSettingsResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7,
-      503: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6,
+      503: errorSchema6
     },
     summary: "Update the caller-organization's auto-recharge settings (billing admin only)."
   },
@@ -26484,10 +26523,10 @@ var apiContract = c7.router({
     body: createCreditTopUpRequestSchema,
     responses: {
       200: createCreditTopUpResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      403: errorSchema7,
-      503: errorSchema7
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6,
+      503: errorSchema6
     },
     summary: "Manually top up the caller-organization's credit pool by charging the saved card."
   },
@@ -26499,8 +26538,8 @@ var apiContract = c7.router({
     }),
     responses: {
       200: adminBillingOverviewResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6
     },
     summary: "List every user and org with current plan + override for the admin panel."
   },
@@ -26512,8 +26551,8 @@ var apiContract = c7.router({
     }),
     responses: {
       200: adminCreditPoolsResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6
     },
     summary: "Per-team credit-pool utilization, blended margin, breakage, and overage."
   },
@@ -26529,10 +26568,10 @@ var apiContract = c7.router({
     body: exports_external.object({}),
     responses: {
       200: adminBootstrapCreditPoolResponseSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      409: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6,
+      409: errorSchema6
     },
     summary: "Create an organization current-period pool with a promotional grant."
   },
@@ -26548,9 +26587,9 @@ var apiContract = c7.router({
     body: adminPlanOverrideRequestSchema,
     responses: {
       200: adminBillingSubjectSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Admin override for a user's plan tier. Null clears the override."
   },
@@ -26566,13 +26605,12 @@ var apiContract = c7.router({
     body: adminPlanOverrideRequestSchema,
     responses: {
       200: adminBillingSubjectSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema6,
+      403: errorSchema6,
+      404: errorSchema6
     },
     summary: "Admin override for an organization's plan tier. Null clears the override."
   },
-  quests: questsContract,
   entities: entitiesContract,
   otelPathFilters: otelPathFiltersContract,
   favorites: favoritesContract,
