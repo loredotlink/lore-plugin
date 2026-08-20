@@ -18926,210 +18926,16 @@ var searchContract = c6.router({
   }
 });
 
-// ../contracts/src/findings.ts
-var findingIdSchema = exports_external.string().regex(/^F-[0-9]{3}$/);
-var MAX_FINDING_TEXT_LENGTH = 1e4;
-var MAX_QUOTED_SPAN_LENGTH = 50000;
-var MAX_FINDING_REFS = 100;
-var MAX_FINDING_GAPS = 100;
-var findingKindSchema = exports_external.enum(["fact", "claim", "inference", "missing"]);
-var findingSourceRefSchema = exports_external.object({
-  sourceId: exports_external.string().min(1),
-  quotedSpan: exports_external.string().min(1).max(MAX_QUOTED_SPAN_LENGTH).optional(),
-  whatItContributes: exports_external.string().min(1).max(MAX_FINDING_TEXT_LENGTH)
-}).strict();
-var findingGapKindSchema = exports_external.enum(["not_found", "not_inspected"]);
-var findingGapSchema = exports_external.object({
-  description: exports_external.string().min(1).max(MAX_FINDING_TEXT_LENGTH),
-  kind: findingGapKindSchema,
-  sourceId: exports_external.string().min(1).optional()
-}).strict();
-var findingConfidenceSchema = exports_external.object({
-  level: exports_external.enum(["high", "medium", "low"]),
-  why: exports_external.string().min(1).max(MAX_FINDING_TEXT_LENGTH)
-}).strict();
-var findingSchema = exports_external.object({
-  id: findingIdSchema,
-  claim: exports_external.string().min(1).max(MAX_FINDING_TEXT_LENGTH),
-  kind: findingKindSchema,
-  restsOn: exports_external.array(findingSourceRefSchema).max(MAX_FINDING_REFS),
-  gaps: exports_external.array(findingGapSchema).max(MAX_FINDING_GAPS),
-  confidence: findingConfidenceSchema
-}).strict();
-var findingsManifestSchema = exports_external.object({
-  findings: exports_external.array(findingSchema)
-}).strict();
-
-// ../contracts/src/evidence.ts
-var id = exports_external.string().min(1);
-var timestamp = exports_external.iso.datetime();
-var visibility = exports_external.enum(["private", "organization"]);
-var provenanceClassSchema = exports_external.enum(["witnessed", "attested"]);
-var verification = exports_external.object({
-  status: exports_external.enum(["passed", "failed", "unchecked", "unknown"]),
-  policy: exports_external.string().min(1),
-  policyVersion: exports_external.number().int().nonnegative(),
-  expectedDigest: exports_external.string().nullable(),
-  observedDigest: exports_external.string().nullable(),
-  verifiedAt: timestamp
-}).strict();
-var base = {
-  bundleId: id,
-  authorUserId: id,
-  organizationId: id.nullable(),
-  visibility,
-  createdAt: timestamp,
-  promotedAt: timestamp.nullable(),
-  copyUrl: exports_external.url().nullable()
-};
-var evidenceEffectDetailSchema = exports_external.object({
-  ...base,
-  kind: exports_external.literal("dock_effect"),
-  provenanceClass: exports_external.literal("witnessed"),
-  effectId: id,
-  toolCallId: exports_external.string().min(1),
-  action: exports_external.string().min(1),
-  scope: exports_external.string().nullable(),
-  settlement: exports_external.enum(["not_dispatched", "in_flight", "committed", "failed_before_commit", "aborted", "unknown"]),
-  retryClass: exports_external.enum(["read_only", "byte_idempotent", "reconcile_first", "never"]),
-  attempts: exports_external.array(exports_external.object({
-    ordinal: exports_external.number().int().positive(),
-    status: exports_external.enum(["not_dispatched", "in_flight", "committed", "failed_before_commit", "aborted", "unknown"]),
-    receiptPresent: exports_external.boolean(),
-    dispatchedAt: timestamp,
-    respondedAt: timestamp.nullable()
-  }).strict()),
-  verifications: exports_external.array(verification)
-}).strict();
-var evidenceOutcomeDetailSchema = exports_external.object({
-  ...base,
-  kind: exports_external.literal("dock_turn_outcome"),
-  provenanceClass: exports_external.literal("witnessed"),
-  promptBlockId: id,
-  outcome: exports_external.enum(["verified_success", "unverified_completion", "partial_success", "exhausted", "cancelled", "failed", "unknown"]),
-  stopReason: exports_external.enum(["end_turn", "aborted", "error"]),
-  iterations: exports_external.number().int().nonnegative().nullable(),
-  settledAt: timestamp,
-  verificationConclusions: exports_external.array(exports_external.object({ status: exports_external.enum(["passed", "failed", "unchecked", "unknown"]) }).strict())
-}).strict();
-var evidenceFindingDetailSchema = exports_external.object({
-  ...base,
-  kind: exports_external.literal("finding"),
-  provenanceClass: exports_external.literal("attested"),
-  findingRecordId: id,
-  outputPath: exports_external.string().min(1),
-  retractedAt: timestamp.nullable(),
-  finding: findingSchema
-}).strict();
-var evidenceDetailSchema = exports_external.discriminatedUnion("kind", [evidenceEffectDetailSchema, evidenceOutcomeDetailSchema, evidenceFindingDetailSchema]);
-var evidenceWorkbenchSummarySchema = exports_external.object({
-  bundleId: id,
-  kind: exports_external.enum(["dock_effect", "dock_turn_outcome", "finding"]),
-  toolCallId: exports_external.string().nullable(),
-  status: exports_external.string().min(1),
-  createdAt: timestamp
-}).strict();
-var evidenceWorkbenchResponseSchema = exports_external.object({ evidence: exports_external.array(evidenceWorkbenchSummarySchema).max(50) }).strict();
-var evidenceSharingDefaultSchema = exports_external.object({ organizationId: id, shareNewEvidence: exports_external.boolean() }).strict();
-var setEvidenceSharingDefaultSchema = exports_external.object({ shareNewEvidence: exports_external.boolean() }).strict();
-var promoteEvidenceRequestSchema = exports_external.object({ organizationId: id }).strict();
-var promoteEvidenceResponseSchema = exports_external.object({
-  bundleId: id,
-  visibility: exports_external.literal("organization"),
-  organizationId: id,
-  copyUrl: exports_external.url()
-}).strict();
-var publishFindingRequestSchema = exports_external.object({
-  outputPath: exports_external.string().min(1),
-  finding: findingSchema,
-  organizationId: id
-}).strict();
-var publishFindingResponseSchema = exports_external.object({
-  bundleId: id,
-  findingRecordId: id,
-  visibility: exports_external.literal("organization"),
-  organizationId: id,
-  copyUrl: exports_external.url()
-}).strict();
-var retractFindingResponseSchema = exports_external.object({
-  bundleId: id,
-  visibility: exports_external.literal("private"),
-  retractedAt: timestamp
-}).strict();
-var evidenceErrorSchema = exports_external.discriminatedUnion("error", [
-  exports_external.object({ error: exports_external.literal("not_found") }).strict(),
-  exports_external.object({ error: exports_external.literal("forbidden") }).strict(),
-  exports_external.object({ error: exports_external.literal("invalid_request") }).strict(),
-  exports_external.object({ error: exports_external.literal("conflict") }).strict(),
-  exports_external.object({ error: exports_external.literal("already_published"), bundleId: id }).strict(),
-  exports_external.object({ error: exports_external.literal("unavailable"), retryable: exports_external.literal(true) }).strict()
-]);
-// ../contracts/src/sourceDocuments.ts
-var SUPPORTED_SOURCE_DOCUMENT_EXTENSIONS = Object.freeze([
-  ".md",
-  ".markdown",
-  ".txt",
-  ".html",
-  ".htm",
-  ".json",
-  ".yaml",
-  ".yml",
-  ".toml",
-  ".csv",
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".py",
-  ".go",
-  ".rs",
-  ".sql",
-  ".sh"
-]);
-var SUPPORTED_EXTENSION_SET = new Set(SUPPORTED_SOURCE_DOCUMENT_EXTENSIONS);
-var CONVERTIBLE_SOURCE_DOCUMENT_EXTENSIONS = Object.freeze([
-  ".pdf",
-  ".docx"
-]);
-var CONVERTIBLE_EXTENSION_SET = new Set(CONVERTIBLE_SOURCE_DOCUMENT_EXTENSIONS);
-var BINDABLE_SOURCE_DOCUMENT_EXTENSIONS = Object.freeze([
-  ...SUPPORTED_SOURCE_DOCUMENT_EXTENSIONS,
-  ...CONVERTIBLE_SOURCE_DOCUMENT_EXTENSIONS
-]);
-var registerSourceDocumentRequestSchema = exports_external.object({
-  kind: exports_external.literal("document"),
-  relativePath: exports_external.string().min(1),
-  title: exports_external.string().min(1)
-}).strict();
-var registerLoreThreadSourceRequestSchema = exports_external.object({
-  kind: exports_external.literal("lore_thread"),
-  loreThreadId: exports_external.string().min(1),
-  title: exports_external.string().min(1)
-}).strict();
-var loreSourceSnapshotResponseSchema = exports_external.object({
-  loreThreadId: exports_external.string(),
-  title: exports_external.string(),
-  relativePath: exports_external.string(),
-  content: exports_external.string(),
-  capturedAt: exports_external.string().datetime(),
-  capturedBlockCount: exports_external.number().int().nonnegative()
-}).strict();
-var dockThreadSourceSchema = exports_external.object({
-  id: exports_external.string(),
-  dockThreadId: exports_external.string(),
-  kind: exports_external.enum(["document", "lore_thread", "artifact"]),
-  relativePath: exports_external.string(),
-  title: exports_external.string(),
-  loreThreadId: exports_external.string().nullable(),
-  boundAt: exports_external.string().datetime(),
-  boundByUserId: exports_external.string(),
-  setAsideAt: exports_external.string().datetime().nullable()
-}).strict();
-var dockThreadSourcesResponseSchema = exports_external.object({
-  sources: exports_external.array(dockThreadSourceSchema)
-}).strict();
-var SOURCE_AUTHORITY_STATES = Object.freeze(["active", "authoritative", "set_aside"]);
-var sourceAuthorityStateSchema = exports_external.enum(SOURCE_AUTHORITY_STATES);
+// ../contracts/src/executorImages.ts
+var executorImageSchema = exports_external.object({
+  mediaType: exports_external.enum(["image/png", "image/jpeg", "image/webp"]),
+  data: exports_external.string().min(1),
+  digest: exports_external.string().regex(/^[0-9a-f]{64}$/, "digest must be a lowercase hex SHA-256 digest"),
+  byteLength: exports_external.number().int().positive(),
+  width: exports_external.number().int().positive(),
+  height: exports_external.number().int().positive(),
+  artifactRef: exports_external.string().min(1).nullable()
+});
 // ../contracts/src/events/types.ts
 var subjectKindSchema = exports_external.enum(["thread", "org", "user", "public"]);
 var subjectSchema = exports_external.discriminatedUnion("kind", [
@@ -19138,26 +18944,11 @@ var subjectSchema = exports_external.discriminatedUnion("kind", [
   exports_external.object({ kind: exports_external.literal("user"), id: exports_external.string().min(1) }),
   exports_external.object({ kind: exports_external.literal("public"), id: exports_external.string().min(1) })
 ]);
-var DOCK_OUTCOMES = [
-  "verified_success",
-  "unverified_completion",
-  "partial_success",
-  "exhausted",
-  "cancelled",
-  "failed",
-  "unknown"
-];
-var dockOutcomeSchema = exports_external.enum(DOCK_OUTCOMES);
-var DOCK_WIRE_STOP_REASONS = ["end_turn", "aborted", "error"];
-var dockWireStopReasonSchema = exports_external.enum(DOCK_WIRE_STOP_REASONS);
 var threadEventTypeSchema = exports_external.enum([
   "thread.listable",
   "thread.completed",
   "thread.block.appended",
   "thread.detail.invalidated",
-  "thread.dock.turn_completed",
-  "thread.dock.turn_recovery_updated",
-  "thread.dock.turn_cancel_requested",
   "thread.participant.joined",
   "thread.participant.left",
   "user.followed",
@@ -19198,21 +18989,6 @@ var skillVersionPayloadSchema = exports_external.object({
   package_id: exports_external.string().min(1).optional(),
   content_hash: exports_external.string().startsWith("md5:")
 });
-var dockTurnCompletedPayloadSchema = exports_external.object({
-  thread_id: exports_external.string().min(1),
-  prompt_block_id: exports_external.string().min(1),
-  stop_reason: dockWireStopReasonSchema,
-  error: exports_external.string().nullable(),
-  outcome: dockOutcomeSchema.optional(),
-  context_receipt: exports_external.object({
-    set_aside_sources: exports_external.array(exports_external.object({
-      source_id: exports_external.string().min(1),
-      title: exports_external.string().max(160)
-    }).strict()).max(50),
-    remaining_set_aside_count: exports_external.number().int().nonnegative()
-  }).strict().optional(),
-  outcome_detail: exports_external.string().min(1).optional()
-});
 var threadEventSchema = exports_external.discriminatedUnion("type", [
   threadEventBase.extend({
     type: exports_external.literal("thread.listable"),
@@ -19239,23 +19015,6 @@ var threadEventSchema = exports_external.discriminatedUnion("type", [
   }),
   threadEventBase.extend({
     type: exports_external.literal("thread.detail.invalidated"),
-    payload: exports_external.object({
-      thread_id: exports_external.string().min(1)
-    })
-  }),
-  threadEventBase.extend({
-    type: exports_external.literal("thread.dock.turn_completed"),
-    payload: dockTurnCompletedPayloadSchema
-  }),
-  threadEventBase.extend({
-    type: exports_external.literal("thread.dock.turn_recovery_updated"),
-    payload: exports_external.strictObject({
-      thread_id: exports_external.string().min(1),
-      prompt_block_id: exports_external.string().min(1)
-    })
-  }),
-  threadEventBase.extend({
-    type: exports_external.literal("thread.dock.turn_cancel_requested"),
     payload: exports_external.object({
       thread_id: exports_external.string().min(1)
     })
@@ -19516,437 +19275,6 @@ var zodObjectToMcpJsonSchema = (schema) => {
   const shape = zodObjectShape(schema);
   return zodShapeToMcpJsonSchema(shape ?? {});
 };
-// ../contracts/src/dockExecutor.ts
-var EFFECT_JOURNAL_CAPABILITY = "effect.journal";
-var EFFECT_JOURNAL_FS_EDIT_FILE_CAPABILITY = "effect.journal.fs.editFile";
-var EFFECT_JOURNAL_SHELL_EXEC_CAPABILITY = "effect.journal.shell.exec";
-var EFFECT_JOURNAL_FS_DELETE_CAPABILITY = "effect.journal.fs.delete";
-var FS_DELETE_HUMAN_EDIT_SUBTREE_GUARD_CAPABILITY = "fs.delete.humanEditSubtreeGuard.v1";
-var EFFECT_JOURNAL_UPLOAD_ASSET_CAPABILITY = "effect.journal.uploadAsset";
-var EFFECT_JOURNAL_BROWSER_ACT_CAPABILITY = "effect.journal.browser.act";
-var BROWSER_NAVIGATE_READ_CAPABILITY = "browser.navigateRead.v1";
-var BROWSER_ORIGIN_BOUND_INTERACTION_CAPABILITY = "browser.originBoundInteraction.v1";
-var BROWSER_REF_PATTERN = /^e\d+$/;
-var BROWSER_REF_MAX_LENGTH = 32;
-var browserCanonicalOriginSchema = exports_external.string().superRefine((value, ctx) => {
-  try {
-    const url2 = new URL(value);
-    if (url2.protocol !== "http:" && url2.protocol !== "https:" || url2.origin !== value || url2.username !== "" || url2.password !== "" || url2.pathname !== "/" || url2.search !== "" || url2.hash !== "") {
-      ctx.addIssue({ code: "custom", message: "must be an exact canonical http(s) origin" });
-    }
-  } catch {
-    ctx.addIssue({ code: "custom", message: "must be an exact canonical http(s) origin" });
-  }
-});
-var browserStatusPageSuccessSchema = exports_external.object({
-  ok: exports_external.literal(true),
-  sessionId: exports_external.string().min(1),
-  pageId: exports_external.string().min(1),
-  url: exports_external.string(),
-  title: exports_external.string(),
-  active: exports_external.boolean()
-}).strict();
-var isEffectJournalCapability = (capability) => capability === EFFECT_JOURNAL_CAPABILITY || capability === EFFECT_JOURNAL_FS_EDIT_FILE_CAPABILITY || capability === EFFECT_JOURNAL_SHELL_EXEC_CAPABILITY || capability === EFFECT_JOURNAL_FS_DELETE_CAPABILITY || capability === EFFECT_JOURNAL_UPLOAD_ASSET_CAPABILITY || capability === EFFECT_JOURNAL_BROWSER_ACT_CAPABILITY;
-var EFFECT_CANCELLATION_CAPABILITY = "effect.cancel";
-var EXECUTOR_CONTRACT_VERSION = 2;
-var digestSchema = exports_external.object({ algorithm: exports_external.literal("sha256"), value: exports_external.string().regex(/^[0-9a-f]{64}$/) }).strict();
-var observationIdentitySchema = exports_external.object({ contractVersion: exports_external.literal(1), requestedPath: exports_external.string().min(1), target: exports_external.string().min(1) });
-var fsInspectPathResultSchema = exports_external.discriminatedUnion("kind", [
-  observationIdentitySchema.extend({ kind: exports_external.literal("missing") }).strict(),
-  observationIdentitySchema.extend({ kind: exports_external.literal("file"), byteLength: exports_external.number().int().nonnegative(), digest: digestSchema }).strict(),
-  observationIdentitySchema.extend({ kind: exports_external.literal("directory") }).strict(),
-  observationIdentitySchema.extend({ kind: exports_external.literal("symlink") }).strict(),
-  observationIdentitySchema.extend({ kind: exports_external.literal("other") }).strict()
-]);
-var fsEditImageSchema = exports_external.object({ characterLength: exports_external.number().int().nonnegative(), byteLength: exports_external.number().int().nonnegative(), digest: digestSchema }).strict();
-var fsPreviewEditResultSchema = exports_external.discriminatedUnion("status", [
-  observationIdentitySchema.extend({ status: exports_external.literal("ready"), prior: fsEditImageSchema, post: fsEditImageSchema }).strict(),
-  observationIdentitySchema.extend({ status: exports_external.literal("not_ready"), reason: exports_external.enum(["absent", "old_text_not_unique"]) }).strict(),
-  observationIdentitySchema.extend({ status: exports_external.literal("unavailable"), reason: exports_external.enum(["binary", "unavailable"]) }).strict()
-]);
-var executorContractVersionRangeSchema = exports_external.object({
-  min: exports_external.number().int().positive(),
-  max: exports_external.number().int().positive()
-}).refine(({ min, max }) => min <= max, {
-  message: "min must be less than or equal to max",
-  path: ["max"]
-});
-var base2 = exports_external.object({
-  callId: exports_external.string().min(1),
-  effectId: exports_external.string().min(1).optional(),
-  attemptOrdinal: exports_external.number().int().positive().optional()
-});
-function checkEffectIdentity(value, ctx) {
-  const hasEffectId = value.effectId !== undefined;
-  const hasAttemptOrdinal = value.attemptOrdinal !== undefined;
-  if (hasEffectId !== hasAttemptOrdinal) {
-    ctx.addIssue({
-      code: "custom",
-      message: "effectId and attemptOrdinal must both be present or both be absent",
-      path: [hasEffectId ? "attemptOrdinal" : "effectId"]
-    });
-  }
-}
-var executorRequestVariantSchemas = {
-  "effect.lookupReceipt": base2.extend({
-    op: exports_external.literal("effect.lookupReceipt"),
-    queryEffectId: exports_external.string().min(1),
-    expectedArgumentDigest: exports_external.string().regex(/^[0-9a-f]{64}$/)
-  }),
-  "fs.readFile": base2.extend({ op: exports_external.literal("fs.readFile"), path: exports_external.string().min(1) }),
-  "fs.inspectPath": base2.extend({ op: exports_external.literal("fs.inspectPath"), path: exports_external.string().min(1) }),
-  "fs.previewEdit": base2.extend({ op: exports_external.literal("fs.previewEdit"), path: exports_external.string().min(1), oldText: exports_external.string().min(1), newText: exports_external.string() }),
-  "fs.writeFile": base2.extend({ op: exports_external.literal("fs.writeFile"), path: exports_external.string().min(1), content: exports_external.string() }),
-  "fs.editFile": base2.extend({
-    op: exports_external.literal("fs.editFile"),
-    path: exports_external.string().min(1),
-    oldText: exports_external.string(),
-    newText: exports_external.string()
-  }),
-  "fs.readDirectory": base2.extend({ op: exports_external.literal("fs.readDirectory"), path: exports_external.string().min(1) }),
-  "fs.delete": base2.extend({ op: exports_external.literal("fs.delete"), path: exports_external.string().min(1) }),
-  "git.command": base2.extend({ op: exports_external.literal("git.command"), args: exports_external.array(exports_external.string()).min(1) }),
-  "shell.exec": base2.extend({ op: exports_external.literal("shell.exec"), command: exports_external.string().min(1), timeoutMs: exports_external.number().int().positive().max(600000).optional() }),
-  uploadAsset: base2.extend({ op: exports_external.literal("uploadAsset"), path: exports_external.string().min(1), kind: exports_external.string().min(1) }),
-  "browser.act": base2.extend({
-    op: exports_external.literal("browser.act"),
-    action: exports_external.string().min(1),
-    params: exports_external.record(exports_external.string(), exports_external.unknown()).optional(),
-    expectedOrigin: browserCanonicalOriginSchema.optional()
-  }),
-  "browser.capture": base2.extend({
-    op: exports_external.literal("browser.capture"),
-    sessionId: exports_external.string().min(1),
-    pageId: exports_external.string().min(1).optional()
-  }),
-  "ui.progress": base2.extend({ op: exports_external.literal("ui.progress"), phase: exports_external.enum(["thinking", "responding"]) }),
-  "ui.textDelta": base2.extend({
-    op: exports_external.literal("ui.textDelta"),
-    turnId: exports_external.string().min(1),
-    modelStepId: exports_external.string().min(1),
-    previousModelStepId: exports_external.string().min(1).nullable().optional(),
-    sequence: exports_external.number().int().nonnegative(),
-    delta: exports_external.string()
-  })
-};
-var EXECUTOR_PRIMITIVES = Object.freeze(Object.keys(executorRequestVariantSchemas));
-var executorRequestVariants = Object.values(executorRequestVariantSchemas);
-var executorRequestSchema = exports_external.discriminatedUnion("op", executorRequestVariants).superRefine((value, ctx) => {
-  checkEffectIdentity(value, ctx);
-  if (value.op === "effect.lookupReceipt" && value.effectId !== undefined) {
-    ctx.addIssue({ code: "custom", message: "effect.lookupReceipt must not carry generic Effect identity", path: ["effectId"] });
-  }
-});
-var READ_ONLY_BROWSER_ACTIONS = new Set([
-  "browser_open",
-  "browser_navigate",
-  "browser_snapshot",
-  "browser_status",
-  "browser_close",
-  "browser_read_text"
-]);
-function isReadOnlyBrowserAction(action) {
-  return READ_ONLY_BROWSER_ACTIONS.has(action);
-}
-function effectJournalCapabilityForRequest(request) {
-  switch (request.op) {
-    case "fs.writeFile":
-      return EFFECT_JOURNAL_CAPABILITY;
-    case "fs.editFile":
-      return EFFECT_JOURNAL_FS_EDIT_FILE_CAPABILITY;
-    case "shell.exec":
-      return EFFECT_JOURNAL_SHELL_EXEC_CAPABILITY;
-    case "fs.delete":
-      return EFFECT_JOURNAL_FS_DELETE_CAPABILITY;
-    case "uploadAsset":
-      return EFFECT_JOURNAL_UPLOAD_ASSET_CAPABILITY;
-    case "browser.act":
-      return isReadOnlyBrowserAction(request.action) ? null : EFFECT_JOURNAL_BROWSER_ACT_CAPABILITY;
-    default:
-      return null;
-  }
-}
-var executorTerminationSchema = exports_external.object({
-  trigger: exports_external.enum(["cancelled", "primitive_timeout"]),
-  requestedSignal: exports_external.literal("SIGTERM"),
-  escalatedToSigkill: exports_external.boolean(),
-  observed: exports_external.discriminatedUnion("kind", [
-    exports_external.object({ kind: exports_external.literal("exit"), code: exports_external.number() }),
-    exports_external.object({ kind: exports_external.literal("signal"), signal: exports_external.string().min(1) }),
-    exports_external.object({ kind: exports_external.literal("unconfirmed") })
-  ])
-});
-var executorReceiptSchema = exports_external.object({
-  receiptId: exports_external.string().min(1),
-  committedAt: exports_external.string().datetime(),
-  resultDigest: exports_external.string().regex(/^[0-9a-f]{64}$/, "resultDigest must be a hex SHA-256 digest"),
-  termination: executorTerminationSchema.optional()
-});
-var effectReceiptLookupResultSchema = exports_external.discriminatedUnion("status", [
-  exports_external.object({
-    status: exports_external.literal("found"),
-    attemptOrdinal: exports_external.number().int().positive(),
-    receipt: executorReceiptSchema
-  }).strict(),
-  exports_external.object({ status: exports_external.literal("not_found") }).strict(),
-  exports_external.object({ status: exports_external.literal("argument_mismatch") }).strict()
-]);
-var EXECUTOR_IMAGE_CAPABILITY = "toolResult.image";
-var EXECUTOR_MAX_IMAGE_BYTES = 5000000;
-var EXECUTOR_MAX_IMAGES_PER_RESPONSE = 4;
-var executorImageSchema = exports_external.object({
-  mediaType: exports_external.enum(["image/png", "image/jpeg", "image/webp"]),
-  data: exports_external.string().min(1),
-  digest: exports_external.string().regex(/^[0-9a-f]{64}$/, "digest must be a lowercase hex SHA-256 digest"),
-  byteLength: exports_external.number().int().positive(),
-  width: exports_external.number().int().positive(),
-  height: exports_external.number().int().positive(),
-  artifactRef: exports_external.string().min(1).nullable()
-});
-function checkImageByteBudget(value, ctx) {
-  if (value.images === undefined)
-    return;
-  const totalBytes = value.images.reduce((sum, image) => sum + image.byteLength, 0);
-  if (totalBytes > EXECUTOR_MAX_IMAGE_BYTES) {
-    ctx.addIssue({
-      code: "custom",
-      message: `total decoded image bytes (${totalBytes}) exceed EXECUTOR_MAX_IMAGE_BYTES (${EXECUTOR_MAX_IMAGE_BYTES})`,
-      path: ["images"]
-    });
-  }
-}
-var executorResponseSchema = exports_external.union([
-  base2.extend({
-    ok: exports_external.literal(true),
-    output: exports_external.string(),
-    receipt: executorReceiptSchema.optional(),
-    images: exports_external.array(executorImageSchema).max(EXECUTOR_MAX_IMAGES_PER_RESPONSE).optional()
-  }),
-  base2.extend({
-    ok: exports_external.literal(false),
-    error: exports_external.object({
-      code: exports_external.string().min(1),
-      message: exports_external.string(),
-      contractReason: exports_external.enum(["version_metadata_missing", "version_no_overlap"]).optional()
-    }),
-    commitStatus: exports_external.enum(["failed_before_commit", "aborted"]).optional(),
-    receipt: executorReceiptSchema.optional()
-  })
-]).superRefine(checkEffectIdentity).superRefine(checkImageByteBudget);
-var executorContractNegotiationSchema = exports_external.discriminatedUnion("status", [
-  exports_external.object({
-    status: exports_external.literal("negotiated"),
-    version: exports_external.number().int().positive(),
-    apiRange: executorContractVersionRangeSchema,
-    executorRange: executorContractVersionRangeSchema
-  }),
-  exports_external.object({
-    status: exports_external.literal("degraded"),
-    reason: exports_external.enum(["version_metadata_missing", "version_no_overlap"]),
-    apiRange: executorContractVersionRangeSchema,
-    executorRange: executorContractVersionRangeSchema.optional()
-  })
-]);
-var executorFrameSchema = exports_external.discriminatedUnion("kind", [
-  exports_external.object({
-    kind: exports_external.literal("hello"),
-    capabilities: exports_external.array(exports_external.string()),
-    threadId: exports_external.string().min(1),
-    contractVersions: executorContractVersionRangeSchema.optional(),
-    timeZone: exports_external.string().min(1).optional()
-  }),
-  exports_external.object({ kind: exports_external.literal("request"), request: executorRequestSchema }),
-  exports_external.object({ kind: exports_external.literal("response"), response: executorResponseSchema }),
-  exports_external.object({
-    kind: exports_external.literal("cancel"),
-    callId: exports_external.string().min(1),
-    effectId: exports_external.string().min(1).optional()
-  }),
-  exports_external.object({ kind: exports_external.literal("hello_ack"), contract: executorContractNegotiationSchema }),
-  exports_external.object({ kind: exports_external.literal("ping") })
-]);
-// ../contracts/src/dockExecutorTools.ts
-var text = (description) => exports_external.string().describe(description);
-var SHOW_ARTIFACT_PROVENANCE_MAX_ANNOTATIONS = 8;
-var SHOW_ARTIFACT_PROVENANCE_MAX_ANNOTATION_LENGTH = 280;
-var SHOW_ARTIFACT_PROVENANCE_MAX_FINDING_LENGTH = 160;
-var showArtifactProvenanceAnnotationSchema = exports_external.string().trim().min(1).max(SHOW_ARTIFACT_PROVENANCE_MAX_ANNOTATION_LENGTH);
-var showArtifactProvenanceAnnotationListSchema = exports_external.array(showArtifactProvenanceAnnotationSchema).max(SHOW_ARTIFACT_PROVENANCE_MAX_ANNOTATIONS);
-var showArtifactProvenanceFindingSchema = exports_external.string().trim().min(1).max(SHOW_ARTIFACT_PROVENANCE_MAX_FINDING_LENGTH);
-var showArtifactProvenanceSchema = exports_external.strictObject({
-  inferences: showArtifactProvenanceAnnotationListSchema,
-  uncertainties: showArtifactProvenanceAnnotationListSchema,
-  derived_from: exports_external.array(exports_external.strictObject({
-    path: exports_external.string().trim().min(1),
-    finding: showArtifactProvenanceFindingSchema.optional()
-  })).max(SHOW_ARTIFACT_PROVENANCE_MAX_ANNOTATIONS)
-});
-var browserRoute = (action) => {
-  return {
-    primitive: "browser.act",
-    requiredCapabilities: browserReadActionCapabilities(action),
-    map: (input, callId) => ({ op: "browser.act", callId, action, params: input })
-  };
-};
-function browserReadActionCapabilities(action) {
-  if (action === "browser_click" || action === "browser_type") {
-    return [
-      "browser.act",
-      BROWSER_ORIGIN_BOUND_INTERACTION_CAPABILITY,
-      EFFECT_JOURNAL_BROWSER_ACT_CAPABILITY,
-      EFFECT_CANCELLATION_CAPABILITY
-    ];
-  }
-  if (action === "browser_navigate" || action === "browser_read_text") {
-    return ["browser.act", BROWSER_NAVIGATE_READ_CAPABILITY];
-  }
-  const request = { op: "browser.act", callId: "route-metadata", action };
-  return effectJournalCapabilityForRequest(request) === null ? ["browser.act"] : ["browser.act", EFFECT_JOURNAL_BROWSER_ACT_CAPABILITY, EFFECT_CANCELLATION_CAPABILITY];
-}
-var EXECUTOR_TOOL_CONTRACTS = {
-  list_files: {
-    version: EXECUTOR_CONTRACT_VERSION,
-    description: "List the files and folders at a path inside the session folder. Call this first when you need to understand what is in the folder before reading or changing anything.",
-    inputSchema: exports_external.object({ path: text("Folder path relative to the session folder. Defaults to the folder root.").optional() }).strict(),
-    routes: [{ primitive: "fs.readDirectory", requiredCapabilities: ["fs.readDirectory"], map: (input, callId) => ({ op: "fs.readDirectory", callId, path: input.path === undefined || input.path === "" ? "." : input.path }) }]
-  },
-  read_file: {
-    version: EXECUTOR_CONTRACT_VERSION,
-    description: "Read a file's contents. Call this before editing a file, and whenever the answer depends on what a file actually contains rather than what you assume it contains.",
-    inputSchema: exports_external.object({ path: text("File path relative to the session folder.") }).strict(),
-    routes: [{ primitive: "fs.readFile", requiredCapabilities: ["fs.readFile"], map: (input, callId) => ({ op: "fs.readFile", callId, path: input.path }) }]
-  },
-  edit_file: {
-    version: EXECUTOR_CONTRACT_VERSION,
-    description: "Replace an exact snippet of text in a file with new text. Prefer this over write_file for changing part of an existing file. The old text must appear exactly once \u2014 include surrounding lines to make it unique. Pass an empty old_text to create a new file.",
-    inputSchema: exports_external.object({ path: text("File path relative to the session folder."), old_text: text("Exact text to replace. Empty string creates the file."), new_text: text("Text to put in its place.") }).strict(),
-    routes: [{ primitive: "fs.editFile", requiredCapabilities: ["fs.editFile", EFFECT_JOURNAL_FS_EDIT_FILE_CAPABILITY, EFFECT_CANCELLATION_CAPABILITY], map: (input, callId) => ({ op: "fs.editFile", callId, path: input.path, oldText: input.old_text, newText: input.new_text }) }]
-  },
-  write_file: {
-    version: EXECUTOR_CONTRACT_VERSION,
-    description: "Write a file, replacing it entirely if it exists. Use this for brand-new files or full rewrites; use edit_file to change part of an existing file.",
-    inputSchema: exports_external.object({ path: text("File path relative to the session folder."), content: text("The full contents of the file.") }).strict(),
-    routes: [{ primitive: "fs.writeFile", requiredCapabilities: ["fs.writeFile", EFFECT_JOURNAL_CAPABILITY, EFFECT_CANCELLATION_CAPABILITY], map: (input, callId) => ({ op: "fs.writeFile", callId, path: input.path, content: input.content }) }]
-  },
-  delete_file: {
-    version: EXECUTOR_CONTRACT_VERSION,
-    description: "Permanently delete a file or folder and all of its contents from the session folder.",
-    inputSchema: exports_external.object({ path: text("File or folder path relative to the session folder.") }).strict(),
-    routes: [{ primitive: "fs.delete", requiredCapabilities: ["fs.delete", EFFECT_JOURNAL_FS_DELETE_CAPABILITY, EFFECT_CANCELLATION_CAPABILITY, "fs.inspectPath", FS_DELETE_HUMAN_EDIT_SUBTREE_GUARD_CAPABILITY], map: (input, callId) => ({ op: "fs.delete", callId, path: input.path }) }]
-  },
-  run_command: {
-    version: EXECUTOR_CONTRACT_VERSION,
-    description: "Run a shell command inside the session folder and return its output. Call this when the task needs something only a real command can do \u2014 running tests, installing packages, checking git status, building the project. Commands time out after 60 seconds.",
-    inputSchema: exports_external.object({ command: text("The shell command to run.") }).strict(),
-    routes: [{ primitive: "shell.exec", requiredCapabilities: ["shell.exec", EFFECT_JOURNAL_SHELL_EXEC_CAPABILITY, EFFECT_CANCELLATION_CAPABILITY], map: (input, callId) => ({ op: "shell.exec", callId, command: input.command }) }]
-  },
-  show_artifact: {
-    version: EXECUTOR_CONTRACT_VERSION,
-    description: "Show a finished result to the user in the Artifact pane beside the conversation. Call this whenever you create or update something the user will read or look at: a brief, report, guide, or summary the user may want to correct themselves (a Lore Document), a work program (markdown), a dashboard, game, or page (self-contained HTML), or an image. The pane also refreshes automatically when you edit the shown file.",
-    inputSchema: exports_external.object({
-      path: text("Path (relative to the session folder) of the HTML, markdown, text, or image file to display."),
-      title: text('A short human title for the artifact, e.g. "Team dashboard".'),
-      provenance: showArtifactProvenanceSchema.optional()
-    }).strict(),
-    routes: [
-      { primitive: "uploadAsset", requiredCapabilities: ["uploadAsset", EFFECT_JOURNAL_UPLOAD_ASSET_CAPABILITY, EFFECT_CANCELLATION_CAPABILITY], map: (input, callId) => ({ op: "uploadAsset", callId, path: input.path, kind: "artifact" }) },
-      { primitive: "fs.readFile", requiredCapabilities: ["fs.readFile"], map: (input, callId) => ({ op: "fs.readFile", callId, path: input.path }) }
-    ]
-  },
-  browser_open: {
-    version: EXECUTOR_CONTRACT_VERSION,
-    description: "Start a new browser session on the user\u2019s computer, optionally opening a URL. Returns a sessionId to pass to the other browser tools. Prefer reusing an open session over opening a new one.",
-    inputSchema: exports_external.object({ url: text("Optional full https:// URL to open after the session starts. Omit to start blank.").optional() }).strict(),
-    routes: [browserRoute("browser_open")]
-  },
-  browser_navigate: {
-    version: EXECUTOR_CONTRACT_VERSION,
-    description: "Navigate an open browser tab to a full http:// or https:// URL. Returns the resolved page ID and the page\u2019s resulting URL and title.",
-    inputSchema: exports_external.object({ sessionId: text("Session ID from browser_open."), url: text("Full http:// or https:// URL to navigate to."), pageId: text("Optional page ID from browser_status. Defaults to the active tab.").optional() }).strict(),
-    routes: [browserRoute("browser_navigate")]
-  },
-  browser_snapshot: {
-    version: EXECUTOR_CONTRACT_VERSION,
-    description: "Read the current page in an open browser session as a text accessibility tree \u2014 the fastest way to see what is on the page. Each element is listed with a [ref=eN] handle identifying it, valid only until the page changes.",
-    inputSchema: exports_external.object({ sessionId: text("Session ID from browser_open."), pageId: text("Optional page ID from browser_status. Defaults to the most recently opened tab.").optional() }).strict(),
-    routes: [browserRoute("browser_snapshot")]
-  },
-  browser_status: {
-    version: EXECUTOR_CONTRACT_VERSION,
-    description: "List open browser sessions (no arguments), the tabs in one session (sessionId), or details of one tab (sessionId + pageId).",
-    inputSchema: exports_external.object({ sessionId: text("Optional session ID to inspect.").optional(), pageId: text("Optional page ID from a prior browser_status call. Requires sessionId.").optional() }).strict(),
-    routes: [browserRoute("browser_status")]
-  },
-  browser_close: {
-    version: EXECUTOR_CONTRACT_VERSION,
-    description: "Close a browser session opened with browser_open.",
-    inputSchema: exports_external.object({ sessionId: text("Session ID to close.") }).strict(),
-    routes: [browserRoute("browser_close")]
-  },
-  browser_read_text: {
-    version: EXECUTOR_CONTRACT_VERSION,
-    description: "Read the visible text of the current page, or of one element identified by a [ref=eN] handle from browser_snapshot. Selectors, XPath, and expressions are not accepted.",
-    inputSchema: exports_external.object({ sessionId: text("Session ID from browser_open."), ref: exports_external.string().max(BROWSER_REF_MAX_LENGTH).regex(BROWSER_REF_PATTERN).describe("Optional [ref=eN] handle from the latest browser_snapshot.").optional(), pageId: text("Optional page ID from browser_status. Defaults to the active tab.").optional() }).strict(),
-    routes: [browserRoute("browser_read_text")]
-  },
-  browser_click: {
-    version: EXECUTOR_CONTRACT_VERSION,
-    description: "Click one element identified by a [ref=eN] handle from the latest browser_snapshot. The page must remain on the server-observed browser origin.",
-    inputSchema: exports_external.object({ sessionId: text("Session ID from browser_open."), ref: exports_external.string().max(BROWSER_REF_MAX_LENGTH).regex(BROWSER_REF_PATTERN), pageId: text("Optional page ID. Defaults to the active tab.").optional() }).strict(),
-    routes: [browserRoute("browser_click")]
-  },
-  browser_type: {
-    version: EXECUTOR_CONTRACT_VERSION,
-    description: "Type text into one element identified by a [ref=eN] handle from the latest browser_snapshot. The page must remain on the server-observed browser origin.",
-    inputSchema: exports_external.object({ sessionId: text("Session ID from browser_open."), ref: exports_external.string().max(BROWSER_REF_MAX_LENGTH).regex(BROWSER_REF_PATTERN), text: exports_external.string(), pageId: text("Optional page ID. Defaults to the active tab.").optional() }).strict(),
-    routes: [browserRoute("browser_type")]
-  },
-  browser_screenshot: {
-    version: EXECUTOR_CONTRACT_VERSION,
-    description: "Take a screenshot of the current page in an open browser session and look at it directly. Use this when the answer depends on how the page renders \u2014 layout, imagery, charts, a visual bug \u2014 rather than on the text browser_snapshot returns; prefer browser_snapshot when reading the page is enough.",
-    inputSchema: exports_external.object({ sessionId: text("Session ID from browser_open."), pageId: text("Optional page ID from browser_status. Defaults to the most recently opened tab.").optional() }).strict(),
-    routes: [{
-      primitive: "browser.capture",
-      requiredCapabilities: ["browser.act", EXECUTOR_IMAGE_CAPABILITY],
-      map: (input, callId) => ({
-        op: "browser.capture",
-        callId,
-        sessionId: input.sessionId,
-        ...input.pageId === undefined ? {} : { pageId: input.pageId }
-      })
-    }]
-  }
-};
-var ALL_EXECUTOR_TOOL_CAPABILITIES = Object.freeze([...new Set(Object.values(EXECUTOR_TOOL_CONTRACTS).flatMap((contract) => contract.routes.flatMap((route) => [...route.requiredCapabilities])))]);
-var LEDGER_TRACKED_EXECUTOR_EFFECTS = Object.freeze(Object.entries(EXECUTOR_TOOL_CONTRACTS).flatMap(([toolName, contract]) => contract.routes.filter((route) => route.requiredCapabilities.some(isEffectJournalCapability)).map((route) => ({ toolName, primitive: route.primitive }))));
-var routeRequirementsByPrimitive = new Map;
-function assertNonBrowserPrimitiveRouteRequirements(routes) {
-  const requirementsByPrimitive = new Map;
-  for (const route of routes) {
-    if (route.primitive === "browser.act")
-      continue;
-    const existing = requirementsByPrimitive.get(route.primitive);
-    if (existing && (existing.length !== route.requiredCapabilities.length || existing.some((capability, index) => capability !== route.requiredCapabilities[index]))) {
-      throw new Error(`Executor Tool routes for ${route.primitive} have divergent capability requirements`);
-    }
-    requirementsByPrimitive.set(route.primitive, route.requiredCapabilities);
-  }
-}
-var executorToolRoutes = Object.values(EXECUTOR_TOOL_CONTRACTS).flatMap((contract) => contract.routes);
-assertNonBrowserPrimitiveRouteRequirements(executorToolRoutes);
-for (const route of executorToolRoutes) {
-  if (!routeRequirementsByPrimitive.has(route.primitive)) {
-    routeRequirementsByPrimitive.set(route.primitive, route.requiredCapabilities);
-  }
-}
-// ../contracts/src/dockFork.ts
-var forkDockThreadRequestSchema = exports_external.object({}).strict();
-var forkDockThreadResponseSchema = exports_external.object({
-  threadId: exports_external.string(),
-  title: exports_external.string().nullable(),
-  forkedAtBlockId: exports_external.string().nullable(),
-  copiedBlockCount: exports_external.number().int().nonnegative()
-}).strict();
 
 // ../contracts/src/index.ts
 var defaultThreadFileParseSizeLimitInBytes = 50 * 1024 * 1024;
@@ -20488,46 +19816,6 @@ var updateArtifactCommentThreadResponseSchema = exports_external.object({
   id: exports_external.string().min(1),
   resolved_at: exports_external.string().datetime().nullable()
 });
-var dockHostToolMarkerV1Schema = exports_external.object({
-  version: exports_external.literal(1),
-  kind: exports_external.literal("host_tool"),
-  tool_name: exports_external.string().min(1),
-  tool_call_id: exports_external.string().min(1),
-  metadata: exports_external.record(exports_external.string(), exports_external.string())
-}).strict();
-var dockHostToolActivityV1Schema = dockHostToolMarkerV1Schema;
-var dockTerminalPresentationV1Schema = dockHostToolMarkerV1Schema;
-var dockTurnOutcomeV1Schema = exports_external.object({
-  outcome: dockOutcomeSchema,
-  stop_reason: dockWireStopReasonSchema
-}).strict();
-var dockContextCitationSourceSchema = exports_external.object({
-  category: exports_external.enum(["document", "artifact", "lore_history", "output", "repository_material", "other_context"]),
-  title: exports_external.string().min(1).max(512),
-  open_target: exports_external.discriminatedUnion("kind", [
-    exports_external.object({ kind: exports_external.literal("source"), relative_path: exports_external.string().min(1).max(1024) }).strict(),
-    exports_external.object({ kind: exports_external.literal("lore_thread"), thread_id: exports_external.string().min(1).max(40), block_id: exports_external.string().min(1).max(40).nullable() }).strict(),
-    exports_external.object({ kind: exports_external.literal("output"), path: exports_external.string().min(1).max(1024) }).strict()
-  ]).nullable()
-}).strict();
-var dockClaimCitationPresentationV1Schema = exports_external.object({
-  version: exports_external.literal(1),
-  citations: exports_external.array(exports_external.object({
-    display_number: exports_external.number().int().positive().max(64),
-    sources: exports_external.array(dockContextCitationSourceSchema).max(8),
-    restricted_source_count: exports_external.number().int().nonnegative().max(8),
-    unavailable_source_count: exports_external.number().int().nonnegative().max(8)
-  }).strict()).max(64),
-  context_gaps: exports_external.object({
-    omitted_budget_count: exports_external.number().int().nonnegative(),
-    set_aside_count: exports_external.number().int().nonnegative(),
-    set_aside_but_selected_count: exports_external.number().int().nonnegative(),
-    source_list_limit_count: exports_external.number().int().nonnegative(),
-    missing_count: exports_external.number().int().nonnegative(),
-    restricted_count: exports_external.number().int().nonnegative(),
-    unavailable_count: exports_external.number().int().nonnegative()
-  }).strict().nullable()
-}).strict();
 var threadBlockObjectSchema = exports_external.object({
   id: exports_external.string().min(1),
   type: exports_external.string().min(1),
@@ -20535,12 +19823,7 @@ var threadBlockObjectSchema = exports_external.object({
   isCritiqued: exports_external.boolean(),
   comment_threads: exports_external.array(threadBlockCommentThreadSchema).optional(),
   exploration: exports_external.lazy(() => explorationSnapshotSchema).optional(),
-  citation_sources: exports_external.array(exports_external.lazy(() => askThreadsSourceSchema)).optional(),
-  host_tool_activity: exports_external.array(dockHostToolActivityV1Schema).optional(),
-  terminal_presentation: dockTerminalPresentationV1Schema.optional(),
-  turn_outcome: dockTurnOutcomeV1Schema.optional(),
-  context_citations: dockClaimCitationPresentationV1Schema.optional(),
-  turn_id: exports_external.string().min(1).optional()
+  citation_sources: exports_external.array(exports_external.lazy(() => askThreadsSourceSchema)).optional()
 }).passthrough();
 var threadBlockListResponseSchema = exports_external.object({
   type: exports_external.literal("list"),
@@ -21059,6 +20342,9 @@ var createThreadResponseSchema = exports_external.object({
   thread_id: exports_external.string().min(1),
   actor: wbCoreActorDescriptorSchema
 });
+var createThreadActorRequestSchema = exports_external.object({
+  client_id: exports_external.uuid().describe("Stable client identity, reused for actor provisioning and reconnects")
+});
 var updateThreadRequestSchema = exports_external.object({
   visibility: exports_external.enum(["private", "workspace", "public"]).optional(),
   title: exports_external.string().trim().min(1).max(200).optional()
@@ -21478,50 +20764,10 @@ var artifactIndexResponseSchema = exports_external.object({
   has_more: exports_external.boolean(),
   objects: exports_external.array(artifactSummarySchema)
 });
-var artifactOutputProvenanceStatusSchema = exports_external.enum(["complete", "partial", "unavailable"]);
-var artifactOutputProvenanceEvidenceCategorySchema = exports_external.enum([
-  "repository_material",
-  "document",
-  "artifact",
-  "lore_history",
-  "output",
-  "conversation",
-  "governing_context",
-  "other_context"
-]);
-var artifactOutputProvenancePresentationSchema = exports_external.strictObject({
-  status: artifactOutputProvenanceStatusSchema,
-  evidence: exports_external.array(exports_external.strictObject({
-    category: artifactOutputProvenanceEvidenceCategorySchema,
-    labels: exports_external.array(exports_external.string().min(1)),
-    total_count: exports_external.number().int().nonnegative()
-  })),
-  inferences: exports_external.array(exports_external.string()),
-  uncertainties: exports_external.array(exports_external.string()),
-  derived_from: exports_external.array(exports_external.strictObject({
-    title: exports_external.string().min(1),
-    pinned_version_ordinal: exports_external.number().int().positive(),
-    current_version_ordinal: exports_external.number().int().positive(),
-    finding: exports_external.string().nullable(),
-    web_url: exports_external.string()
-  })),
-  restricted_source_count: exports_external.number().int().nonnegative(),
-  unavailable_source_count: exports_external.number().int().nonnegative()
-});
-var artifactOutputHumanAuthorshipPresentationSchema = exports_external.strictObject({
-  status: exports_external.literal("human_authored"),
-  edited_by: exports_external.strictObject({ user_id: exports_external.string(), display_name: exports_external.string().nullable() }).nullable().describe("The person who wrote these bytes, or null when their account has since been removed."),
-  edited_at: exports_external.string().describe("ISO-8601 time this version was saved.")
-});
-var artifactOutputProvenanceSchema = exports_external.discriminatedUnion("status", [
-  artifactOutputProvenancePresentationSchema,
-  artifactOutputHumanAuthorshipPresentationSchema
-]);
 var artifactDetailResponseSchema = artifactSummarySchema.extend({
   download_url: exports_external.string().describe("Presigned, time-limited URL to download the artifact bytes."),
   download_url_expires_at: exports_external.string().describe("ISO-8601 expiry for download_url."),
   preview_url: exports_external.string().nullable().describe("Presigned, time-limited URL that serves the bytes inline for embedding (iframe/img). null when the type is not previewable."),
-  provenance: artifactOutputProvenanceSchema.nullable(),
   current_version_id: exports_external.string().nullable().describe("The version id these bytes are, or null when the artifact has no version history. Pass it as `base_version_id` when saving an edit."),
   current_version_ordinal: exports_external.number().int().positive().nullable().describe("The current version's position in the history (1 is the first save), or null when the artifact has no version history."),
   current_version_saved_at: exports_external.string().nullable().describe("ISO-8601 time the current version was written, or null when the artifact has no version history."),
@@ -21593,39 +20839,6 @@ var uploadThreadAttachmentResponseSchema = exports_external.object({
   digest: exports_external.string().describe("Lowercase hex SHA-256 of the stored bytes, server-derived."),
   byte_length: exports_external.number().int().positive().describe("Decoded byte length, server-derived.")
 });
-var recordDockOutputRequestSchema = exports_external.object({
-  harness: exports_external.string().describe("Harness of the source session, e.g. dock"),
-  harness_internal_id: exports_external.string().describe("Source session id (threads.harness_internal_id)"),
-  tool_call_id: exports_external.string().min(1).optional().describe("Successful canonical show_artifact Tool call identity."),
-  path: exports_external.string().min(1).describe("Path relative to the Session folder, e.g. docs/plan.md. With the thread this is the Output's identity, so the server canonicalizes it before storing \u2014 `\\` becomes `/`, duplicate slashes collapse, and `.` segments drop, which makes `./plan.md` and `plan.md` one Output rather than two. Callers should still send a normalized path. Absolute paths and `..` segments are rejected rather than resolved (400)."),
-  title: exports_external.string().min(1).describe("The name a person recognizes, e.g. Quarterly plan"),
-  content_base64: exports_external.string().min(1).describe("Output bytes, base64-encoded. Max 10 MiB decoded."),
-  content_type: exports_external.string().nullable().optional().describe("MIME type, e.g. text/markdown"),
-  content_hash: exports_external.string().regex(/^sha256:[0-9a-f]{64}$/, "content_hash must be sha256:<64 lowercase hex> over the decoded bytes").describe("sha256:<64 lowercase hex> over the decoded bytes. The server verifies it before writing: an equal hash suppresses the upload and the new version, so the dedupe decision must not be caller-assertable.")
-});
-var recordDockOutputResponseSchema = exports_external.object({
-  output_id: exports_external.string().describe("Durable Output id, e.g. dout_..."),
-  thread_id: exports_external.string(),
-  version_created: exports_external.boolean().describe("False when the bytes matched the current version: no upload, no new version."),
-  version_ordinal: exports_external.number().int().positive().describe("Ordinal of the current version after this call \u2014 a number a person can say out loud."),
-  web_url: exports_external.string().describe("Lore web URL that opens this Output for the team (the mirrored artifact page).")
-});
-var recordDockOutputErrorResponseSchema = errorSchema7.extend({
-  document_rejection: documentRejectionSchema.optional()
-});
-var judgeDockOutputPromotionRequestSchema = exports_external.object({
-  content_base64: exports_external.string().min(1).describe("The shown bytes, base64-encoded. Max 10 MiB decoded."),
-  content_type: exports_external.string().nullable().optional().describe("The MIME type the mirror will state for this path, e.g. text/html. A type that contradicts HTML (text/markdown) makes the verdict not_a_document, exactly as it would at the mirror.")
-});
-var judgeDockOutputPromotionResponseSchema = exports_external.discriminatedUnion("promotion", [
-  exports_external.object({ promotion: exports_external.literal("storable") }),
-  exports_external.object({ promotion: exports_external.literal("not_a_document") }),
-  exports_external.object({
-    promotion: exports_external.literal("rejected"),
-    document_rejection: documentRejectionSchema,
-    notice: exports_external.string().describe("The refusal as one sentence for the model, appended to the show Observation verbatim.")
-  })
-]);
 var saveDocumentArtifactRequestSchema = exports_external.object({
   content: exports_external.string().min(1).describe("The edited document, as either interchange form: the v2 AST envelope (`lore_document_v2` JSON \u2014 what the editor sends) or HTML (what models write, and what older editors sent). Canonicalized server-side before storage; storage is the v2 AST form."),
   base_version_id: exports_external.string().min(1).describe("The version this edit was made against, e.g. dovr_... \u2014 the `current_version_id` the editor loaded. Re-checked under the write lock: if it no longer names the current version someone else wrote meanwhile and this save is refused with 409 rather than silently overwriting them.")
@@ -21642,62 +20855,6 @@ var saveDocumentArtifactConflictResponseSchema = errorSchema7.extend({
 });
 var saveDocumentArtifactRejectionResponseSchema = errorSchema7.extend({
   document_rejection: documentRejectionSchema
-});
-var setDockOutputDemotedRequestSchema = exports_external.object({
-  harness: exports_external.string().min(1),
-  harness_internal_id: exports_external.string().min(1),
-  path: exports_external.string().min(1),
-  demoted: exports_external.boolean()
-});
-var setDockOutputDemotedResponseSchema = exports_external.object({ demoted: exports_external.boolean() });
-var setDockOutputDemotedNotFoundResponseSchema = exports_external.object({
-  code: exports_external.enum(["session_missing", "output_missing"]),
-  message: exports_external.string()
-});
-var listDockOutputsQuerySchema = exports_external.object({
-  thread_id: exports_external.string().min(1).describe("Thread whose Outputs to list, e.g. th_.... Visibility is derived from that thread.")
-});
-var dockOutputSummarySchema = exports_external.object({
-  id: exports_external.string(),
-  path: exports_external.string(),
-  title: exports_external.string(),
-  version_ordinal: exports_external.number().int().positive().describe("The current version's ordinal."),
-  size_in_bytes: exports_external.number().int().nonnegative().describe("The current version's size."),
-  mime_type: exports_external.string().nullable(),
-  demoted: exports_external.boolean().describe("True when removed from the Outputs surface. Demoted Outputs are flagged, never omitted."),
-  updated_at: exports_external.string()
-});
-var listDockOutputsResponseSchema = exports_external.object({
-  objects: exports_external.array(dockOutputSummarySchema),
-  has_more: exports_external.boolean().describe("True when the thread has more Outputs than this bounded read returned. There is no cursor: the cap is a ceiling, not a page size, and demoted Outputs are included in it \u2014 so a demote-heavy thread needs this flag to say the tail was dropped rather than hiding it.")
-});
-var dockOutputVersionOriginSchema = exports_external.enum(["model", "human"]).describe("Who authored the bytes: the model, or a person who typed them.");
-var dockOutputVersionSummarySchema = exports_external.object({
-  id: exports_external.string().describe("Version id, e.g. dovr_... \u2014 the value a document save passes as base_version_id."),
-  ordinal: exports_external.number().int().positive().describe("The small, monotonic number a person can say out loud; never reused."),
-  origin: dockOutputVersionOriginSchema,
-  editor: exports_external.object({ id: exports_external.string(), display_name: exports_external.string().nullable() }).nullable().describe("Who typed this version's bytes. null for model versions, and for human versions whose editor's account is gone."),
-  created_at: exports_external.string(),
-  size_in_bytes: exports_external.number().int().nonnegative(),
-  mime_type: exports_external.string().nullable(),
-  is_current: exports_external.boolean().describe("True for the version the Output currently points at."),
-  content_reclaimed: exports_external.boolean().describe("True when retention reclaimed the bytes: the version existed, its record remains, its content is gone. Distinct from a version that never existed, which is a 404.")
-});
-var listDockOutputVersionsResponseSchema = exports_external.object({
-  output: exports_external.object({
-    id: exports_external.string(),
-    thread_id: exports_external.string(),
-    path: exports_external.string(),
-    title: exports_external.string(),
-    current_version_id: exports_external.string()
-  }),
-  objects: exports_external.array(dockOutputVersionSummarySchema).describe("Newest first. Pruned versions are flagged, never omitted."),
-  has_more: exports_external.boolean().describe("True when the history is longer than this bounded read returned.")
-});
-var dockOutputVersionContentResponseSchema = dockOutputVersionSummarySchema.extend({
-  content: exports_external.string().nullable().describe("The version bytes inline, for text content the API can read. A lore_document_v2 version stores the AST envelope and reads here as its canonical HTML rendering \u2014 the same bytes a v1 version of the document stored \u2014 while download_url serves the stored envelope. null when the content was reclaimed, is binary, or could not be read \u2014 the metadata around it still answers what the version was."),
-  download_url: exports_external.string().nullable().describe("Presigned, time-limited URL for the version bytes. null when the content was reclaimed."),
-  download_url_expires_at: exports_external.string().nullable().describe("ISO-8601 expiry for download_url.")
 });
 var skillInstallationSkillSchema = exports_external.object({
   id: exports_external.string(),
@@ -22800,6 +21957,24 @@ var apiContract = c7.router({
     },
     summary: "Create a Workbench thread and its keyed Workbench Core actor"
   },
+  createThreadActor: {
+    method: "POST",
+    path: "/threads/:id/actor",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1)
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: createThreadActorRequestSchema,
+    responses: {
+      201: createThreadResponseSchema,
+      401: errorSchema7,
+      404: errorSchema7,
+      503: errorSchema7
+    },
+    summary: "Provision and describe the Workbench Core actor for an existing Workbench thread"
+  },
   getThread: {
     method: "GET",
     path: "/threads/:id",
@@ -23452,92 +22627,6 @@ var apiContract = c7.router({
       413: errorSchema7
     },
     summary: "Upload one image for a Lore thread message attachment and get its artifact reference"
-  },
-  recordDockOutput: {
-    method: "POST",
-    path: "/dock/outputs",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: recordDockOutputRequestSchema,
-    responses: {
-      200: recordDockOutputResponseSchema,
-      400: recordDockOutputErrorResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7,
-      409: errorSchema7,
-      413: errorSchema7
-    },
-    summary: "Mirror a promoted Workbench Output to its session thread, versioned and deduped"
-  },
-  judgeDockOutputPromotion: {
-    method: "POST",
-    path: "/dock/outputs/promotion-verdict",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: judgeDockOutputPromotionRequestSchema,
-    responses: {
-      200: judgeDockOutputPromotionResponseSchema,
-      400: errorSchema7,
-      401: errorSchema7,
-      413: errorSchema7
-    },
-    summary: "Judge whether shown bytes would promote as a Lore Document, without writing anything \u2014 the show-time half of the mirror's verdict"
-  },
-  setDockOutputDemoted: {
-    method: "POST",
-    path: "/dock/outputs/demotion",
-    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
-    body: setDockOutputDemotedRequestSchema,
-    responses: { 200: setDockOutputDemotedResponseSchema, 400: errorSchema7, 401: errorSchema7, 404: setDockOutputDemotedNotFoundResponseSchema },
-    summary: "Remove or restore a durable Output for the authenticated Dock session"
-  },
-  listDockOutputs: {
-    method: "GET",
-    path: "/dock/outputs",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    query: listDockOutputsQuerySchema,
-    responses: {
-      200: listDockOutputsResponseSchema,
-      401: errorSchema7
-    },
-    summary: "List a visible thread's durable Outputs, newest-updated first, demoted ones flagged"
-  },
-  listDockOutputVersions: {
-    method: "GET",
-    path: "/dock/outputs/:id/versions",
-    pathParams: exports_external.object({
-      id: exports_external.string().min(1).describe("Output id, e.g. dout_...")
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    responses: {
-      200: listDockOutputVersionsResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7
-    },
-    summary: "List one Output's version history, newest first, pruned versions flagged rather than omitted"
-  },
-  getDockOutputVersion: {
-    method: "GET",
-    path: "/dock/outputs/:id/versions/:ordinal",
-    pathParams: exports_external.object({
-      id: exports_external.string().min(1).describe("Output id, e.g. dout_..."),
-      ordinal: exports_external.coerce.number().int().positive().describe("The version's ordinal.")
-    }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    responses: {
-      200: dockOutputVersionContentResponseSchema,
-      401: errorSchema7,
-      404: errorSchema7
-    },
-    summary: "Read one version of an Output: inline text content when readable, plus a presigned download URL"
   },
   getSkillPackage: {
     method: "GET",
@@ -25560,9 +24649,6 @@ var TokensFileSchema = exports_external.object({
 function tokensFilePath(stateDir) {
   return path2.join(stateDir, "tokens.json");
 }
-function tempPathFor(p) {
-  return `${p}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
-}
 function isEnoent2(err) {
   return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
 }
@@ -25578,9 +24664,6 @@ function parseTokensFile(raw, p) {
     throw new Error(`tokens file at ${p} failed schema validation: ${result.error.message}`);
   }
   return result.data;
-}
-function serializeFile(file2) {
-  return JSON.stringify(TokensFileSchema.parse(file2));
 }
 async function readFileAsync(stateDir) {
   const p = tokensFilePath(stateDir);
@@ -25598,8 +24681,8 @@ async function writeFileAsyncAtomic(stateDir, file2) {
   const p = tokensFilePath(stateDir);
   await fsp2.mkdir(stateDir, { recursive: true, mode: 448 });
   await fsp2.chmod(stateDir, 448);
-  const tmp = tempPathFor(p);
-  const body = serializeFile(file2);
+  const tmp = `${p}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
+  const body = JSON.stringify(TokensFileSchema.parse(file2));
   try {
     const fh = await fsp2.open(tmp, "w", 384);
     try {
@@ -25822,16 +24905,16 @@ function stateDir2(home = os3.homedir()) {
     return path6.resolve(expandHome2(devStateDir, home));
   return path6.join(home, ".lore");
 }
-function resourceUrl(base3) {
-  return `${base3}/mcp`;
+function resourceUrl(base) {
+  return `${base}/mcp`;
 }
 var inFlight = null;
 function discoverEndpoints(opts) {
   if (inFlight)
     return inFlight;
-  const base3 = cloudBaseUrl();
+  const base = cloudBaseUrl();
   const p = discoverOAuthEndpoints({
-    resource: resourceUrl(base3),
+    resource: resourceUrl(base),
     stateDir: stateDir2(opts?.home),
     fetchImpl: opts?.fetchImpl,
     now: opts?.now
@@ -26314,9 +25397,9 @@ function readCodexSessionId(transcriptPath) {
   if (firstLine !== null) {
     try {
       const parsed = JSON.parse(firstLine);
-      const id2 = nonBlank(parsed.payload?.id);
-      if (id2 !== null)
-        return id2;
+      const id = nonBlank(parsed.payload?.id);
+      if (id !== null)
+        return id;
     } catch {}
   }
   return inferSessionIdFromFilename(transcriptPath);
@@ -26339,10 +25422,10 @@ function readFirstLine(filePath, maxBytes = 16 * 1024) {
   }
 }
 function inferSessionIdFromFilename(transcriptPath) {
-  const base3 = path10.basename(transcriptPath, ".jsonl");
+  const base = path10.basename(transcriptPath, ".jsonl");
   const uuidSuffix = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
-  const match = base3.match(uuidSuffix);
-  return match?.[1] ?? base3;
+  const match = base.match(uuidSuffix);
+  return match?.[1] ?? base;
 }
 
 // server-src/lib/session/cowork.ts
@@ -27356,10 +26439,10 @@ var readLocalSessionTool = {
 // server-src/lib/clipboard.ts
 import { spawn } from "child_process";
 import os7 from "os";
-async function copyToClipboard(text2, options = {}) {
+async function copyToClipboard(text, options = {}) {
   const timeoutMs = options.timeoutMs ?? 2000;
   for (const candidate of clipboardCandidates()) {
-    const ok = await runClipboardCandidate(candidate, text2, timeoutMs);
+    const ok = await runClipboardCandidate(candidate, text, timeoutMs);
     if (ok)
       return true;
   }
@@ -27381,7 +26464,7 @@ function clipboardCandidates() {
       return [];
   }
 }
-async function runClipboardCandidate(candidate, text2, timeoutMs) {
+async function runClipboardCandidate(candidate, text, timeoutMs) {
   return new Promise((resolve2) => {
     let child;
     try {
@@ -27410,7 +26493,7 @@ async function runClipboardCandidate(candidate, text2, timeoutMs) {
       settle(code === 0);
     });
     child.stdin?.on("error", () => {});
-    child.stdin?.end(text2);
+    child.stdin?.end(text);
   });
 }
 
@@ -27773,8 +26856,8 @@ async function initiateDeviceCode(opts) {
     body
   });
   if (!res.ok) {
-    const text2 = await res.text().catch(() => "");
-    const excerpt = text2.length > 200 ? `${text2.slice(0, 200)}...` : text2;
+    const text = await res.text().catch(() => "");
+    const excerpt = text.length > 200 ? `${text.slice(0, 200)}...` : text;
     throw new Error(`device-code request failed: HTTP ${res.status} ${excerpt}`);
   }
   let json2;
@@ -28196,18 +27279,18 @@ function extractThreadUrl(result) {
       continue;
     if (block.type !== "text")
       continue;
-    const text2 = block.text;
-    if (typeof text2 !== "string" || text2.trim() === "")
+    const text = block.text;
+    if (typeof text !== "string" || text.trim() === "")
       continue;
-    const parsedUrl = extractThreadUrlFromJsonText(text2);
+    const parsedUrl = extractThreadUrlFromJsonText(text);
     if (parsedUrl)
       return parsedUrl;
   }
   return;
 }
-function extractThreadUrlFromJsonText(text2) {
+function extractThreadUrlFromJsonText(text) {
   try {
-    const parsed = JSON.parse(text2);
+    const parsed = JSON.parse(text);
     const url2 = parsed.thread_url;
     return typeof url2 === "string" && url2.trim() !== "" ? url2 : undefined;
   } catch {
@@ -28216,14 +27299,14 @@ function extractThreadUrlFromJsonText(text2) {
 }
 function formatShareResult(result) {
   if (result !== null && typeof result === "object" && Array.isArray(result.content)) {
-    const text2 = result.content.map((block) => {
+    const text = result.content.map((block) => {
       if (block !== null && typeof block === "object" && block.type === "text" && typeof block.text === "string") {
         return block.text;
       }
       return JSON.stringify(block);
     }).join(`
 `);
-    return text2 || "Lore share returned no message.";
+    return text || "Lore share returned no message.";
   }
   if (typeof result === "string")
     return result;
