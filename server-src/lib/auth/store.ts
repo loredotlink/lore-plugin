@@ -3,16 +3,12 @@
  * cloud-proxy tools.
  *
  * The token format, atomic-write semantics, file permissions, and schema live
- * in the shared `@lore/identity-store` package so the plugin and the CLI share
- * ONE file with per-client slots (ADR-0002 Phase 0, ADR-0008). This module is
+ * in the shared `@lore/identity-store` package. This module is
  * the plugin-side adapter: it keeps the established `readTokens` /
  * `writeTokens` / `deleteTokens` / `tokensFilePath` surface (and the `home`
  * override used by tests) but binds every call to the plugin's `plugin` slot,
- * so a CLI login/refresh never clobbers the plugin's tokens and vice versa.
  *
- * Migration: a flat pre-v2 `~/.lore/tokens.json` is routed to the `plugin`
- * slot on read by `@lore/identity-store` when it looks like an AuthKit token.
- * The plugin's own pre-consolidation layout
+ * The plugin's pre-consolidation layout
  * (`~/Library/Application Support/tanagram/lore/tokens.json`) is recovered
  * here on first read after upgrade.
  */
@@ -23,7 +19,7 @@ import {
   type Tokens,
   TokensSchema,
   deleteClientTokens,
-  deleteLegacyTokens,
+  deleteLegacyPluginTokens,
   legacyPluginTokensFile,
   migrateLegacyPluginTokens,
   readClientTokens,
@@ -41,8 +37,8 @@ function expandHome(p: string, home: string): string {
 }
 
 /**
- * Canonical Lore state directory. Shared with the CLI; production resolves to
- * `~/.lore`, while local/dev harness installs may pass `LORE_DEV_STATE_DIR` so
+ * Canonical Lore state directory. Production resolves to `~/.lore`, while
+ * local/dev harness installs may pass `LORE_DEV_STATE_DIR` so
  * the plugin reads the same client-keyed token file the desktop configured.
  */
 export function stateDir(home: string = os.homedir()): string {
@@ -64,11 +60,8 @@ export function tokensFilePath(home: string = os.homedir()): string {
  *
  * On a canonical miss, recover the plugin's own pre-consolidation Application
  * Support layout once (that file only ever held the plugin's AuthKit token).
- * The legacy CLI two-file layout is deliberately NOT adopted here: it holds a
- * WorkOS User Management token belonging to the CLI, and the CLI now owns its
- * own slot (TAN-4329). A corrupt/invalid canonical file degrades to logged-out
- * rather than throwing on the cloud-proxy auth hot path (symmetric with the
- * CLI); recovery is re-login.
+ * A corrupt or invalid canonical file degrades to logged-out rather than
+ * throwing on the cloud-proxy auth hot path. Recovery requires a new login.
  */
 export async function readTokens(home?: string): Promise<Tokens | null> {
   const dir = stateDir(home);
@@ -83,29 +76,24 @@ export async function readTokens(home?: string): Promise<Tokens | null> {
   const migrated = migrateLegacyPluginTokens(legacyPluginTokensFile(home));
   if (!migrated) return null;
   await writeClientTokens(dir, CLIENT_KEY, migrated);
-  deleteLegacyTokens(dir, home);
+  deleteLegacyPluginTokens(home);
   return migrated;
 }
 
 /**
- * Persist the plugin's slot atomically (preserving the CLI's slot), then clear
- * all legacy layouts: the v2 file is now the source of truth, so leftover
- * legacy files must not survive to be re-migrated by either client.
+ * Persist the plugin's slot atomically, then clear its old token file.
  */
 export async function writeTokens(tokens: Tokens, home?: string): Promise<void> {
   const dir = stateDir(home);
   await writeClientTokens(dir, CLIENT_KEY, tokens);
-  deleteLegacyTokens(dir, home);
+  deleteLegacyPluginTokens(home);
 }
 
 /**
- * Remove the plugin's slot (leaving the CLI's slot intact) plus every legacy
- * layout. Clearing legacy matters because either client would otherwise
- * re-migrate a leftover on its next read and resurrect a session the user just
- * logged out of. No-op when absent.
+ * Remove the plugin's slot and its old token file. No-op when absent.
  */
 export async function deleteTokens(home?: string): Promise<void> {
   const dir = stateDir(home);
   await deleteClientTokens(dir, CLIENT_KEY);
-  deleteLegacyTokens(dir, home);
+  deleteLegacyPluginTokens(home);
 }

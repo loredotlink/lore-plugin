@@ -7,7 +7,7 @@ import {
  * Shared OAuth client constants for the AuthKit migration.
  *
  * These are public values — not secrets — and are safe to commit to source.
- * Per RFC 8252 §8.4, native OAuth clients (including CLI/MCP plugins) are
+ * Per RFC 8252 §8.4, native OAuth clients (including MCP plugins) are
  * "public clients": the client_id is not a credential and its exposure to
  * end users is expected and intentional.
  */
@@ -17,7 +17,7 @@ import {
  *
  * Used in every OAuth token request — device-code polling, refresh — as the
  * `client_id` form parameter. This is a WorkOS Connect public application
- * configured for CLI Auth / RFC 8628 device authorization. It is public,
+ * configured for RFC 8628 device authorization. It is public,
  * stable, safe to commit, and not a credential.
  *
  * Why static, not the CIMD URL:

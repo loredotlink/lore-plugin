@@ -23,7 +23,7 @@ Amp is intentionally different: the Amp adapter exports an explicitly resolved A
 
 The plugin is a discovery, manual-share, local-read, authentication, and cloud-consumption surface. It does not configure, install, enable, disable, inspect, or execute background capture.
 
-The Lore desktop app owns its embedded capture process and the **Configure Session Uploads** UI. The interactive CLI owns standalone upload configuration (`lore configure`) and background-agent lifecycle. Plugin code must not shell out to those CLI commands or maintain a parallel consent/configuration state machine. The only plugin state retained is a share counter used to show the desktop discovery tip after the first three successful manual shares; legacy consent and dismissal fields are ignored when older state files are read.
+The Lore desktop app owns capture and the **Configure Session Uploads** UI. Plugin code must not maintain a parallel consent/configuration state machine. The only plugin state retained is a share counter used to show the desktop discovery tip after the first three successful manual shares; legacy consent and dismissal fields are ignored when older state files are read.
 
 ## Package layout
 
@@ -184,11 +184,11 @@ Flow summary:
 1. Discover the protected resource and authorization server from Lore
 2. Start WorkOS AuthKit device authorization when needed
 3. Open the browser automatically when possible
-4. Persist tokens through `@lore/identity-store` under the canonical `~/.lore/tokens.json` shared with the CLI
+4. Persist tokens through `@lore/identity-store` under the canonical `~/.lore/tokens.json`
 5. Refresh silently when access tokens are near expiry
 6. On cloud-side 401, clear local tokens and ask the agent to run `lore_login` again
 
-This keeps Claude Code, Cowork, Codex, and Amp on the same auth path. No separate CLI bootstrap is required for the plugin package.
+This keeps Claude Code, Cowork, Codex, and Amp on the same auth path. No separate bootstrap is required for the plugin package.
 
 ## Why `skills/` instead of `commands/`
 

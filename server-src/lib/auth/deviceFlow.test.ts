@@ -21,7 +21,7 @@
  *   ✓ initiateDeviceCode: POSTs correct body (client_id, scope, resource)
  *   ✓ initiateDeviceCode: resource from discovery is in the POST body
  *   ✓ initiateDeviceCode: scope is AUTHKIT_SCOPES (not legacy "mcp.read mcp.write")
- *   ✓ initiateDeviceCode: client_id is the registered WorkOS public CLI client
+ *   ✓ initiateDeviceCode: client_id is the registered WorkOS public plugin client
  *   ✓ initiateDeviceCode: validates required fields via Zod (missing field throws)
  *   ✓ pollDeviceToken success: polls until 200, validates token response, writes to store
  *   ✓ pollDeviceToken authorization_pending: retries at the specified interval
@@ -241,7 +241,7 @@ describe('initiateDeviceCode', () => {
     expect(result.interval).toBe(5);
   });
 
-  test('POST body includes client_id = registered WorkOS public CLI client', async () => {
+  test('POST body includes client_id = registered WorkOS public plugin client', async () => {
     let capturedBody: string | undefined;
     const fetchImpl = makeRoutingFetch({
       deviceResponse: () => jsonResponse(makeDeviceCodeBody()),
@@ -253,7 +253,7 @@ describe('initiateDeviceCode', () => {
     const params = new URLSearchParams(capturedBody);
     expect(params.get('client_id')).toBe('client_01KRSDB9SR20N7MB0D9MPS05Q6');
     expect(params.get('client_id')).toBe(PLUGIN_AUTHKIT_CLIENT_ID);
-    // WorkOS CLI Auth device flow is configured for this public client id;
+    // WorkOS device authorization is configured for this public client id;
     // it is intentionally public and safe to commit per RFC 8252 §8.4.
     // See constants.ts for why we're not using the CIMD URL form here.
     expect(params.get('client_id')).toMatch(/^client_/);

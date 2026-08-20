@@ -151,8 +151,7 @@ export function detectSource(
   //    under `local-agent-mode-sessions/<acct>/<org>/local_*/audit.jsonl`, not
   //    in `~/.claude/projects`, so routing to ClaudeCodeSource (step 1) would
   //    look in the wrong root and fail with "session not found" + an empty
-  //    list_local_sessions. Detect Cowork the same way the CLI's
-  //    `resolveSessionFromCwd` does: the working directory has a
+  //    list_local_sessions. Detect Cowork from the working directory's
   //    `local-agent-mode-sessions` path segment. Prefer `CLAUDE_PROJECT_DIR`
   //    (Claude Code injects it into MCP stdio children) over `process.cwd()`.
   if (isCoworkCwd(nonBlank(env.CLAUDE_PROJECT_DIR) ?? safeCwd())) {

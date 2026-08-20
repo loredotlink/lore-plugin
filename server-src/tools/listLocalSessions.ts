@@ -8,8 +8,8 @@
  * tool error.
  *
  * Why this exists separately from the default share flow:
- *   - The default share flow uses `find_latest_session` / the CLI's
- *     own resolution to pick "this" session. It does not call this
+ *   - The default share flow uses `find_latest_session` to pick "this"
+ *     session. It does not call this
  *     tool.
  *   - This tool is the agent's escape hatch when the user asks to
  *     share something other than the current session (e.g. "share the

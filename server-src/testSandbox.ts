@@ -99,7 +99,7 @@ export function armRealLoreWriteGuard(): void {
   patchAsync(fsp, 'open');
   patchAsync(fsp, 'rename', [0, 1]);
 
-  // Sync (CLI) path.
+  // Synchronous path.
   patchSync(fs, 'mkdirSync');
   patchSync(fs, 'writeFileSync');
   patchSync(fs, 'rmSync');

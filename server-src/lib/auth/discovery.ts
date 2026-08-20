@@ -1,9 +1,8 @@
 /**
  * Endpoint discovery via PRM → AS metadata.
  *
- * The protocol implementation lives in `@lore/identity-store` so the CLI and
- * plugin refresh the same AuthKit tokens through the same discovery rules. This
- * file keeps the plugin-local public API, environment selection, and in-flight
+ * The protocol implementation lives in `@lore/identity-store`. This file keeps
+ * the plugin-local public API, environment selection, and in-flight
  * de-duplication used by the MCP tools.
  */
 

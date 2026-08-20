@@ -358,7 +358,7 @@ describe('getValidAccessToken', () => {
     expect(params.get('client_id')).toBe(PLUGIN_AUTHKIT_CLIENT_ID);
   });
 
-  test('client_id in the POST body is the registered WorkOS public CLI client', async () => {
+  test('client_id in the POST body is the registered WorkOS public plugin client', async () => {
     await writeTokens(expiredTokens(), home);
     let capturedBody: string | undefined;
     const fetchImpl = makeFullRoutingFetch({
@@ -371,7 +371,7 @@ describe('getValidAccessToken', () => {
     const params = new URLSearchParams(capturedBody);
     expect(params.get('client_id')).toBe('client_01KRSDB9SR20N7MB0D9MPS05Q6');
     expect(params.get('client_id')).toBe(PLUGIN_AUTHKIT_CLIENT_ID);
-    // WorkOS CLI Auth device flow is configured for this public client id;
+    // WorkOS device authorization is configured for this public client id;
     // it is intentionally public and safe to commit per RFC 8252 §8.4.
     expect(params.get('client_id')).toMatch(/^client_/);
     // Explicitly verify it is NOT the legacy pre-AuthKit client id.

@@ -59,8 +59,7 @@ export type ReadLocalSessionResult = {
 /**
  * Treat empty string / whitespace as "not provided". When the input
  * is a non-blank string, return the *trimmed* form so downstream
- * lookups and error messages don't see surrounding whitespace —
- * matches the lore CLI's `shareSession.ts` normalization idiom.
+ * lookups and error messages don't see surrounding whitespace.
  */
 function nonBlank(value: unknown): string | null {
   if (typeof value !== 'string') return null;

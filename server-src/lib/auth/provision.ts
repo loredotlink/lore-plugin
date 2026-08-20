@@ -2,16 +2,10 @@
  * Self-provision the shared, long-lived Lore API key from the plugin's login
  * flow.
  *
- * Why the plugin mints its own key (rather than relying on the CLI):
- *   The CLI's WorkOS User-Management token is accepted by the REST
- *   `createUploadApiKey` endpoint, but the plugin's AuthKit token carries the
- *   MCP audience and is rejected by that REST parser. So the plugin cannot mint
- *   over REST. Instead it calls the cloud `create_api_key` MCP tool — reachable
- *   with the MCP-audience token it already holds — and stores the returned raw
- *   key in the shared top-level `apiKey` slot every client reads. A user whose
- *   first (or only) Lore contact is the plugin's `lore_login` therefore still
- *   gets the durable credential that removes the refresh surface and fixes
- *   auto-share from credential-less child contexts.
+ * The plugin calls the cloud `create_api_key` MCP tool with its MCP-audience
+ * token and stores the returned key in the shared top-level `apiKey` slot.
+ * A user whose first Lore contact is `lore_login` therefore gets the durable
+ * credential needed by credential-less child contexts.
  *
  * Why the raw key never touches the agent:
  *   `create_api_key` is intentionally NOT in the agent-facing proxy tool set

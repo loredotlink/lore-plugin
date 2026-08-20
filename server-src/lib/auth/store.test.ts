@@ -84,21 +84,6 @@ describe('read/write/delete (adapter over the canonical store)', () => {
     await expect(deleteTokens(home)).resolves.toBeUndefined();
   });
 
-  test('deleteTokens also clears the legacy CLI token files in ~/.lore', async () => {
-    // The CLI's pre-consolidation files live in the same shared dir; if logout
-    // left them behind the CLI would re-migrate them and resurrect the session.
-    const stateDir = path.join(home, '.lore');
-    fs.mkdirSync(stateDir, { recursive: true });
-    fs.writeFileSync(path.join(stateDir, 'token'), 'legacy-access', 'utf8');
-    fs.writeFileSync(path.join(stateDir, 'refresh_token'), 'legacy-refresh', 'utf8');
-    await writeTokens(validTokens, home);
-
-    await deleteTokens(home);
-
-    expect(fs.existsSync(path.join(stateDir, 'token'))).toBe(false);
-    expect(fs.existsSync(path.join(stateDir, 'refresh_token'))).toBe(false);
-  });
-
   test('degrades to null (does not throw) when the canonical file is corrupt', async () => {
     const file = tokensFilePath(home);
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -118,31 +103,6 @@ describe('read/write/delete (adapter over the canonical store)', () => {
     expect(fs.existsSync(legacy)).toBe(false);
   });
 
-  test('does NOT adopt the legacy CLI two-file layout (separate identities, TAN-4329)', async () => {
-    // Pre-consolidation the plugin and CLI shared one identity, so the plugin
-    // migrated the CLI's two-file layout too. Under TAN-4329 they authenticate
-    // separately: that layout holds the CLI's WorkOS User Management token,
-    // which must not become the plugin's AuthKit token. The plugin stays
-    // logged out; the CLI owns and re-authenticates its own slot.
-    const stateDir = path.join(home, '.lore');
-    fs.mkdirSync(stateDir, { recursive: true });
-    fs.writeFileSync(path.join(stateDir, 'token'), 'cli-access', 'utf8');
-    fs.writeFileSync(path.join(stateDir, 'refresh_token'), 'cli-refresh', 'utf8');
-
-    expect(await readTokens(home)).toBeNull();
-  });
-
-  test('writeTokens clears leftover legacy CLI files (canonical is source of truth)', async () => {
-    const stateDir = path.join(home, '.lore');
-    fs.mkdirSync(stateDir, { recursive: true });
-    fs.writeFileSync(path.join(stateDir, 'token'), 'stale-access', 'utf8');
-    fs.writeFileSync(path.join(stateDir, 'refresh_token'), 'stale-refresh', 'utf8');
-
-    await writeTokens(validTokens, home);
-
-    expect(fs.existsSync(path.join(stateDir, 'token'))).toBe(false);
-    expect(fs.existsSync(path.join(stateDir, 'refresh_token'))).toBe(false);
-  });
 });
 
 describe('legacy Application Support migration', () => {
