@@ -18900,11 +18900,22 @@ var globalSearchPersonResultSchema = exports_external.object({
   avatar_url: exports_external.string().nullable(),
   href: exports_external.string().min(1)
 });
+var globalSearchPostResultSchema = exports_external.object({
+  id: exports_external.string().min(1),
+  caption: exports_external.string().nullable(),
+  cover_url: exports_external.string().nullable(),
+  author: exports_external.object({
+    user_id: exports_external.string().min(1),
+    display_name: exports_external.string(),
+    handle: exports_external.string().nullable()
+  })
+});
 var globalSearchResponseSchema = exports_external.object({
   type: exports_external.literal("global_search"),
   threads: exports_external.array(globalSearchThreadResultSchema),
   skills: exports_external.array(globalSearchSkillResultSchema),
-  people: exports_external.array(globalSearchPersonResultSchema)
+  people: exports_external.array(globalSearchPersonResultSchema),
+  posts: exports_external.array(globalSearchPostResultSchema)
 });
 var globalSearchQuerySchema = exports_external.object({
   q: exports_external.string().trim().min(1).max(80)
@@ -18922,7 +18933,7 @@ var searchContract = c6.router({
       401: errorSchema6,
       422: errorSchema6
     },
-    summary: "Global navbar search. Threads and people are searched globally (subject to thread visibility); skills are scoped to the viewer workspace. Max 5 results per kind."
+    summary: "Global navbar search. Threads and people are searched globally (subject to thread visibility); skills and posts are scoped to the viewer workspace. Max 5 thread, skill, and person results, and 15 post results."
   }
 });
 
@@ -18953,6 +18964,7 @@ var threadEventTypeSchema = exports_external.enum([
   "thread.participant.left",
   "user.followed",
   "user.joined",
+  "notification.created",
   "user.presence",
   "skill.published",
   "skill.version.accepted",
@@ -19047,6 +19059,14 @@ var threadEventSchema = exports_external.discriminatedUnion("type", [
     payload: exports_external.object({
       organization_id: exports_external.string().min(1).nullable(),
       organization_name: exports_external.string().nullable()
+    })
+  }),
+  threadEventBase.extend({
+    type: exports_external.literal("notification.created"),
+    subjects: exports_external.tuple([exports_external.templateLiteral(["user:", exports_external.string().min(1)])]),
+    actor_user_id: exports_external.string().min(1),
+    payload: exports_external.object({
+      notification_id: exports_external.string().min(1)
     })
   }),
   threadEventBase.extend({
@@ -19279,6 +19299,7 @@ var zodObjectToMcpJsonSchema = (schema) => {
 // ../contracts/src/index.ts
 var defaultThreadFileParseSizeLimitInBytes = 50 * 1024 * 1024;
 var c7 = initContract();
+var SMS_IDENTITY_EMAIL_DOMAIN = "sms.lore.link";
 var publicEmailDomains = [
   "gmail.com",
   "googlemail.com",
@@ -19355,7 +19376,10 @@ var publicEmailDomains = [
   "o2.pl",
   "onet.pl"
 ];
-var publicEmailDomainSet = new Set(publicEmailDomains);
+var publicEmailDomainSet = new Set([
+  ...publicEmailDomains,
+  SMS_IDENTITY_EMAIL_DOMAIN
+]);
 var messageSchema = exports_external.object({
   id: exports_external.string().uuid(),
   role: exports_external.enum(["user", "assistant"]),
@@ -19399,6 +19423,7 @@ var userAttributionSourceSchema = exports_external.enum([
   "ai_search",
   "other"
 ]);
+var userSignupChannelSchema = exports_external.enum(["email", "sms"]);
 var userSchema = exports_external.object({
   id: exports_external.string(),
   first_name: exports_external.string().min(1),
@@ -19474,6 +19499,8 @@ var updateCurrentUserRequestSchema = exports_external.object({
   onboarded_at: exports_external.union([exports_external.literal("now"), exports_external.null()]).optional(),
   attribution_source: userAttributionSourceSchema.nullable().optional(),
   attribution_source_detail: exports_external.string().max(280).nullable().optional(),
+  first_name: exports_external.string().trim().min(1).max(255).optional(),
+  last_name: exports_external.string().trim().min(1).max(255).optional(),
   display_name: exports_external.string().min(1).max(120).optional(),
   handle: handleSchema.optional(),
   bio: exports_external.string().max(280).nullable().optional(),
@@ -19545,6 +19572,29 @@ var submitContactMessageRequestSchema = exports_external.object({
 var submitContactMessageResponseSchema = exports_external.object({
   ok: exports_external.boolean()
 });
+var startSmsVerificationRequestSchema = exports_external.object({
+  phone_number: exports_external.string().trim().min(1).max(32)
+});
+var startSmsVerificationResponseSchema = exports_external.object({
+  verification_id: exports_external.string(),
+  expires_at: exports_external.string().datetime()
+});
+var verifySmsCodeRequestSchema = exports_external.object({
+  verification_id: exports_external.string().min(1),
+  code: exports_external.string().trim().regex(/^\d{6}$/, "Enter the 6-digit code.")
+});
+var refreshSmsSessionRequestSchema = exports_external.object({
+  refresh_token: exports_external.string().min(1)
+});
+var refreshSmsSessionResponseSchema = exports_external.object({
+  access_token: exports_external.string(),
+  refresh_token: exports_external.string()
+});
+var verifySmsCodeResponseSchema = exports_external.object({
+  access_token: exports_external.string(),
+  refresh_token: exports_external.string(),
+  is_new_account: exports_external.boolean()
+});
 var waitlistEntrySchema = exports_external.object({
   location: exports_external.string().min(1),
   contact: exports_external.string().email(),
@@ -19564,6 +19614,30 @@ var feedbackEntrySchema = exports_external.object({
   id: exports_external.string().min(1),
   type: feedbackTypeSchema,
   message: exports_external.string().min(1),
+  created_at: exports_external.string().datetime()
+});
+var reportTargetTypeSchema = exports_external.enum(["post", "user"]);
+var reportReasonSchema = exports_external.enum([
+  "spam",
+  "harassment",
+  "hate_speech",
+  "sexual_content",
+  "violence",
+  "scam",
+  "other"
+]);
+var createReportRequestSchema = exports_external.object({
+  target_type: reportTargetTypeSchema,
+  target_id: exports_external.string().min(1),
+  reason: reportReasonSchema,
+  details: exports_external.string().trim().min(1).max(1000).optional()
+}).strict();
+var reportEntrySchema = exports_external.object({
+  id: exports_external.string().min(1),
+  target_type: reportTargetTypeSchema,
+  target_id: exports_external.string().min(1),
+  reason: reportReasonSchema,
+  details: exports_external.string().nullable(),
   created_at: exports_external.string().datetime()
 });
 var createThreadBlockCommentThreadRequestSchema = exports_external.object({
@@ -19593,7 +19667,6 @@ var harnessSchema = exports_external.enum([
   "lore",
   "cursor",
   "cowork",
-  "dock",
   "workbench",
   "unspecified"
 ]);
@@ -19781,9 +19854,12 @@ var artifactCommentAuthorSchema = exports_external.object({
   display_name: exports_external.string().min(1),
   avatar_url: exports_external.string().nullable()
 });
+var artifactCommentAuthorKindSchema = exports_external.enum(["human", "lore"]);
+var artifactCommentThreadLoreStatusSchema = exports_external.enum(["working", "failed"]);
 var artifactCommentSchema = exports_external.object({
   id: exports_external.string().min(1),
   author: artifactCommentAuthorSchema.nullable(),
+  author_kind: artifactCommentAuthorKindSchema,
   created_at: exports_external.string().datetime(),
   deleted_at: exports_external.string().datetime().nullable(),
   content: exports_external.string()
@@ -19794,7 +19870,8 @@ var artifactCommentThreadSchema = exports_external.object({
   created_at: exports_external.string().datetime(),
   resolved_at: exports_external.string().datetime().nullable(),
   anchor: loreDocumentCommentAnchorSchema.nullable(),
-  comments: exports_external.array(artifactCommentSchema)
+  comments: exports_external.array(artifactCommentSchema),
+  lore_status: artifactCommentThreadLoreStatusSchema.nullable()
 });
 var listArtifactCommentThreadsResponseSchema = exports_external.object({
   comment_threads: exports_external.array(artifactCommentThreadSchema)
@@ -20324,9 +20401,46 @@ var resolveThreadShareHighlightResponseSchema = exports_external.object({
 var requestThreadAccessResponseSchema = exports_external.object({
   status: exports_external.literal("ok")
 });
-var createThreadRequestSchema = exports_external.object({
+var createThreadRequestBaseSchema = exports_external.object({
   client_id: exports_external.uuid().describe("Stable desktop client identity, reused for actor provisioning and reconnects")
 });
+var wbModeSchema = exports_external.enum(["general", "create", "comment"]);
+var wbCoreModelConfigurationSchema = exports_external.discriminatedUnion("model", [
+  exports_external.object({
+    model: exports_external.literal("gpt-5.6-luna"),
+    reasoning_level: exports_external.literal("low")
+  }),
+  exports_external.object({
+    model: exports_external.literal("gpt-5.6-terra"),
+    reasoning_level: exports_external.literal("medium")
+  }),
+  exports_external.object({
+    model: exports_external.literal("claude-opus-5"),
+    reasoning_level: exports_external.literal("medium")
+  }),
+  exports_external.object({
+    model: exports_external.literal("claude-sonnet-5"),
+    reasoning_level: exports_external.literal("medium")
+  }),
+  exports_external.object({
+    model: exports_external.literal("claude-haiku-4-5-20251001"),
+    reasoning_level: exports_external.literal("low")
+  }),
+  exports_external.object({
+    model: exports_external.literal("grok-4.6"),
+    reasoning_level: exports_external.literal("medium")
+  })
+]);
+var createThreadRequestWithoutModelConfigurationSchema = createThreadRequestBaseSchema.extend({
+  mode: wbModeSchema.optional(),
+  model: exports_external.never().optional(),
+  reasoning_level: exports_external.never().optional()
+});
+var createThreadRequestWithModelConfigurationSchema = exports_external.intersection(createThreadRequestBaseSchema.extend({ mode: wbModeSchema.optional() }), wbCoreModelConfigurationSchema);
+var createThreadRequestSchema = exports_external.union([
+  createThreadRequestWithoutModelConfigurationSchema,
+  createThreadRequestWithModelConfigurationSchema
+]);
 var wbCoreActorDescriptorSchema = exports_external.object({
   name: exports_external.literal("wbCore"),
   key: exports_external.tuple([exports_external.string().min(1)]),
@@ -20338,10 +20452,11 @@ var wbCoreActorDescriptorSchema = exports_external.object({
     gateway: exports_external.object({ skipReadyWait: exports_external.literal(true) })
   })
 });
-var createThreadResponseSchema = exports_external.object({
+var createThreadResponseSchema = exports_external.intersection(exports_external.object({
   thread_id: exports_external.string().min(1),
+  mode: wbModeSchema,
   actor: wbCoreActorDescriptorSchema
-});
+}), wbCoreModelConfigurationSchema);
 var createThreadActorRequestSchema = exports_external.object({
   client_id: exports_external.uuid().describe("Stable client identity, reused for actor provisioning and reconnects")
 });
@@ -20726,6 +20841,108 @@ var artifactAuthorSchema = exports_external.object({
   display_name: exports_external.string(),
   avatar_url: exports_external.string().nullable()
 });
+var postAuthorSchema = exports_external.object({
+  user_id: exports_external.string(),
+  display_name: exports_external.string(),
+  handle: exports_external.string().nullable(),
+  avatar_url: exports_external.string().nullable()
+});
+var postEngagementSchema = exports_external.object({
+  like_count: exports_external.number().int().nonnegative(),
+  comment_count: exports_external.number().int().nonnegative(),
+  share_count: exports_external.number().int().nonnegative(),
+  viewer_has_liked: exports_external.boolean(),
+  viewer_has_bookmarked: exports_external.boolean()
+});
+var postSummarySchema = exports_external.object({
+  id: exports_external.string(),
+  artifact_id: exports_external.string(),
+  artifact_version_id: exports_external.string(),
+  version_number: exports_external.number().int().positive(),
+  caption: exports_external.string().nullable(),
+  created_at: exports_external.string().describe("ISO-8601 publish time."),
+  author: postAuthorSchema,
+  preview_url: exports_external.string().nullable(),
+  cover_url: exports_external.string().nullable(),
+  engagement: postEngagementSchema
+});
+var postOpenGraphPreviewSchema = exports_external.object({
+  artifact_title: exports_external.string(),
+  caption: exports_external.string().nullable(),
+  author_display_name: exports_external.string(),
+  cover_url: exports_external.string().nullable()
+});
+var postFeedResponseSchema = exports_external.object({
+  objects: exports_external.array(postSummarySchema),
+  has_more: exports_external.boolean(),
+  next_cursor: exports_external.string().nullable()
+});
+var listPostsQuerySchema = exports_external.object({
+  scope: exports_external.enum(["workspace", "mine", "saved", "global", "following"]).default("workspace"),
+  cursor: exports_external.string().optional(),
+  limit: exports_external.coerce.number().int().min(1).max(50).default(20)
+});
+var postCommentSchema = exports_external.object({
+  id: exports_external.string(),
+  post_id: exports_external.string(),
+  body: exports_external.string(),
+  created_at: exports_external.string().describe("ISO-8601 comment creation time."),
+  author: postAuthorSchema
+});
+var listPostCommentsQuerySchema = exports_external.object({
+  cursor: exports_external.string().optional(),
+  limit: exports_external.coerce.number().int().min(1).max(50).default(20)
+});
+var postCommentPageResponseSchema = exports_external.object({
+  objects: exports_external.array(postCommentSchema),
+  has_more: exports_external.boolean(),
+  next_cursor: exports_external.string().nullable()
+});
+var createPostCommentRequestSchema = exports_external.object({
+  body: exports_external.string().trim().min(1).max(2200)
+}).strict();
+var createPostCommentResponseSchema = exports_external.object({
+  comment: postCommentSchema,
+  engagement: postEngagementSchema
+});
+var recordPostShareRequestSchema = exports_external.object({
+  request_id: exports_external.uuid()
+}).strict();
+var recordPostShareResponseSchema = postEngagementSchema;
+var notificationKindSchema = exports_external.enum([
+  "follow",
+  "post_like",
+  "post_comment",
+  "post_share"
+]);
+var notificationActorSchema = postAuthorSchema;
+var socialNotificationSchema = exports_external.object({
+  id: exports_external.string(),
+  kind: notificationKindSchema,
+  occurred_at: exports_external.string().datetime(),
+  read_at: exports_external.string().datetime().nullable(),
+  actor: notificationActorSchema,
+  post_id: exports_external.string().nullable(),
+  comment_id: exports_external.string().nullable()
+});
+var listNotificationsQuerySchema = exports_external.object({
+  cursor: exports_external.string().optional(),
+  limit: exports_external.coerce.number().int().min(1).max(50).default(20)
+});
+var socialNotificationPageResponseSchema = exports_external.object({
+  objects: exports_external.array(socialNotificationSchema),
+  has_more: exports_external.boolean(),
+  next_cursor: exports_external.string().nullable(),
+  unread_count: exports_external.number().int().nonnegative()
+});
+var markNotificationsReadRequestSchema = exports_external.object({
+  through_id: exports_external.string().min(1)
+}).strict();
+var createPostRequestSchema = exports_external.object({
+  artifact_id: exports_external.string().min(1),
+  artifact_version_id: exports_external.string().min(1),
+  caption: exports_external.string().max(2200).nullable().optional()
+}).strict();
 var listArtifactsQuerySchema = exports_external.object({
   scope: exports_external.enum(["mine", "workspace"]).optional().describe("`mine` (default) returns artifacts you authored; `workspace` returns all visible artifacts in your org."),
   thread_id: exports_external.string().optional().describe("Restrict to artifacts produced by a single thread, e.g. th_..."),
@@ -20764,6 +20981,11 @@ var artifactIndexResponseSchema = exports_external.object({
   has_more: exports_external.boolean(),
   objects: exports_external.array(artifactSummarySchema)
 });
+var artifactCodeStorageLocationSchema = exports_external.object({
+  repo_id: exports_external.string().describe("The Code Storage repository id; equals the artifact id."),
+  commit_sha: exports_external.string().describe("The full commit SHA these bytes were committed in."),
+  path: exports_external.string().describe("The file path inside that commit.")
+});
 var artifactDetailResponseSchema = artifactSummarySchema.extend({
   download_url: exports_external.string().describe("Presigned, time-limited URL to download the artifact bytes."),
   download_url_expires_at: exports_external.string().describe("ISO-8601 expiry for download_url."),
@@ -20773,7 +20995,34 @@ var artifactDetailResponseSchema = artifactSummarySchema.extend({
   current_version_saved_at: exports_external.string().nullable().describe("ISO-8601 time the current version was written, or null when the artifact has no version history."),
   document_content: exports_external.string().nullable().describe("A Lore Document's stored bytes, inline: the v2 AST envelope for `lore_document_v2`, canonical HTML for a not-yet-rewritten `lore_document_v1`. null for every artifact that is not a document, and for a document whose bytes could not be read."),
   artifact_visibility: artifactVisibilitySchema.describe("The artifact's own published visibility \u2014 what `setArtifactVisibility` edits."),
-  thread_visibility: artifactVisibilitySchema.describe("The owning thread's visibility, which always applies in addition to the artifact's own.")
+  thread_visibility: artifactVisibilitySchema.describe("The owning thread's visibility, which always applies in addition to the artifact's own."),
+  code_storage: artifactCodeStorageLocationSchema.nullable().optional().describe("Where the current version's bytes live in Code Storage, or null.")
+});
+var artifactCodeStorageVersionStatusSchema = exports_external.enum(["match", "missing", "legacy"]);
+var artifactCodeStorageResponseSchema = exports_external.object({
+  artifact_id: exports_external.string(),
+  repo_id: exports_external.string().nullable().describe("The Code Storage repository id (the artifact id), or null when no version lives there yet."),
+  current_version_id: exports_external.string(),
+  versions: exports_external.array(exports_external.object({
+    id: exports_external.string(),
+    version_number: exports_external.number().int().positive(),
+    origin: exports_external.enum(["model", "human", "imported"]),
+    created_at: exports_external.string(),
+    content_hash: exports_external.string(),
+    size_in_bytes: exports_external.number().int().nonnegative(),
+    storage_url: exports_external.string(),
+    commit_sha: exports_external.string().nullable(),
+    path: exports_external.string().nullable(),
+    status: artifactCodeStorageVersionStatusSchema.describe("'match' when the repository has this version's commit, 'missing' when it does not, 'legacy' when the version predates Code Storage.")
+  })),
+  commits: exports_external.array(exports_external.object({
+    sha: exports_external.string(),
+    parent_shas: exports_external.array(exports_external.string()),
+    message: exports_external.string(),
+    author_name: exports_external.string(),
+    author_email: exports_external.string(),
+    date: exports_external.string()
+  }))
 });
 var backfillArtifactFileSchema = exports_external.object({
   kind: coworkArtifactKindSchema,
@@ -20855,6 +21104,43 @@ var saveDocumentArtifactConflictResponseSchema = errorSchema7.extend({
 });
 var saveDocumentArtifactRejectionResponseSchema = errorSchema7.extend({
   document_rejection: documentRejectionSchema
+});
+var artifactVersionSummarySchema = exports_external.object({
+  id: exports_external.string().describe("Version id, e.g. dovr_\u2026"),
+  ordinal: exports_external.number().int().positive().describe("Position in the history; 1 is the first version."),
+  origin: exports_external.enum(["model", "human", "imported"]).describe("Who wrote these bytes."),
+  editor: exports_external.object({ id: exports_external.string(), display_name: exports_external.string().nullable() }).nullable().describe("The person who authored a human version, or null."),
+  created_at: exports_external.string().describe("ISO-8601 time the version was written."),
+  size_in_bytes: exports_external.number().int().nonnegative(),
+  mime_type: exports_external.string().nullable(),
+  is_current: exports_external.boolean().describe("True for the version the artifact points at."),
+  content_reclaimed: exports_external.boolean().describe("True when retention reclaimed the bytes. The row remains; the content cannot be read or restored.")
+});
+var listArtifactVersionsResponseSchema = exports_external.object({
+  artifact: exports_external.object({
+    id: exports_external.string(),
+    thread_id: exports_external.string(),
+    file_name: exports_external.string(),
+    title: exports_external.string().nullable(),
+    current_version_id: exports_external.string()
+  }),
+  objects: exports_external.array(artifactVersionSummarySchema).describe("Newest first."),
+  has_more: exports_external.boolean().describe("True when the history was longer than the ceiling.")
+});
+var artifactVersionContentResponseSchema = artifactVersionSummarySchema.extend({
+  content: exports_external.string().nullable().describe("The bytes decoded as UTF-8 text when the type is text and the read succeeded; null otherwise."),
+  download_url: exports_external.string().nullable().describe("Presigned URL for the bytes; null when reclaimed."),
+  download_url_expires_at: exports_external.string().nullable().describe("ISO-8601 expiry for download_url.")
+});
+var restoreArtifactVersionResponseSchema = exports_external.object({
+  version_id: exports_external.string().describe("The current version after the restore."),
+  ordinal: exports_external.number().int().positive().describe("Ordinal of the current version after the restore."),
+  no_op: exports_external.boolean().describe("True when the restored bytes were already current: no version row and no upload."),
+  restored_from: exports_external.object({ version_id: exports_external.string(), ordinal: exports_external.number().int().positive() }).describe("The version whose bytes were restored.")
+});
+var restoreArtifactVersionRefusalResponseSchema = errorSchema7.extend({
+  code: exports_external.enum(["content_reclaimed", "document_rejected"]),
+  document_rejection: documentRejectionSchema.optional()
 });
 var skillInstallationSkillSchema = exports_external.object({
   id: exports_external.string(),
@@ -21466,6 +21752,11 @@ var recordDesktopHeartbeatResponseSchema = exports_external.object({
   last_upload_at: exports_external.string().datetime().nullable(),
   started_at: exports_external.string().datetime()
 });
+var blockUserResponseSchema = exports_external.object({
+  blocker_id: exports_external.string().min(1),
+  blocked_id: exports_external.string().min(1),
+  is_blocked: exports_external.literal(true)
+});
 var followUserResponseSchema = exports_external.object({
   follower_id: exports_external.string().min(1),
   followee_id: exports_external.string().min(1),
@@ -21953,6 +22244,7 @@ var apiContract = c7.router({
     responses: {
       201: createThreadResponseSchema,
       401: errorSchema7,
+      409: errorSchema7,
       503: errorSchema7
     },
     summary: "Create a Workbench thread and its keyed Workbench Core actor"
@@ -22388,6 +22680,210 @@ var apiContract = c7.router({
     },
     summary: "Set a skill's visibility (owner only); minting a share link when set to public"
   },
+  listPosts: {
+    method: "GET",
+    path: "/posts",
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    query: listPostsQuerySchema,
+    responses: {
+      200: postFeedResponseSchema,
+      401: errorSchema7
+    },
+    summary: "List published posts, newest first, for the feed or for Studio"
+  },
+  getPost: {
+    method: "GET",
+    path: "/posts/:id",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1).describe("Stable post ID, e.g. post_...")
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    responses: {
+      200: postSummarySchema,
+      401: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "Get one post, for its permalink"
+  },
+  getPostOpenGraphPreview: {
+    method: "GET",
+    path: "/posts/:id/preview",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1).describe("Stable post ID from a shared post URL, e.g. post_...")
+    }),
+    responses: {
+      200: postOpenGraphPreviewSchema,
+      404: errorSchema7
+    },
+    summary: "Anonymous, link-capability preview for a post unfurl. Excludes artifact bytes and the runnable artifact URL."
+  },
+  createPost: {
+    method: "POST",
+    path: "/posts",
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: createPostRequestSchema,
+    responses: {
+      201: postSummarySchema,
+      401: errorSchema7,
+      404: errorSchema7,
+      409: errorSchema7
+    },
+    summary: "Publish an artifact version to the feed"
+  },
+  deletePost: {
+    method: "DELETE",
+    path: "/posts/:id",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1).describe("Stable post ID, e.g. post_...")
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: exports_external.void(),
+    responses: {
+      204: exports_external.void(),
+      401: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "Delete your own post, removing it from every feed"
+  },
+  likePost: {
+    method: "PUT",
+    path: "/posts/:id/like",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    body: exports_external.void(),
+    responses: {
+      200: postEngagementSchema,
+      401: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "Like a visible post"
+  },
+  unlikePost: {
+    method: "DELETE",
+    path: "/posts/:id/like",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    body: exports_external.void(),
+    responses: {
+      200: postEngagementSchema,
+      401: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "Remove the current viewer's like from a visible post"
+  },
+  bookmarkPost: {
+    method: "PUT",
+    path: "/posts/:id/bookmark",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    body: exports_external.void(),
+    responses: {
+      200: postEngagementSchema,
+      401: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "Bookmark a visible post"
+  },
+  unbookmarkPost: {
+    method: "DELETE",
+    path: "/posts/:id/bookmark",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    body: exports_external.void(),
+    responses: {
+      200: postEngagementSchema,
+      401: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "Remove the current viewer's bookmark from a visible post"
+  },
+  listPostComments: {
+    method: "GET",
+    path: "/posts/:id/comments",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    query: listPostCommentsQuerySchema,
+    responses: {
+      200: postCommentPageResponseSchema,
+      401: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "List comments on a visible post, newest first"
+  },
+  createPostComment: {
+    method: "POST",
+    path: "/posts/:id/comments",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    body: createPostCommentRequestSchema,
+    responses: {
+      201: createPostCommentResponseSchema,
+      401: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "Comment on a visible post"
+  },
+  deletePostComment: {
+    method: "DELETE",
+    path: "/posts/:id/comments/:commentId",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1),
+      commentId: exports_external.string().min(1)
+    }),
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    body: exports_external.void(),
+    responses: {
+      200: postEngagementSchema,
+      401: errorSchema7,
+      403: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "Delete an authored comment or a comment on the current viewer's post"
+  },
+  recordPostShare: {
+    method: "POST",
+    path: "/posts/:id/shares",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    body: recordPostShareRequestSchema,
+    responses: {
+      200: recordPostShareResponseSchema,
+      401: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "Record one successful post share idempotently"
+  },
+  listNotifications: {
+    method: "GET",
+    path: "/notifications",
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    query: listNotificationsQuerySchema,
+    responses: {
+      200: socialNotificationPageResponseSchema,
+      401: errorSchema7
+    },
+    summary: "List the current viewer's social notifications, newest first"
+  },
+  markNotificationsRead: {
+    method: "PATCH",
+    path: "/notifications/read",
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    body: markNotificationsReadRequestSchema,
+    responses: {
+      204: exports_external.void(),
+      401: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "Mark the current viewer's notifications read through one loaded item"
+  },
   listArtifacts: {
     method: "GET",
     path: "/artifacts",
@@ -22437,6 +22933,50 @@ var apiContract = c7.router({
     },
     summary: "Save an edited Lore Document as a new human-authored version"
   },
+  listArtifactVersions: {
+    method: "GET",
+    path: "/artifacts/:id/versions",
+    pathParams: exports_external.object({ id: exports_external.string().min(1).describe("Stable artifact ID, e.g. art_...") }),
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    responses: {
+      200: listArtifactVersionsResponseSchema,
+      401: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "List an artifact's version history, newest first"
+  },
+  getArtifactVersion: {
+    method: "GET",
+    path: "/artifacts/:id/versions/:ordinal",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1).describe("Stable artifact ID, e.g. art_..."),
+      ordinal: exports_external.coerce.number().int().positive()
+    }),
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    responses: {
+      200: artifactVersionContentResponseSchema,
+      401: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "Read one version of an artifact: inline text when readable, plus a presigned download URL"
+  },
+  restoreArtifactVersion: {
+    method: "POST",
+    path: "/artifacts/:id/versions/:ordinal/restore",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1).describe("Stable artifact ID, e.g. art_..."),
+      ordinal: exports_external.coerce.number().int().positive().describe("The version to restore.")
+    }),
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    body: exports_external.object({}).optional(),
+    responses: {
+      200: restoreArtifactVersionResponseSchema,
+      401: errorSchema7,
+      404: errorSchema7,
+      422: restoreArtifactVersionRefusalResponseSchema
+    },
+    summary: "Restore an older version of an artifact by appending its bytes as a new, attributed version"
+  },
   presignBackfillArtifacts: {
     method: "POST",
     path: "/artifacts/backfill/presign",
@@ -22480,6 +23020,22 @@ var apiContract = c7.router({
       413: errorSchema7
     },
     summary: "Publish a live local artifact to its session thread and get a shareable web URL"
+  },
+  getArtifactCodeStorage: {
+    method: "GET",
+    path: "/artifacts/:id/code-storage",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1).describe("Stable artifact ID, e.g. art_...")
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    responses: {
+      200: artifactCodeStorageResponseSchema,
+      401: errorSchema7,
+      404: errorSchema7
+    },
+    summary: "An artifact's version rows beside its Code Storage commit log, with a match status per version"
   },
   setArtifactVisibility: {
     method: "PUT",
@@ -23147,6 +23703,22 @@ var apiContract = c7.router({
     },
     summary: "Mutual-follow suggestions for a viewer: walks the viewer's followees one hop further and ranks candidates by mutual count. Replaces a 1 \u2192 24 client-side fan-out across `/users/:seed/following`."
   },
+  blockUser: {
+    method: "POST",
+    path: "/users/:id/block",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: exports_external.object({}).optional(),
+    responses: {
+      200: blockUserResponseSchema,
+      401: errorSchema7,
+      404: errorSchema7,
+      422: errorSchema7
+    },
+    summary: "Block another user and remove follows in both directions. Idempotent \u2014 repeating the call is a no-op."
+  },
   followUser: {
     method: "POST",
     path: "/users/:id/follow",
@@ -23699,6 +24271,41 @@ var apiContract = c7.router({
     },
     summary: "Create an unauthenticated waitlist entry keyed by (location, contact)."
   },
+  startSmsVerification: {
+    method: "POST",
+    path: "/auth/sms/start",
+    body: startSmsVerificationRequestSchema,
+    responses: {
+      200: startSmsVerificationResponseSchema,
+      400: errorSchema7,
+      429: errorSchema7,
+      503: errorSchema7
+    },
+    summary: "Send a one-time code to a US phone number to begin SMS onboarding."
+  },
+  verifySmsCode: {
+    method: "POST",
+    path: "/auth/sms/verify",
+    body: verifySmsCodeRequestSchema,
+    responses: {
+      200: verifySmsCodeResponseSchema,
+      400: errorSchema7,
+      429: errorSchema7,
+      503: errorSchema7
+    },
+    summary: "Redeem an SMS one-time code for a WorkOS AuthKit session, creating the account on first use."
+  },
+  refreshSmsSession: {
+    method: "POST",
+    path: "/auth/sms/refresh",
+    body: refreshSmsSessionRequestSchema,
+    responses: {
+      200: refreshSmsSessionResponseSchema,
+      401: errorSchema7,
+      503: errorSchema7
+    },
+    summary: "Exchange an SMS session refresh token for a fresh access token."
+  },
   submitContactMessage: {
     method: "POST",
     path: "/contact",
@@ -23724,6 +24331,21 @@ var apiContract = c7.router({
       429: errorSchema7
     },
     summary: "Submit in-app feedback. Persists to lore.feedback_entries and best-effort posts to the #lore-feedback Slack channel. Rate-limited to 30 submissions/hour per user."
+  },
+  createReport: {
+    method: "POST",
+    path: "/reports",
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: createReportRequestSchema,
+    responses: {
+      201: reportEntrySchema,
+      401: errorSchema7,
+      404: errorSchema7,
+      422: errorSchema7
+    },
+    summary: "Report a visible post or another user for moderation. Repeated reports of the same target by one reporter return the original report."
   },
   createShareToken: {
     method: "POST",
