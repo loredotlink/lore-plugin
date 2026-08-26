@@ -5,7 +5,7 @@ description: Share the current session to Lore and return a shareable URL. Use w
 
 # Share session to Lore
 
-Use the bundled `lore-local` MCP server. It resolves the active session on disk itself, uploads it to Lore with the correct harness for the current runtime, and returns a shareable thread URL.
+Use the bundled `lore-local` MCP server. In Claude Code, the bundled hook binds each share call to the current conversation, including after `/new`. The server resolves that session on disk, uploads it to Lore with the correct harness for the current runtime, and returns a shareable thread URL.
 
 ## When to Use
 
@@ -59,6 +59,8 @@ The share result is a JSON object with:
   Ask whether they want to share an older session, then list with `list_local_sessions`.
 - `share_session` errors with `session not found: <id>`:
   Tell the user the id did not match and offer to list available sessions.
+- `share_session` reports that the current Claude Code session id is unavailable:
+  Tell the user to reload or update the Lore plugin, then retry. Do not select a session by recency.
 - Auth errors:
   Call `lore_login` on `lore-local`, then retry the share. If `lore_login` returns `browser_open_failed`, tell the user to visit the verification URL, then call `lore_login_resume({ device_code })` and retry.
 - Empty session content:

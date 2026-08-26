@@ -23,9 +23,11 @@ import {
   discoverEndpoints,
   __resetInFlightForTests as __resetDiscoveryInFlightForTests,
 } from '../lib/auth/discovery';
+import { ClaudeCodeSource } from '../lib/session/claudeCode';
 import { CodexSource } from '../lib/session/codex';
 import { CoworkSource } from '../lib/session/cowork';
 import { writePluginState, readPluginState } from '../lib/pluginState';
+import { encodeCwdToDir } from '@lore/transcript-locate';
 
 function makeTmpHome(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'share-session-test-'));
@@ -550,6 +552,74 @@ describe('shareSessionFromDisk', () => {
     expect(
       (calls[0]!.body.params.arguments as { transcript: string }).transcript,
     ).toBe('older-transcript');
+  });
+
+  test('Claude hook session id wins over the MCP process stale session env', async () => {
+    await writeTokens(validTokens(), home);
+    const projectsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'share-session-claude-root-'));
+    try {
+      const cwd = '/Users/q/repos/lore';
+      const projectDir = path.join(projectsRoot, encodeCwdToDir(cwd));
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(path.join(projectDir, 'stale-session.jsonl'), 'stale-transcript');
+      fs.writeFileSync(path.join(projectDir, 'current-session.jsonl'), 'current-transcript');
+      const claudeSource = new ClaudeCodeSource({ projectsRoot, cwd });
+      const { fetchImpl, calls } = captureFetch((req) =>
+        rpcShareSuccess(req.body.id, {
+          thread_id: 'current-thread',
+          thread_url: 'https://lore/current-thread',
+        }),
+      );
+
+      await shareSessionFromDiskForTest(
+        { session_id: 'current-session' },
+        {
+          fetchImpl,
+          home,
+          source: claudeSource,
+          env: { CLAUDE_CODE_SESSION_ID: 'stale-session' },
+        },
+      );
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.body.params.arguments).toEqual({
+        transcript: 'current-transcript',
+        uploads: [],
+        outputs: [],
+        harness: 'claudeCode',
+        visibility: 'workspace',
+      });
+    } finally {
+      rmrf(projectsRoot);
+    }
+  });
+
+  test('implicit Claude share fails closed before upload when the hook id is absent', async () => {
+    await writeTokens(validTokens(), home);
+    const projectsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'share-session-claude-root-'));
+    try {
+      const cwd = '/Users/q/repos/lore';
+      const projectDir = path.join(projectsRoot, encodeCwdToDir(cwd));
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(path.join(projectDir, 'stale-session.jsonl'), 'stale-transcript');
+      const claudeSource = new ClaudeCodeSource({ projectsRoot, cwd });
+      const { fetchImpl, calls } = captureFetch(() => jsonResponse({}));
+
+      await expect(
+        shareSessionFromDiskForTest(
+          {},
+          {
+            fetchImpl,
+            home,
+            source: claudeSource,
+            env: { CLAUDE_CODE_SESSION_ID: 'stale-session' },
+          },
+        ),
+      ).rejects.toThrow('current Claude Code session id is unavailable');
+      expect(calls).toHaveLength(0);
+    } finally {
+      rmrf(projectsRoot);
+    }
   });
 
   test('no session_id and no env → resolves newest by mtime', async () => {

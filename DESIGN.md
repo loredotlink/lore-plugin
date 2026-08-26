@@ -39,6 +39,8 @@ plugin-root/
 │   └── lore.ts                      # canonical Amp plugin implementation
 ├── assets/
 │   └── lore.svg
+├── hooks/
+│   └── hooks.json                   # current Claude session injection
 ├── skills/
 │   ├── read/SKILL.md
 │   └── share/SKILL.md
@@ -102,6 +104,8 @@ Runtime-specific readers:
 
 Every reader normalizes to the same `SessionPayload` shape: session id, optional conversation id, transcript text, uploads, outputs, and transcript path.
 
+Source detection and share target selection are separate concerns. Claude Code keeps one plugin MCP process alive across `/new`, so an environment session id inherited when that process started can become stale. The bundled `PreToolUse` hook receives the current Claude conversation id for each `share_session` call and injects it as an explicit `session_id`. An implicit Claude share fails before upload if that injection is absent. This prevents stale environment state or newest-file guesses from updating the wrong Lore thread. Explicit ids still support sharing an older Claude session. Cowork and Codex continue to use their runtime-specific environment and filesystem resolution.
+
 Amp is not a `SessionSource` in the MVP. Amp sharing is host-specific because the adapter resolves a thread ID from the command context, an explicit tool input, or `AMP_CURRENT_THREAD_ID`, then exports the raw session through `amp threads export <thread_id>` instead of using the shared on-disk session detector. The Amp command and natural-language tool both call the same `shareAmpThread` helper, which delegates upload/auth behavior to the existing `runShareSession` core.
 
 ## Share flow
@@ -117,11 +121,12 @@ Why:
 Claude Code/Cowork/Codex flow:
 
 1. Agent calls `share_session({ session_id? })` on `lore-local`
-2. The tool resolves the target session on disk
-3. The tool reads transcript, uploads, and outputs locally
-4. The tool maps the detected runtime to a Lore harness
-5. The tool calls the Lore cloud `share_session` API
-6. The tool returns `{ thread_id, thread_url }` plus an optional tip
+2. For an implicit Claude Code share, the bundled `PreToolUse` hook adds the current conversation id to the tool input
+3. The tool resolves the target session on disk
+4. The tool reads transcript, uploads, and outputs locally
+5. The tool maps the detected runtime to a Lore harness
+6. The tool calls the Lore cloud `share_session` API
+7. The tool returns `{ thread_id, thread_url }` plus an optional tip
 
 Harness mapping:
 

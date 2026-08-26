@@ -1,0 +1,17 @@
+{
+  "description": "Bind Lore share calls to the Claude Code conversation that made them.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__plugin_lore_lore-local__share_session",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/server/lore-mcp\" inject-share-session-id",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -11,11 +11,13 @@
  *   `read_local_session` and round-trip the entire transcript through
  *   its own context window before forwarding it here. That blew past
  *   tool-result limits on long sessions and triggered subagent
- *   fallback. The handler now resolves the session locally (same
- *   priority order as `read_local_session`: explicit `session_id` →
- *   `CLAUDE_CODE_SESSION_ID` / `CLAUDE_SESSION_ID` / `COWORK_SESSION_ID`
- *   → newest-by-mtime),
- *   reads the transcript from disk, and pipes it straight to the cloud.
+ *   fallback. The handler now resolves the session locally. For Claude Code,
+ *   a bundled PreToolUse hook supplies the current conversation id on every
+ *   call; the MCP process environment is not trusted because the process can
+ *   outlive a conversation. Explicit ids still select older sessions. Cowork
+ *   and Codex retain the resolution order used by `read_local_session`.
+ *   The handler reads the transcript from disk and pipes it straight to the
+ *   cloud.
  *   The agent only sees `{thread_id, thread_url}` come back.
  *
  * Local plumbing:
@@ -37,6 +39,10 @@
  *   the defense-in-depth pair; the merge-order rule above is the runtime
  *   half.
  */
+import {
+  ErrorCode,
+  McpError,
+} from '@modelcontextprotocol/sdk/types.js';
 import {
   mcpShareSessionPluginResultSchema,
   mcpShareSessionPluginToolSpec,
@@ -117,6 +123,8 @@ export async function runShareSession(
  * lazily (and reads `process.env` lazily) on each invocation.
  *
  * Errors:
+ *   - An implicit Claude Code share without a hook-supplied id throws
+ *     `McpError(InvalidParams)` instead of guessing from stale process state.
  *   - `runReadLocalSession` throws `McpError(InvalidParams)` when no
  *     session can be resolved (no arg, no env, no sessions on disk)
  *     or when the explicit id doesn't exist. Those propagate verbatim.
@@ -134,9 +142,16 @@ export async function shareSessionFromDisk(
 ): Promise<McpTextCallToolResult> {
   const source = opts.source ?? detectSource(opts.env);
   const env = opts.env ?? process.env;
+  const explicitSessionId = args.session_id?.trim();
+  if (source.runtime === 'claude-code' && !explicitSessionId) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      'current Claude Code session id is unavailable; reload or update the Lore plugin, then retry',
+    );
+  }
   const session = runReadLocalSession({
     source,
-    args: { session_id: args.session_id },
+    args: { session_id: explicitSessionId },
     env,
   });
   const highlight = args.highlight?.trim();

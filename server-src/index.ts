@@ -38,6 +38,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import type { ToolDispatchOpts, ToolInputSchema } from './lib/tool.js';
+import { runInjectShareSessionIdHook } from './hooks/injectShareSessionId.js';
 import { tools } from './tools/index.js';
 
 /** Module-level name→tool lookup. Constructed once; shared by `dispatchToolCall` and `main`. */
@@ -210,7 +211,15 @@ export async function dispatchToolCall(
   return toCallToolResult(value);
 }
 
-export async function main(): Promise<void> {
+export async function main(args: string[] = process.argv.slice(2)): Promise<void> {
+  if (args[0] === 'inject-share-session-id' && args.length === 1) {
+    await runInjectShareSessionIdHook();
+    return;
+  }
+  if (args.length > 0) {
+    throw new Error(`Unknown lore-mcp command: ${args.join(' ')}`);
+  }
+
   const server = new Server(SERVER_INFO, {
     capabilities: {
       // Declare `tools` so the SDK accepts our tools/list and
