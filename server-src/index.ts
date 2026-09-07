@@ -17,8 +17,9 @@
  *     return value into a `CallToolResult`. JSON-serializable returns
  *     become a single text block (`JSON.stringify`'d); handlers that
  *     already produce a `CallToolResult` shape are passed through
- *     unchanged (forward-compat for tools that want structured content
- *     or `isError: true`).
+ *     unchanged. Handler failures become `isError: true` tool results so
+ *     agents receive actionable content; request/protocol failures remain
+ *     JSON-RPC errors.
  *   - Unknown names surface as `McpError(MethodNotFound, ...)`, the
  *     JSON-RPC-standard code for "this name doesn't resolve". Clients
  *     can re-list tools and try again.
@@ -38,6 +39,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import type { ToolDispatchOpts, ToolInputSchema } from './lib/tool.js';
+import { toolExecutionError } from './lib/errors.js';
 import { runInjectShareSessionIdHook } from './hooks/injectShareSessionId.js';
 import { tools } from './tools/index.js';
 
@@ -160,17 +162,9 @@ export function toCallToolResult(value: unknown): CallToolResult {
   try {
     text = typeof value === 'string' ? value : JSON.stringify(value);
   } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Tool returned a value that could not be serialized: ${
-            (error as Error).message
-          }`,
-        },
-      ],
-      isError: true,
-    };
+    return toolExecutionError(
+      `Tool returned a value that could not be serialized: ${(error as Error).message}`,
+    );
   }
   return {
     content: [{ type: 'text', text }],
@@ -183,6 +177,8 @@ export function toCallToolResult(value: unknown): CallToolResult {
  *   2. Validate `params.arguments` against the tool's `inputSchema`
  *      (throws `McpError(InvalidParams)` on failure).
  *   3. Invoke the handler and wrap its return in a `CallToolResult`.
+ *      Operational failures become `CallToolResult.isError`; they are not
+ *      protocol-level JSON-RPC errors.
  *
  * Extracted from `main()` so integration tests can call it directly with
  * a temp `home`, exercising dispatch without booting the stdio transport.
@@ -207,19 +203,21 @@ export async function dispatchToolCall(
       `Invalid arguments for tool '${name}': ${error}`,
     );
   }
-  const value = await tool.handler(argsObj, opts);
-  return toCallToolResult(value);
+  try {
+    const value = await tool.handler(argsObj, opts);
+    return toCallToolResult(value);
+  } catch (handlerError) {
+    const message =
+      handlerError instanceof Error
+        ? handlerError.message.replace(/^MCP error -?\d+:\s*/, '')
+        : String(handlerError);
+    return toolExecutionError(message);
+  }
 }
 
-export async function main(args: string[] = process.argv.slice(2)): Promise<void> {
-  if (args[0] === 'inject-share-session-id' && args.length === 1) {
-    await runInjectShareSessionIdHook();
-    return;
-  }
-  if (args.length > 0) {
-    throw new Error(`Unknown lore-mcp command: ${args.join(' ')}`);
-  }
-
+/** Build the MCP server. Tests supply isolated dispatch options and use an
+ * in-memory transport to verify the same protocol envelopes as stdio. */
+export function createLoreMcpServer(opts?: ToolDispatchOpts): Server {
   const server = new Server(SERVER_INFO, {
     capabilities: {
       // Declare `tools` so the SDK accepts our tools/list and
@@ -237,9 +235,22 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    return dispatchToolCall(request.params);
+    return dispatchToolCall(request.params, opts);
   });
 
+  return server;
+}
+
+export async function main(args: string[] = process.argv.slice(2)): Promise<void> {
+  if (args[0] === 'inject-share-session-id' && args.length === 1) {
+    await runInjectShareSessionIdHook();
+    return;
+  }
+  if (args.length > 0) {
+    throw new Error(`Unknown lore-mcp command: ${args.join(' ')}`);
+  }
+
+  const server = createLoreMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

@@ -42,6 +42,7 @@ import {
   type McpTextCallToolResult,
 } from '@lore/contracts/mcp';
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
 import { AuthRequiredError } from './errors';
 import { getValidAccessToken, forceRefreshAccessToken } from './auth/refresh.js';
 import { deleteTokens } from './auth/store.js';
@@ -52,20 +53,37 @@ interface Options {
   home?: string;
 }
 
-interface JsonRpcSuccess {
-  jsonrpc: '2.0';
-  id: string;
-  result: unknown;
-}
+const jsonRpcErrorPayloadSchema = z.strictObject({
+  code: z.number(),
+  message: z.string(),
+  data: z.json().optional(),
+});
 
-interface JsonRpcError {
-  jsonrpc: '2.0';
-  id: string;
-  error: {
-    code?: number;
-    message?: string;
-    data?: unknown;
-  };
+const jsonRpcResponseSchema = z.union([
+  z.strictObject({
+    jsonrpc: z.literal('2.0'),
+    id: z.string(),
+    result: z.json(),
+  }),
+  z.strictObject({
+    jsonrpc: z.literal('2.0'),
+    id: z.string(),
+    error: jsonRpcErrorPayloadSchema,
+  }),
+]);
+
+type JsonRpcErrorPayload = z.infer<typeof jsonRpcErrorPayloadSchema>;
+
+/** A validated JSON-RPC error returned by the Lore cloud MCP server. */
+export class CloudMcpError extends Error {
+  readonly code: number;
+
+  constructor(toolName: string, error: JsonRpcErrorPayload) {
+    super(error.message);
+    this.name = 'CloudMcpError';
+    this.code = error.code;
+    this.cause = { toolName, code: error.code, data: error.data };
+  }
 }
 
 /**
@@ -169,28 +187,14 @@ export async function callCloudTool(
     throw new Error('cloud response was not valid JSON-RPC');
   }
 
-  if (
-    !json ||
-    typeof json !== 'object' ||
-    (json as { jsonrpc?: unknown }).jsonrpc !== '2.0'
-  ) {
+  const parsedRpc = jsonRpcResponseSchema.safeParse(json);
+  if (!parsedRpc.success) {
     throw new Error('cloud response was not valid JSON-RPC');
   }
 
-  const rpc = json as Partial<JsonRpcSuccess> & Partial<JsonRpcError>;
-
-  if (rpc.error) {
-    const message = rpc.error.message ?? 'unknown cloud error';
-    // Attach the code via `.cause` (Error's standard extension slot) so
-    // upstream logs can surface it without us needing to invent another
-    // field on the Error subclass.
-    throw new Error(`Cloud MCP error from "${toolName}": ${message}`, {
-      cause: { code: rpc.error.code, data: rpc.error.data },
-    });
-  }
-
-  if (!('result' in rpc)) {
-    throw new Error('cloud response was not valid JSON-RPC');
+  const rpc = parsedRpc.data;
+  if ('error' in rpc) {
+    throw new CloudMcpError(toolName, rpc.error);
   }
 
   const result = mcpTextCallToolResultSchema.safeParse(rpc.result);

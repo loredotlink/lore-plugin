@@ -69,8 +69,21 @@ export function authRequiredToMcpError(): {
   isError: true;
   content: [{ type: 'text'; text: string }];
 } {
+  return toolExecutionError(AUTH_REQUIRED_MESSAGE);
+}
+
+/**
+ * Return an operational tool failure through MCP's `CallToolResult.isError`
+ * channel. JSON-RPC errors are reserved for protocol and request failures;
+ * putting an execution failure there leaves some hosts with no agent-visible
+ * content.
+ */
+export function toolExecutionError(message: string): {
+  isError: true;
+  content: [{ type: 'text'; text: string }];
+} {
   return {
     isError: true,
-    content: [{ type: 'text', text: AUTH_REQUIRED_MESSAGE }],
+    content: [{ type: 'text', text: message }],
   };
 }

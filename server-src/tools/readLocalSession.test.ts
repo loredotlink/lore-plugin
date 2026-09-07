@@ -445,6 +445,7 @@ describe('readLocalSessionTool.handler — env is read lazily', () => {
   // precedence in the resolver.
   const ORIGINAL_CLAUDE_CODE_SESSION_ID = process.env.CLAUDE_CODE_SESSION_ID;
   const ORIGINAL_CLAUDE_SESSION_ID = process.env.CLAUDE_SESSION_ID;
+  const ORIGINAL_COWORK_SESSION_ID = process.env.COWORK_SESSION_ID;
   afterEach(() => {
     if (ORIGINAL_CLAUDE_CODE_SESSION_ID === undefined) {
       delete process.env.CLAUDE_CODE_SESSION_ID;
@@ -455,6 +456,11 @@ describe('readLocalSessionTool.handler — env is read lazily', () => {
       delete process.env.CLAUDE_SESSION_ID;
     } else {
       process.env.CLAUDE_SESSION_ID = ORIGINAL_CLAUDE_SESSION_ID;
+    }
+    if (ORIGINAL_COWORK_SESSION_ID === undefined) {
+      delete process.env.COWORK_SESSION_ID;
+    } else {
+      process.env.COWORK_SESSION_ID = ORIGINAL_COWORK_SESSION_ID;
     }
   });
 
@@ -486,5 +492,20 @@ describe('readLocalSessionTool.handler — env is read lazily', () => {
     }
     expect(thrown).toBeInstanceOf(McpError);
     expect((thrown as McpError).message).toContain('lazy-marker-code-67890');
+  });
+
+  test('handler passes runtime env when dispatch options omit home', async () => {
+    delete process.env.CLAUDE_CODE_SESSION_ID;
+    delete process.env.CLAUDE_SESSION_ID;
+    process.env.COWORK_SESSION_ID = 'lazy-cowork-marker-24680';
+
+    let thrown: unknown;
+    try {
+      await readLocalSessionTool.handler({}, {});
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(McpError);
+    expect((thrown as McpError).message).toContain('lazy-cowork-marker-24680');
   });
 });

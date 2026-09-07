@@ -20,8 +20,10 @@
  * effect immediately.
  *
  * Errors:
- *   - Specified session id not found (via arg or env): `McpError(InvalidParams)`
- *     with message `session not found: <id>`.
+ *   - Specified session id not found (via arg): `McpError(InvalidParams)`
+ *     with an actionable prompt to call `list_local_sessions`.
+ *   - Session id from the runtime environment not found:
+ *     `McpError(InvalidParams)` with the source's lookup message.
  *   - No sessions at all (no arg, no env, mtime resolution returns null):
  *     `McpError(InvalidParams, "no session found")`.
  *   - Lib-level errors from `readSession` (missing `local_*` subdir,
@@ -84,7 +86,7 @@ function resolveSession(
     } catch (err) {
       throw new McpError(
         ErrorCode.InvalidParams,
-        (err as Error).message,
+        `${(err as Error).message}. Call list_local_sessions to choose an available session, then retry.`,
       );
     }
   }
@@ -164,12 +166,12 @@ export const readLocalSessionTool: ToolDefinition = {
     },
     additionalProperties: false,
   },
-  handler: async (args: unknown): Promise<ReadLocalSessionResult> => {
+  handler: async (args: unknown, opts): Promise<ReadLocalSessionResult> => {
     // The dispatcher in `index.ts` has already validated `args`
     // against `inputSchema`, so it's safe to narrow here.
     const typed = (args ?? {}) as ReadLocalSessionArgs;
     return runReadLocalSession({
-      source: detectSource(),
+      source: detectSource({ home: opts?.home, env: process.env }),
       args: typed,
       env: process.env,
     });

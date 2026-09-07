@@ -114,6 +114,8 @@ export function nonBlank(value: unknown): string | null {
 export type DetectSourceOptions = {
   /** Override `process.env`. */
   env?: NodeJS.ProcessEnv;
+  /** Override the runtime session roots through their shared home. */
+  home?: string;
   /** Inject a Claude Code source (typically with a tmpdir root). */
   claudeCodeSource?: SessionSource;
   /** Inject a Cowork source (typically with a tmpdir root). */
@@ -126,10 +128,9 @@ export type DetectSourceOptions = {
  * Choose the right SessionSource for the current runtime. See the
  * file-level comment for the resolution order.
  *
- * Accepts either a bare `ProcessEnv` (legacy callers) or an options
- * bag with injection hooks (tests). The argument is destructured by
- * shape: a plain process env has no `claudeCodeSource`/`coworkSource`
- * field, so the heuristic is robust.
+ * Accepts either a bare `ProcessEnv` (legacy callers) or an options bag with
+ * injection hooks. A `home` field always identifies the options bag; other
+ * option fields are structured values rather than environment strings.
  */
 export function detectSource(
   envOrOptions?: NodeJS.ProcessEnv | DetectSourceOptions,
@@ -141,9 +142,9 @@ export function detectSource(
         ? envOrOptions
         : { env: envOrOptions };
   const env = opts.env ?? process.env;
-  const claudeCode = opts.claudeCodeSource ?? new ClaudeCodeSource();
-  const cowork = opts.coworkSource ?? new CoworkSource();
-  const codex = opts.codexSource ?? new CodexSource();
+  const claudeCode = opts.claudeCodeSource ?? new ClaudeCodeSource({ home: opts.home });
+  const cowork = opts.coworkSource ?? new CoworkSource({ home: opts.home });
+  const codex = opts.codexSource ?? new CodexSource({ home: opts.home });
 
   // 0. Cowork runtime signal — checked BEFORE the Claude Code env vars.
   //    Cowork *is* the Claude Code harness running in local-agent-mode, so
@@ -228,5 +229,6 @@ function isDetectSourceOptions(
     return true;
   }
   if (v.env !== undefined && typeof v.env !== 'string') return true;
+  if (v.home !== undefined) return true;
   return false;
 }

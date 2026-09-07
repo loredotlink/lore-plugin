@@ -62,6 +62,8 @@ export type ToolDispatchOpts = {
   home?: string;
   /** Override for opening the device-flow browser URL in tests. */
   openBrowser?: (url: string) => { status: number | null };
+  /** Override cloud transport in protocol-level tests. */
+  fetchImpl?: typeof fetch;
 };
 
 export type ToolDefinition = {

@@ -8,18 +8,23 @@
 import {
   buildMcpContractToolSpecs,
   mcpSearchThreadsToolSpec,
-  type McpStaticToolSpec,
+  type McpGeneratedToolSpec,
   type McpTextCallToolResult,
 } from '@lore/contracts/mcp';
+import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 
-import { callCloudTool } from '../lib/cloudCall.js';
-import { AuthRequiredError, authRequiredToMcpError } from '../lib/errors.js';
+import { callCloudTool, CloudMcpError } from '../lib/cloudCall.js';
+import {
+  AuthRequiredError,
+  authRequiredToMcpError,
+  toolExecutionError,
+} from '../lib/errors.js';
 import type { ToolDefinition, ToolInputSchema } from '../lib/tool.js';
 
 export async function runCloudProxyTool(
   toolName: string,
   args: Record<string, unknown>,
-  opts: { fetchImpl?: typeof fetch; home?: string } = {},
+  opts: { fetchImpl?: typeof fetch; home?: string; notFoundMessage?: string } = {},
 ): Promise<McpTextCallToolResult> {
   try {
     return await callCloudTool(toolName, args, opts);
@@ -27,16 +32,30 @@ export async function runCloudProxyTool(
     if (err instanceof AuthRequiredError) {
       return authRequiredToMcpError();
     }
+    if (
+      err instanceof CloudMcpError &&
+      err.code === ErrorCode.InvalidParams &&
+      opts.notFoundMessage !== undefined &&
+      err.message === opts.notFoundMessage
+    ) {
+      return toolExecutionError(
+        `${opts.notFoundMessage}. Check the thread ID and your access, then retry.`,
+      );
+    }
     throw err;
   }
 }
 
-export const buildCloudProxyTool = (spec: McpStaticToolSpec): ToolDefinition => ({
+export const buildCloudProxyTool = (spec: McpGeneratedToolSpec): ToolDefinition => ({
   name: spec.name,
   description: spec.description,
   inputSchema: spec.inputSchema as ToolInputSchema,
-  handler: async (args: unknown): Promise<unknown> =>
-    runCloudProxyTool(spec.name, (args ?? {}) as Record<string, unknown>),
+  handler: async (args: unknown, opts): Promise<unknown> =>
+    runCloudProxyTool(spec.name, (args ?? {}) as Record<string, unknown>, {
+      fetchImpl: opts?.fetchImpl,
+      home: opts?.home,
+      notFoundMessage: spec.notFoundMessage,
+    }),
 });
 
 export const cloudProxyTools: ToolDefinition[] = [

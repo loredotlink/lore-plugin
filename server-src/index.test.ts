@@ -27,12 +27,16 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { mcpTextCallToolResultSchema } from '@lore/contracts/mcp';
+import { encodeCwdToDir } from '@lore/transcript-locate';
 import type { ToolInputSchema } from './lib/tool';
 import { listLocalSessionsTool } from './tools/listLocalSessions';
 import { shareSessionTool } from './tools/share_session';
-import { validateAgainstSchema, dispatchToolCall } from './index';
-import { readTokens } from './lib/auth/store';
+import { validateAgainstSchema, dispatchToolCall, createLoreMcpServer } from './index';
+import { readTokens, writeTokens } from './lib/auth/store';
 import { __resetCloudBaseUrlForTests } from './lib/cloudBaseUrl';
 import { __resetInFlightForTests as __resetDiscoveryInFlightForTests } from './lib/auth/discovery';
 
@@ -365,6 +369,208 @@ describe('dispatchToolCall — end-to-end dispatch wiring', () => {
       if (originalHome === undefined) delete process.env.HOME;
       else process.env.HOME = originalHome;
       await fsp.rm(processHome, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('MCP tool response envelopes', () => {
+  let tmpHome: string;
+  const sessionEnvNames = [
+    'CLAUDE_CODE_SESSION_ID',
+    'CLAUDE_SESSION_ID',
+    'COWORK_SESSION_ID',
+    'CODEX_THREAD_ID',
+    'CODEX_SESSION_ID',
+    'CLAUDE_PROJECT_DIR',
+  ] as const;
+  const savedSessionEnv = new Map<string, string | undefined>();
+
+  beforeEach(async () => {
+    tmpHome = await fsp.mkdtemp(path.join(os.tmpdir(), 'lore-envelope-test-'));
+    for (const name of sessionEnvNames) {
+      savedSessionEnv.set(name, process.env[name]);
+      delete process.env[name];
+    }
+    process.env.LORE_MCP_BASE_URL = 'https://mcp.example.test';
+    __resetCloudBaseUrlForTests();
+  });
+
+  afterEach(async () => {
+    for (const name of sessionEnvNames) {
+      const value = savedSessionEnv.get(name);
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    savedSessionEnv.clear();
+    delete process.env.LORE_MCP_BASE_URL;
+    __resetCloudBaseUrlForTests();
+    __resetDiscoveryInFlightForTests();
+    await fsp.rm(tmpHome, { recursive: true, force: true });
+  });
+
+  async function callTool(
+    name: string,
+    args: Record<string, string>,
+    fetchImpl?: typeof fetch,
+  ) {
+    const server = createLoreMcpServer({ home: tmpHome, fetchImpl });
+    const client = new Client({ name: 'lore-envelope-test', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    try {
+      return mcpTextCallToolResultSchema.parse(
+        await client.callTool({ name, arguments: args }),
+      );
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  }
+
+  function claudeSessionPath(sessionId: string): string {
+    return path.join(
+      tmpHome,
+      '.claude',
+      'projects',
+      encodeCwdToDir(process.cwd()),
+      `${sessionId}.jsonl`,
+    );
+  }
+
+  async function writeClaudeSession(sessionId: string, transcript: string): Promise<void> {
+    const sessionPath = claudeSessionPath(sessionId);
+    await fsp.mkdir(path.dirname(sessionPath), { recursive: true });
+    await fsp.writeFile(sessionPath, transcript, 'utf8');
+  }
+
+  async function authenticate(): Promise<void> {
+    await writeTokens({
+      access_token: 'test-access',
+      refresh_token: 'test-refresh',
+      expires_at: Date.now() + 60_000,
+      scope: 'mcp.read',
+    }, tmpHome);
+  }
+
+  function cloudRpcError(message: string, code = ErrorCode.InvalidParams): typeof fetch {
+    return testFetch(async (_url, init) => {
+      const request = JSON.parse(String(init?.body)) as { id: string };
+      return Response.json({
+        jsonrpc: '2.0',
+        id: request.id,
+        error: { code, message },
+      });
+    });
+  }
+
+  function testFetch(
+    implementation: (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => Promise<Response>,
+  ): typeof fetch {
+    return Object.assign(implementation, {
+      preconnect: (_url: string | URL): void => {},
+    });
+  }
+
+  test('nonexistent local session is an actionable tool error', async () => {
+    const result = await callTool('read_local_session', { session_id: 'missing-session' });
+
+    expect(result).toEqual({
+      isError: true,
+      content: [{
+        type: 'text',
+        text: 'session not found: missing-session. Call list_local_sessions to choose an available session, then retry.',
+      }],
+    });
+  });
+
+  test.each([
+    ['empty', ''],
+    ['nonempty', '{"type":"user"}\n'],
+  ])('valid %s local session remains successful', async (_label, transcript) => {
+    await writeClaudeSession('valid-session', transcript);
+
+    const result = await callTool('read_local_session', { session_id: 'valid-session' });
+    expect(result.isError).toBeUndefined();
+    expect(JSON.parse((result.content[0] as { type: 'text'; text: string }).text)).toMatchObject({
+      session_id: 'valid-session',
+      transcript,
+    });
+  });
+
+  test.each(['nonexistent', 'invisible'])(
+    '%s cloud thread gets the same non-disclosing tool error',
+    async () => {
+      await authenticate();
+      const result = await callTool(
+        'get_thread',
+        { thread_id: 'th_unavailable' },
+        cloudRpcError('thread not found or not visible'),
+      );
+
+      expect(result).toEqual({
+        isError: true,
+        content: [{
+          type: 'text',
+          text: 'thread not found or not visible. Check the thread ID and your access, then retry.',
+        }],
+      });
+    },
+  );
+
+  test('valid cloud thread remains successful', async () => {
+    await authenticate();
+    const fetchImpl = testFetch(async (_url, init) => {
+      const request = JSON.parse(String(init?.body)) as { id: string };
+      return Response.json({
+        jsonrpc: '2.0',
+        id: request.id,
+        result: {
+          content: [{ type: 'text', text: JSON.stringify({ id: 'th_visible', blocks: [] }) }],
+        },
+      });
+    });
+
+    const result = await callTool('get_thread', { thread_id: 'th_visible' }, fetchImpl);
+    expect(result.isError).toBeUndefined();
+    expect(JSON.parse(result.content[0].text)).toEqual({ id: 'th_visible', blocks: [] });
+  });
+
+  test('authentication failure remains actionable and distinct', async () => {
+    const result = await callTool('get_thread', { thread_id: 'th_any' });
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { type: 'text'; text: string }).text).toContain('lore_login');
+  });
+
+  test.each([
+    ['timeout', testFetch(async () => { throw new DOMException('request timed out', 'TimeoutError'); }), 'request timed out'],
+    ['rate limit', testFetch(async () => new Response('retry later', { status: 429 })), 'HTTP 429'],
+    ['upstream server', testFetch(async () => new Response('temporarily unavailable', { status: 503 })), 'HTTP 503'],
+    ['malformed response', testFetch(async () => new Response('not-json', { status: 200 })), 'not valid JSON-RPC'],
+  ])('%s failure remains a distinct tool error', async (_label, fetchImpl, expected) => {
+    await authenticate();
+    const result = await callTool('get_thread', { thread_id: 'th_any' }, fetchImpl);
+
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { type: 'text'; text: string }).text).toContain(expected);
+    expect((result.content[0] as { type: 'text'; text: string }).text).not.toContain('not found');
+  });
+
+  test('packaged tool list does not expose the retired lore_setup control plane', async () => {
+    const server = createLoreMcpServer({ home: tmpHome });
+    const client = new Client({ name: 'lore-list-test', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    try {
+      const listed = await client.listTools();
+      expect(listed.tools.map((tool) => tool.name)).not.toContain('lore_setup');
+    } finally {
+      await client.close();
+      await server.close();
     }
   });
 });

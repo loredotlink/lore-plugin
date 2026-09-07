@@ -371,6 +371,24 @@ describe('callCloudTool', () => {
     expect((caught as { cause?: { code?: number } }).cause?.code).toBe(-32602);
   });
 
+  test('malformed JSON-RPC error payload is rejected before error classification', async () => {
+    await writeTokens(validTokens(), home);
+    const { fetchImpl } = captureFetch((req) =>
+      jsonResponse({
+        jsonrpc: '2.0',
+        id: (req.body as { id: string }).id,
+        error: {
+          code: -32602,
+          message: ['thread not found or not visible'],
+        },
+      }),
+    );
+
+    await expect(
+      callCloudTool('get_thread', { thread_id: 'th_unavailable' }, { fetchImpl, home }),
+    ).rejects.toThrow('cloud response was not valid JSON-RPC');
+  });
+
   test('non-JSON 200 body: throws "cloud response was not valid JSON-RPC"', async () => {
     await writeTokens(validTokens(), home);
     const { fetchImpl } = captureFetch(
