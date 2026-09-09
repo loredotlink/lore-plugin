@@ -2,16 +2,14 @@
  * Self-provision the shared, long-lived Lore API key from the plugin's login
  * flow.
  *
- * The plugin calls the cloud `create_api_key` MCP tool with its MCP-audience
- * token and stores the returned key in the shared top-level `apiKey` slot.
+ * The plugin calls the upload-key REST endpoint with its MCP-audience token
+ * and stores the returned key in the shared top-level `apiKey` slot.
  * A user whose first Lore contact is `lore_login` therefore gets the durable
  * credential needed by credential-less child contexts.
  *
  * Why the raw key never touches the agent:
- *   `create_api_key` is intentionally NOT in the agent-facing proxy tool set
- *   (`cloudProxyTools`). It is invoked here, inside the plugin process, and the
- *   raw key is written straight to disk — it never appears in a tool result the
- *   model can see.
+ *   The REST call runs here, inside the plugin process, and the raw key is
+ *   written straight to disk. There is no MCP tool result for the model to see.
  *
  * Idempotent + non-fatal:
  *   Provisioning is skipped when a key is already present (env override or the
@@ -19,9 +17,12 @@
  *   remains a working fallback, so a provisioning blip must never fail login.
  */
 import os from 'node:os';
+import { createUploadApiKeyResponseSchema } from '@lore/contracts';
 import { readApiKey, writeApiKey } from '@lore/identity-store';
-import { callCloudTool } from '../cloudCall.js';
-import { stateDir } from './store.js';
+import { AuthRequiredError } from '../errors.js';
+import { cloudMcpBaseUrl } from '../cloudBaseUrl.js';
+import { forceRefreshAccessToken, getValidAccessToken } from './refresh.js';
+import { deleteTokens, stateDir } from './store.js';
 
 const LORE_API_KEY_ENV = 'LORE_API_KEY';
 
@@ -39,50 +40,57 @@ export function pluginApiKeyName(hostname: string): string {
   return `plugin@${hostname}`;
 }
 
+type CreateUploadApiKeyImpl = (
+  name: string,
+  opts: { home?: string; fetchImpl?: typeof fetch },
+) => Promise<string | null>;
+
 /**
- * Extract the raw `lore_uak_` key from a `create_api_key` CallToolResult.
- *
- * The cloud tool returns the `createUploadApiKey` response body (a plain
- * object); the MCP server wraps a plain object as
- * `{ content: [{ type: 'text', text: <json> }] }`, so we parse the text node's
- * JSON and read `raw_key`. Returns null on any unexpected shape — the caller
- * treats that as a non-fatal provisioning miss rather than throwing.
+ * Create the upload-only key through its REST owner. A 401 uses the same
+ * retry-before-delete rule as cloud MCP calls. Error messages never include
+ * response bodies because an upstream echo could contain a credential.
  */
-export function extractRawKey(result: unknown): string | null {
-  if (!result || typeof result !== 'object') return null;
-  const content = (result as { content?: unknown }).content;
-  if (!Array.isArray(content)) return null;
-  for (const node of content) {
-    if (
-      node &&
-      typeof node === 'object' &&
-      (node as { type?: unknown }).type === 'text' &&
-      typeof (node as { text?: unknown }).text === 'string'
-    ) {
-      try {
-        const parsed = JSON.parse((node as { text: string }).text) as {
-          raw_key?: unknown;
-        };
-        if (typeof parsed.raw_key === 'string' && parsed.raw_key.length > 0) {
-          return parsed.raw_key;
-        }
-      } catch {
-        // Not JSON — keep scanning the remaining content nodes.
-      }
+export const createUploadApiKey: CreateUploadApiKeyImpl = async (
+  name,
+  opts,
+) => {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const accessToken = await getValidAccessToken(opts);
+  const post = (bearer: string) =>
+    fetchImpl(`${cloudMcpBaseUrl()}/api/upload_api_keys`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${bearer}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ name }),
+    });
+
+  let response = await post(accessToken);
+  if (response.status === 401) {
+    const refreshedToken = await forceRefreshAccessToken({
+      previousAccessToken: accessToken,
+      ...opts,
+    });
+    response = await post(refreshedToken);
+    if (response.status === 401) {
+      await deleteTokens(opts.home);
+      throw new AuthRequiredError();
     }
   }
-  return null;
-}
 
-/** Injectable cloud-call seam so tests never touch the network. */
-type CallCloudToolImpl = (
-  toolName: string,
-  args: Record<string, unknown>,
-  opts?: { home?: string; fetchImpl?: typeof fetch },
-) => Promise<unknown>;
+  if (!response.ok) {
+    throw new Error(`Upload API key creation failed: HTTP ${response.status}`);
+  }
+
+  const parsed = createUploadApiKeyResponseSchema.safeParse(
+    await response.json().catch(() => null),
+  );
+  return parsed.success ? parsed.data.raw_key : null;
+};
 
 /**
- * Mint the shared API key via the cloud `create_api_key` tool and persist it,
+ * Mint the shared API key via the REST endpoint and persist it,
  * unless one already exists. Returns `{ provisioned: true }` only when it
  * actually stored a new key.
  */
@@ -92,23 +100,21 @@ export async function provisionSharedApiKey(
     fetchImpl?: typeof fetch;
     now?: () => number;
     hostname?: string;
-    callCloudToolImpl?: CallCloudToolImpl;
+    createUploadApiKeyImpl?: CreateUploadApiKeyImpl;
   } = {},
 ): Promise<{ provisioned: boolean }> {
   const now = opts.now ?? Date.now;
   const hostname = opts.hostname ?? os.hostname();
-  const call = opts.callCloudToolImpl ?? callCloudTool;
+  const createKey = opts.createUploadApiKeyImpl ?? createUploadApiKey;
 
   // Idempotent: an env override or a stored key already covers this machine.
   if (envApiKey() !== null) return { provisioned: false };
   if ((await readApiKey(stateDir(opts.home))) !== null) return { provisioned: false };
 
-  const result = await call(
-    'create_api_key',
-    { name: pluginApiKeyName(hostname) },
+  const rawKey = await createKey(
+    pluginApiKeyName(hostname),
     { home: opts.home, fetchImpl: opts.fetchImpl },
   );
-  const rawKey = extractRawKey(result);
   if (!rawKey) return { provisioned: false };
 
   await writeApiKey(stateDir(opts.home), { value: rawKey, created_at: now() });

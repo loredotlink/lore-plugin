@@ -19283,8 +19283,161 @@ var initContract = () => {
   };
 };
 
-// ../contracts/src/binders.ts
+// ../contracts/src/organizationAuthority.ts
+var id = exports_external.string().min(1).max(64);
+var name = exports_external.string().trim().min(1).max(120);
+var error51 = exports_external.object({ message: exports_external.string() });
+var headers = exports_external.object({ authorization: exports_external.string().min(1).optional() });
+var pathParams = exports_external.object({ id });
+var organizationDecisionVersionsSchema = exports_external.object({
+  classifier_version: exports_external.string().min(1).max(200),
+  rule_version: exports_external.string().min(1).max(200),
+  input_version: exports_external.string().min(1).max(200)
+});
+var labelMembershipSourceSchema = exports_external.enum(["manual_or_cohort", "automatic", "rejected"]);
+var personalLabelSchema = exports_external.object({ id, name, owner_user_id: id });
+var labelDecisionSchema = exports_external.object({
+  label_id: id,
+  source: labelMembershipSourceSchema,
+  confidence: exports_external.number().min(0).max(1).nullable(),
+  decision_versions: organizationDecisionVersionsSchema.nullable(),
+  assigned_at: exports_external.string().datetime()
+});
+var threadOrganizationSchema = exports_external.object({
+  thread_id: id,
+  labels: exports_external.array(labelDecisionSchema),
+  binder: exports_external.object({
+    binder_id: id.nullable(),
+    source: exports_external.enum(["user", "lore"]),
+    decision_versions: organizationDecisionVersionsSchema.nullable(),
+    assigned_at: exports_external.string().datetime()
+  }).nullable(),
+  rejected_binder_ids: exports_external.array(id)
+});
+var setLabelDecisionBodySchema = exports_external.object({
+  label_id: id,
+  source: exports_external.enum(["manual_or_cohort", "rejected"])
+});
+var binderExampleSchema = exports_external.object({
+  thread_id: id,
+  polarity: exports_external.enum(["positive", "negative"]),
+  user_confirmed: exports_external.boolean()
+});
+var binderPolicyBodySchema = exports_external.object({
+  inclusion_rule: exports_external.string().trim().min(1).max(4000),
+  rule_version: exports_external.number().int().positive(),
+  examples: exports_external.array(binderExampleSchema).max(8)
+}).refine((body) => new Set(body.examples.map((example) => example.thread_id)).size === body.examples.length && body.examples.filter((example) => example.polarity === "positive").length <= 5 && body.examples.filter((example) => example.polarity === "negative").length <= 3, { message: "Use distinct threads and at most five positive and three negative examples." });
+var binderPolicySchema = exports_external.object({
+  binder_id: id,
+  inclusion_rule: exports_external.string().nullable(),
+  rule_version: exports_external.number().int().positive(),
+  examples: exports_external.array(binderExampleSchema)
+});
+var organizationProposalEvidenceSchema = exports_external.object({
+  kind: exports_external.enum(["label", "label_and_binder"]),
+  name,
+  rationale: exports_external.string().min(1).max(4000),
+  inclusion_rule: exports_external.string().trim().min(1).max(4000).nullable(),
+  cohort: exports_external.array(exports_external.object({ thread_id: id, input_version: exports_external.string().min(1).max(200) })).min(5).max(200),
+  decision_versions: organizationDecisionVersionsSchema
+}).refine((proposal) => new Set(proposal.cohort.map((thread) => thread.thread_id)).size === proposal.cohort.length && (proposal.kind === "label" ? proposal.cohort.length < 10 : proposal.cohort.length >= 10 && proposal.inclusion_rule !== null), { message: "Use a distinct cohort: 5\u20139 for a label, 10 or more with a rule for a combined proposal." });
+var organizationProposalSchema = exports_external.object({
+  id,
+  status: exports_external.enum(["pending", "approved", "rejected"]),
+  evidence: organizationProposalEvidenceSchema,
+  created_at: exports_external.string().datetime(),
+  decided_at: exports_external.string().datetime().nullable(),
+  label_id: id.nullable(),
+  binder_id: id.nullable(),
+  approved_thread_ids: exports_external.array(id).nullable()
+});
+var approveOrganizationProposalBodySchema = exports_external.object({
+  name,
+  binder_name: name.optional(),
+  inclusion_rule: exports_external.string().trim().min(1).max(4000).optional(),
+  thread_ids: exports_external.array(id).min(1).max(200),
+  confirmed_example_thread_ids: exports_external.array(id).max(5).default([])
+});
 var c = initContract();
+var organizationAuthorityContract = c.router({
+  listPersonalLabels: {
+    method: "GET",
+    path: "/labels",
+    headers,
+    responses: { 200: exports_external.array(personalLabelSchema), 401: error51 }
+  },
+  createPersonalLabel: {
+    method: "POST",
+    path: "/labels",
+    headers,
+    body: exports_external.object({ name }),
+    responses: { 201: personalLabelSchema, 401: error51, 409: error51 }
+  },
+  getThreadOrganization: {
+    method: "GET",
+    path: "/threads/:id/organization",
+    headers,
+    pathParams,
+    responses: { 200: threadOrganizationSchema, 401: error51, 404: error51 }
+  },
+  setThreadLabelDecision: {
+    method: "PUT",
+    path: "/threads/:id/labels",
+    headers,
+    pathParams,
+    body: setLabelDecisionBodySchema,
+    responses: { 200: threadOrganizationSchema, 401: error51, 404: error51 }
+  },
+  setThreadBinderRejection: {
+    method: "PUT",
+    path: "/threads/:id/binder-rejections",
+    headers,
+    pathParams,
+    body: exports_external.object({ binder_id: id, rejected: exports_external.boolean() }),
+    responses: { 200: threadOrganizationSchema, 401: error51, 404: error51, 409: error51 }
+  },
+  getBinderPolicy: {
+    method: "GET",
+    path: "/binders/:id/policy",
+    headers,
+    pathParams,
+    responses: { 200: binderPolicySchema, 401: error51, 404: error51 }
+  },
+  setBinderPolicy: {
+    method: "PUT",
+    path: "/binders/:id/policy",
+    headers,
+    pathParams,
+    body: binderPolicyBodySchema,
+    responses: { 200: binderPolicySchema, 400: error51, 401: error51, 404: error51, 409: error51 }
+  },
+  listOrganizationProposals: {
+    method: "GET",
+    path: "/organization-proposals",
+    headers,
+    responses: { 200: exports_external.array(organizationProposalSchema), 401: error51 }
+  },
+  rejectOrganizationProposal: {
+    method: "POST",
+    path: "/organization-proposals/:id/reject",
+    headers,
+    pathParams,
+    body: exports_external.object({}).nullish(),
+    responses: { 200: organizationProposalSchema, 401: error51, 404: error51, 409: error51 }
+  },
+  approveOrganizationProposal: {
+    method: "POST",
+    path: "/organization-proposals/:id/approve",
+    headers,
+    pathParams,
+    body: approveOrganizationProposalBodySchema,
+    responses: { 200: organizationProposalSchema, 400: error51, 401: error51, 404: error51, 409: error51 }
+  }
+});
+
+// ../contracts/src/binders.ts
+var c2 = initContract();
 var errorSchema = exports_external.object({ message: exports_external.string() });
 var BINDER_SUB_GROUP_THRESHOLD = 3;
 var binderStatusSchema = exports_external.enum(["active", "archived"]);
@@ -19307,12 +19460,14 @@ var binderSubGroupSchema = exports_external.object({
   thread_ids: exports_external.array(exports_external.string().min(1)).min(BINDER_SUB_GROUP_THRESHOLD)
 });
 var binderDetailResourceSchema = binderResourceSchema.extend({
-  sub_groups: exports_external.array(binderSubGroupSchema)
+  sub_groups: exports_external.array(binderSubGroupSchema),
+  thread_order: exports_external.array(exports_external.string().min(1))
 });
 var binderListResponseSchema = exports_external.object({
   type: exports_external.literal("list"),
   list_type: exports_external.literal("binder"),
   objects: exports_external.array(binderResourceSchema),
+  archived_objects: exports_external.array(binderResourceSchema),
   unsorted_count: exports_external.number().int().nonnegative(),
   new_count: exports_external.number().int().nonnegative(),
   labeled_thread_count: exports_external.number().int().nonnegative()
@@ -19328,6 +19483,12 @@ var updateBinderBodySchema = exports_external.object({
   blurb: exports_external.string().trim().max(500).nullable().optional(),
   status: binderStatusSchema.optional()
 }).refine((body) => body.name !== undefined || body.blurb !== undefined || body.status !== undefined, { message: "Provide at least one field to update." });
+var moveDirectionSchema = exports_external.enum(["up", "down"]);
+var reorderBinderBodySchema = exports_external.object({ direction: moveDirectionSchema });
+var reorderThreadInBinderBodySchema = exports_external.object({
+  direction: moveDirectionSchema,
+  relative_to_thread_id: exports_external.string().min(1)
+});
 var setThreadBinderBodySchema = exports_external.object({
   binder_id: exports_external.string().min(1).nullable()
 });
@@ -19377,6 +19538,7 @@ var setBinderSuggestionsEnabledBodySchema = exports_external.object({
   enabled: exports_external.boolean()
 });
 var promoteLabelBodySchema = exports_external.object({
+  thread_ids: exports_external.array(exports_external.string().min(1)).max(200).optional(),
   name: exports_external.string().trim().min(1).max(120).optional()
 });
 var binderOrganizingBasisSchema = exports_external.enum([
@@ -19417,7 +19579,8 @@ var authorizationHeaders = exports_external.object({
 var resourceIdParams = exports_external.object({
   id: exports_external.string().min(1).max(64)
 });
-var bindersContract = c.router({
+var bindersContract = c2.router({
+  ...organizationAuthorityContract,
   listBinders: {
     method: "GET",
     path: "/binders",
@@ -19466,6 +19629,32 @@ var bindersContract = c.router({
     },
     summary: "Rename, describe, archive, or reactivate one of the viewer's personal binders."
   },
+  deleteBinder: {
+    method: "DELETE",
+    path: "/binders/:id",
+    pathParams: resourceIdParams,
+    headers: authorizationHeaders,
+    body: exports_external.object({}).nullish(),
+    responses: {
+      204: exports_external.undefined(),
+      401: errorSchema,
+      404: errorSchema
+    },
+    summary: "Delete one of the viewer's binders and leave its threads in Unsorted."
+  },
+  reorderBinder: {
+    method: "PUT",
+    path: "/binders/:id/order",
+    pathParams: resourceIdParams,
+    headers: authorizationHeaders,
+    body: reorderBinderBodySchema,
+    responses: {
+      204: exports_external.undefined(),
+      401: errorSchema,
+      404: errorSchema
+    },
+    summary: "Move one active personal binder one place up or down in its saved order."
+  },
   listBinderSuggestions: {
     method: "GET",
     path: "/binders/suggestions",
@@ -19511,7 +19700,7 @@ var bindersContract = c.router({
       404: errorSchema,
       409: errorSchema
     },
-    summary: "Create a binder from a label, filing the viewer's threads that carry the label into it."
+    summary: "Create a binder from a personal label, filing only explicit reviewed thread_ids."
   },
   proposeInitialBinders: {
     method: "POST",
@@ -19537,11 +19726,25 @@ var bindersContract = c.router({
       404: errorSchema
     },
     summary: "File a thread into a binder by hand, or into Unsorted with null. Records source=user so Lore never moves it again."
+  },
+  reorderThreadInBinder: {
+    method: "PUT",
+    path: "/threads/:id/binder-order",
+    pathParams: resourceIdParams,
+    headers: authorizationHeaders,
+    body: reorderThreadInBinderBodySchema,
+    responses: {
+      204: exports_external.undefined(),
+      401: errorSchema,
+      403: errorSchema,
+      404: errorSchema
+    },
+    summary: "Move an owned thread before or after a visible neighbor within its active binder."
   }
 });
 
 // ../contracts/src/checkpoints.ts
-var c2 = initContract();
+var c3 = initContract();
 var errorSchema2 = exports_external.object({ message: exports_external.string() });
 var threadCheckpointCreatorSchema = exports_external.object({
   id: exports_external.string().min(1),
@@ -19585,7 +19788,7 @@ var createThreadCheckpointBodySchema = exports_external.object({
 var renameThreadCheckpointBodySchema = exports_external.object({
   name: exports_external.string().trim().min(1).max(120)
 });
-var checkpointsContract = c2.router({
+var checkpointsContract = c3.router({
   listCheckpointBookmarks: {
     method: "GET",
     path: "/checkpoints",
@@ -19670,15 +19873,165 @@ var checkpointsContract = c2.router({
   }
 });
 
+// ../contracts/src/scheduledTasks.ts
+var c4 = initContract();
+var errorSchema3 = exports_external.object({ message: exports_external.string() });
+var authorizationHeaders2 = exports_external.object({
+  authorization: exports_external.string().min(1).optional()
+});
+var scheduledTaskRunStatusSchema = exports_external.enum([
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "skipped"
+]);
+var scheduledTaskRunFailureCodeSchema = exports_external.enum([
+  "task_disabled",
+  "actor_rejected",
+  "dispatch_failed",
+  "turn_error",
+  "turn_aborted",
+  "settle_unknown"
+]);
+var scheduledTaskRunResourceSchema = exports_external.object({
+  id: exports_external.string().min(1),
+  scheduled_for: exports_external.string().datetime(),
+  status: scheduledTaskRunStatusSchema,
+  failure_code: scheduledTaskRunFailureCodeSchema.nullable(),
+  thread_id: exports_external.string().min(1).nullable(),
+  started_at: exports_external.string().datetime().nullable(),
+  settled_at: exports_external.string().datetime().nullable()
+});
+var scheduledTaskResourceSchema = exports_external.object({
+  id: exports_external.string().min(1),
+  title: exports_external.string().min(1),
+  prompt: exports_external.string().min(1),
+  source_thread_id: exports_external.string().min(1).nullable(),
+  cron_expression: exports_external.string().min(1),
+  timezone: exports_external.string().min(1),
+  enabled: exports_external.boolean(),
+  paused_reason: exports_external.enum(["failures"]).nullable(),
+  next_run_at: exports_external.string().datetime(),
+  last_run_at: exports_external.string().datetime().nullable(),
+  consecutive_failures: exports_external.number().int().nonnegative(),
+  created_at: exports_external.string().datetime(),
+  latest_run: scheduledTaskRunResourceSchema.nullable()
+});
+var scheduledTaskDetailSchema = scheduledTaskResourceSchema.extend({
+  runs: exports_external.array(scheduledTaskRunResourceSchema)
+});
+var scheduledTaskListResponseSchema = exports_external.object({
+  objects: exports_external.array(scheduledTaskResourceSchema)
+});
+var createScheduledTaskBodySchema = exports_external.object({
+  title: exports_external.string().trim().min(1).max(120),
+  prompt: exports_external.string().trim().min(1).max(20000),
+  cron_expression: exports_external.string().trim().min(9).max(120),
+  timezone: exports_external.string().trim().min(1).max(64),
+  source_thread_id: exports_external.string().min(1).max(64).optional()
+});
+var updateScheduledTaskBodySchema = exports_external.object({
+  title: exports_external.string().trim().min(1).max(120).optional(),
+  prompt: exports_external.string().trim().min(1).max(20000).optional(),
+  cron_expression: exports_external.string().trim().min(9).max(120).optional(),
+  timezone: exports_external.string().trim().min(1).max(64).optional(),
+  enabled: exports_external.boolean().optional()
+});
+var scheduledTaskPathParams = exports_external.object({
+  id: exports_external.string().min(1).max(64)
+});
+var scheduledTasksContract = c4.router({
+  listScheduledTasks: {
+    method: "GET",
+    path: "/scheduled-tasks",
+    headers: authorizationHeaders2,
+    responses: {
+      200: scheduledTaskListResponseSchema,
+      401: errorSchema3
+    },
+    summary: "List the viewer's scheduled tasks: rows in the active workspace plus personal rows they created, soonest next run first."
+  },
+  getScheduledTask: {
+    method: "GET",
+    path: "/scheduled-tasks/:id",
+    pathParams: scheduledTaskPathParams,
+    headers: authorizationHeaders2,
+    responses: {
+      200: scheduledTaskDetailSchema,
+      401: errorSchema3,
+      404: errorSchema3
+    },
+    summary: "One scheduled task with its recent runs."
+  },
+  createScheduledTask: {
+    method: "POST",
+    path: "/scheduled-tasks",
+    headers: authorizationHeaders2,
+    body: createScheduledTaskBodySchema,
+    responses: {
+      201: scheduledTaskResourceSchema,
+      400: errorSchema3,
+      401: errorSchema3,
+      404: errorSchema3
+    },
+    summary: "Create a scheduled task in the viewer's active workspace (or personal scope). The source thread, if given, must be visible to the viewer."
+  },
+  updateScheduledTask: {
+    method: "PATCH",
+    path: "/scheduled-tasks/:id",
+    pathParams: scheduledTaskPathParams,
+    headers: authorizationHeaders2,
+    body: updateScheduledTaskBodySchema,
+    responses: {
+      200: scheduledTaskResourceSchema,
+      400: errorSchema3,
+      401: errorSchema3,
+      403: errorSchema3,
+      404: errorSchema3
+    },
+    summary: "Edit, pause, or resume a scheduled task. Creator only."
+  },
+  deleteScheduledTask: {
+    method: "DELETE",
+    path: "/scheduled-tasks/:id",
+    pathParams: scheduledTaskPathParams,
+    headers: authorizationHeaders2,
+    body: exports_external.object({}).nullish(),
+    responses: {
+      204: exports_external.undefined(),
+      401: errorSchema3,
+      403: errorSchema3,
+      404: errorSchema3
+    },
+    summary: "Soft-delete a scheduled task. Creator only. Run history stays readable through its threads."
+  },
+  runScheduledTaskNow: {
+    method: "POST",
+    path: "/scheduled-tasks/:id/run",
+    pathParams: scheduledTaskPathParams,
+    headers: authorizationHeaders2,
+    body: exports_external.object({}).nullish(),
+    responses: {
+      202: scheduledTaskRunResourceSchema,
+      401: errorSchema3,
+      403: errorSchema3,
+      404: errorSchema3,
+      409: errorSchema3
+    },
+    summary: "Queue an out-of-schedule run now. Creator only. Answers 409 while a run is already queued or running."
+  }
+});
+
 // ../contracts/src/favorites.ts
-var c3 = initContract();
+var c5 = initContract();
 var favoriteThreadListResponseSchema = exports_external.object({
   type: exports_external.literal("list"),
   list_type: exports_external.literal("thread"),
   has_more: exports_external.boolean(),
   objects: exports_external.array(exports_external.unknown())
 });
-var errorSchema3 = exports_external.object({ message: exports_external.string() });
+var errorSchema4 = exports_external.object({ message: exports_external.string() });
 var toggleThreadFavoriteResponseSchema = exports_external.object({
   thread_id: exports_external.string().min(1),
   is_favorited: exports_external.boolean(),
@@ -19719,7 +20072,7 @@ var listFavoritePromptsQuerySchema = exports_external.object({
 var favoritedBlockIdsResponseSchema = exports_external.object({
   block_ids: exports_external.array(exports_external.string().min(1))
 });
-var favoritesContract = c3.router({
+var favoritesContract = c5.router({
   addThreadFavorite: {
     method: "POST",
     path: "/threads/:id/favorite",
@@ -19732,9 +20085,9 @@ var favoritesContract = c3.router({
     body: exports_external.object({}).optional(),
     responses: {
       201: toggleThreadFavoriteResponseSchema,
-      401: errorSchema3,
-      403: errorSchema3,
-      404: errorSchema3
+      401: errorSchema4,
+      403: errorSchema4,
+      404: errorSchema4
     },
     summary: "Bookmark a thread for the authenticated user. Idempotent \u2014 re-favoriting returns the existing membership."
   },
@@ -19750,9 +20103,9 @@ var favoritesContract = c3.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: toggleThreadFavoriteResponseSchema,
-      401: errorSchema3,
-      403: errorSchema3,
-      404: errorSchema3
+      401: errorSchema4,
+      403: errorSchema4,
+      404: errorSchema4
     },
     summary: "Remove a thread bookmark for the authenticated user (no-op if absent)."
   },
@@ -19765,8 +20118,8 @@ var favoritesContract = c3.router({
     query: listFavoriteThreadsQuerySchema,
     responses: {
       200: favoriteThreadListResponseSchema,
-      401: errorSchema3,
-      403: errorSchema3
+      401: errorSchema4,
+      403: errorSchema4
     },
     summary: "List threads the authenticated user has favorited, newest favorited first. Visibility filtering still applies \u2014 a thread the viewer can no longer see (e.g. visibility downgraded) is omitted from the list."
   },
@@ -19782,10 +20135,10 @@ var favoritesContract = c3.router({
     body: exports_external.object({}).optional(),
     responses: {
       201: togglePromptFavoriteResponseSchema,
-      401: errorSchema3,
-      403: errorSchema3,
-      404: errorSchema3,
-      409: errorSchema3
+      401: errorSchema4,
+      403: errorSchema4,
+      404: errorSchema4,
+      409: errorSchema4
     },
     summary: 'Bookmark a single user prompt (a thread_blocks row with type="user") for the authenticated user. Idempotent.'
   },
@@ -19801,8 +20154,8 @@ var favoritesContract = c3.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: togglePromptFavoriteResponseSchema,
-      401: errorSchema3,
-      404: errorSchema3
+      401: errorSchema4,
+      404: errorSchema4
     },
     summary: "Remove a prompt bookmark for the authenticated user (no-op if absent)."
   },
@@ -19815,7 +20168,7 @@ var favoritesContract = c3.router({
     query: listFavoritePromptsQuerySchema,
     responses: {
       200: favoritePromptListResponseSchema,
-      401: errorSchema3
+      401: errorSchema4
     },
     summary: "List the user's favorited prompts, newest first. Prompts whose parent thread the viewer can no longer see (visibility downgraded) are filtered out at read time."
   },
@@ -19830,23 +20183,23 @@ var favoritesContract = c3.router({
     }),
     responses: {
       200: favoritedBlockIdsResponseSchema,
-      401: errorSchema3,
-      403: errorSchema3,
-      404: errorSchema3
+      401: errorSchema4,
+      403: errorSchema4,
+      404: errorSchema4
     },
     summary: "Returns the set of thread_block ids the authenticated viewer has favorited within a single thread, used to bootstrap per-prompt star state on the SessionView."
   }
 });
 
 // ../contracts/src/push.ts
-var c4 = initContract();
-var errorSchema4 = exports_external.object({ message: exports_external.string() });
+var c6 = initContract();
+var errorSchema5 = exports_external.object({ message: exports_external.string() });
 var registerPushDeviceBodySchema = exports_external.object({
   token: exports_external.string().min(1).max(200),
   platform: exports_external.literal("ios"),
   environment: exports_external.enum(["sandbox", "production"])
 });
-var pushContract = c4.router({
+var pushContract = c6.router({
   registerPushDevice: {
     method: "POST",
     path: "/push/devices",
@@ -19856,7 +20209,7 @@ var pushContract = c4.router({
     body: registerPushDeviceBodySchema,
     responses: {
       200: exports_external.object({ ok: exports_external.literal(true) }),
-      401: errorSchema4
+      401: errorSchema5
     },
     summary: "Register (or re-own) an APNs device token for the authenticated user. Idempotent per token."
   },
@@ -19869,15 +20222,15 @@ var pushContract = c4.router({
     body: exports_external.object({ token: exports_external.string().min(1).max(200) }),
     responses: {
       200: exports_external.object({ ok: exports_external.literal(true) }),
-      401: errorSchema4
+      401: errorSchema5
     },
     summary: "Remove a device token. Missing tokens succeed (idempotent)."
   }
 });
 
 // ../contracts/src/nativeApp.ts
-var c5 = initContract();
-var errorSchema5 = exports_external.object({ message: exports_external.string() });
+var c7 = initContract();
+var errorSchema6 = exports_external.object({ message: exports_external.string() });
 var onboardingMarketingSchema = exports_external.object({
   video_url: exports_external.string().url().max(500).nullable(),
   words: exports_external.array(exports_external.string().min(1).max(40)).max(8),
@@ -19888,7 +20241,7 @@ var nativeAppConfigSchema = exports_external.object({
   entry_route: exports_external.string().min(1).max(200),
   onboarding: onboardingMarketingSchema
 });
-var nativeAppContract = c5.router({
+var nativeAppContract = c7.router({
   getNativeAppConfig: {
     method: "GET",
     path: "/native-app/config",
@@ -19906,17 +20259,17 @@ var nativeAppContract = c5.router({
     body: nativeAppConfigSchema,
     responses: {
       200: nativeAppConfigSchema,
-      400: errorSchema5,
-      401: errorSchema5,
-      403: errorSchema5
+      400: errorSchema6,
+      401: errorSchema6,
+      403: errorSchema6
     },
     summary: "Set where the native shell lands instead of the homepage."
   }
 });
 
 // ../contracts/src/contacts.ts
-var c6 = initContract();
-var errorSchema6 = exports_external.object({ message: exports_external.string() });
+var c8 = initContract();
+var errorSchema7 = exports_external.object({ message: exports_external.string() });
 var contactUploadSchema = exports_external.object({
   phone_number: exports_external.string().min(1).max(40),
   display_name: exports_external.string().max(255).default("")
@@ -19938,7 +20291,7 @@ var contactSuggestionSchema = exports_external.object({
   mutual_count: exports_external.number().int(),
   is_on_lore: exports_external.boolean()
 });
-var contactsContract = c6.router({
+var contactsContract = c8.router({
   syncContacts: {
     method: "POST",
     path: "/contacts/sync",
@@ -19946,8 +20299,8 @@ var contactsContract = c6.router({
     body: syncContactsBodySchema,
     responses: {
       200: syncContactsResponseSchema,
-      401: errorSchema6,
-      503: errorSchema6
+      401: errorSchema7,
+      503: errorSchema7
     },
     summary: "Upload an address book. Numbers are hashed server-side and never stored."
   },
@@ -19957,15 +20310,15 @@ var contactsContract = c6.router({
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
     responses: {
       200: exports_external.object({ suggestions: exports_external.array(contactSuggestionSchema) }),
-      401: errorSchema6
+      401: errorSchema7
     },
     summary: "People to follow from the viewer's address book, ranked by how many address books hold them."
   }
 });
 
 // ../contracts/src/otelPathFilters.ts
-var c7 = initContract();
-var errorSchema7 = exports_external.object({ message: exports_external.string() });
+var c9 = initContract();
+var errorSchema8 = exports_external.object({ message: exports_external.string() });
 var otelPathFilterIdSchema = exports_external.string().regex(/^opf_[0-9A-Za-z]{22}$/);
 var otelPathFlavorSchema = exports_external.enum(["posix", "windows"]);
 var otelPathFilterSchema = exports_external.object({
@@ -19987,7 +20340,7 @@ var pathPairSchema = exports_external.object({
     });
   }
 });
-var otelPathFiltersContract = c7.router({
+var otelPathFiltersContract = c9.router({
   list: {
     method: "GET",
     path: "/otel/path-filters",
@@ -20003,8 +20356,8 @@ var otelPathFiltersContract = c7.router({
         has_more: exports_external.boolean(),
         objects: exports_external.array(otelPathFilterSchema)
       }),
-      401: errorSchema7,
-      403: errorSchema7
+      401: errorSchema8,
+      403: errorSchema8
     },
     summary: "List OTEL path allowlist filters for the authenticated user and organization"
   },
@@ -20015,9 +20368,9 @@ var otelPathFiltersContract = c7.router({
     body: pathPairSchema,
     responses: {
       201: otelPathFilterSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      409: errorSchema7
+      401: errorSchema8,
+      403: errorSchema8,
+      409: errorSchema8
     },
     summary: "Create an OTEL path allowlist filter"
   },
@@ -20030,9 +20383,9 @@ var otelPathFiltersContract = c7.router({
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
     responses: {
       200: otelPathFilterSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema8,
+      403: errorSchema8,
+      404: errorSchema8
     },
     summary: "Get an OTEL path allowlist filter"
   },
@@ -20046,10 +20399,10 @@ var otelPathFiltersContract = c7.router({
     body: pathPairSchema,
     responses: {
       200: otelPathFilterSchema,
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7,
-      409: errorSchema7
+      401: errorSchema8,
+      403: errorSchema8,
+      404: errorSchema8,
+      409: errorSchema8
     },
     summary: "Update an OTEL path allowlist filter without changing wildcard kind"
   },
@@ -20062,17 +20415,17 @@ var otelPathFiltersContract = c7.router({
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
     responses: {
       204: exports_external.undefined(),
-      401: errorSchema7,
-      403: errorSchema7,
-      404: errorSchema7
+      401: errorSchema8,
+      403: errorSchema8,
+      404: errorSchema8
     },
     summary: "Delete an OTEL path allowlist filter"
   }
 });
 
 // ../contracts/src/references.ts
-var c8 = initContract();
-var errorSchema8 = exports_external.object({ message: exports_external.string() });
+var c10 = initContract();
+var errorSchema9 = exports_external.object({ message: exports_external.string() });
 var referenceTypeSchema = exports_external.enum([
   "skill",
   "slash_command",
@@ -20121,7 +20474,7 @@ var referenceThreadListResponseSchema = exports_external.object({
   has_more: exports_external.boolean(),
   objects: exports_external.array(exports_external.unknown())
 });
-var referencesContract = c8.router({
+var referencesContract = c10.router({
   listThreadReferences: {
     method: "GET",
     path: "/threads/:id/references",
@@ -20130,8 +20483,8 @@ var referencesContract = c8.router({
     query: listThreadReferencesQuerySchema,
     responses: {
       200: referenceLinkListResponseSchema,
-      401: errorSchema8,
-      404: errorSchema8
+      401: errorSchema9,
+      404: errorSchema9
     },
     summary: "List a thread's deterministic reference links (skills, plan artifacts, files, PRs), block-anchored, in transcript order."
   },
@@ -20142,16 +20495,16 @@ var referencesContract = c8.router({
     query: listReferenceThreadsQuerySchema,
     responses: {
       200: referenceThreadListResponseSchema,
-      400: errorSchema8,
-      401: errorSchema8
+      400: errorSchema9,
+      401: errorSchema9
     },
     summary: "Reverse lookup: threads that witness a given reference (type + key), newest activity first, filtered to the viewer's visible threads."
   }
 });
 
 // ../contracts/src/search.ts
-var c9 = initContract();
-var errorSchema9 = exports_external.object({ message: exports_external.string() });
+var c11 = initContract();
+var errorSchema10 = exports_external.object({ message: exports_external.string() });
 var globalSearchThreadResultSchema = exports_external.object({
   id: exports_external.string().min(1),
   title: exports_external.string(),
@@ -20191,7 +20544,7 @@ var globalSearchResponseSchema = exports_external.object({
 var globalSearchQuerySchema = exports_external.object({
   q: exports_external.string().trim().min(1).max(80)
 });
-var searchContract = c9.router({
+var searchContract = c11.router({
   globalSearch: {
     method: "GET",
     path: "/search",
@@ -20201,17 +20554,107 @@ var searchContract = c9.router({
     query: globalSearchQuerySchema,
     responses: {
       200: globalSearchResponseSchema,
-      401: errorSchema9,
-      422: errorSchema9
+      401: errorSchema10,
+      422: errorSchema10
     },
     summary: "Global navbar search. Threads and people are searched globally (subject to thread visibility); skills and posts are scoped to the viewer workspace. Max 5 thread, skill, and person results, and 15 post results."
   }
 });
 
-// ../contracts/src/workbenchArtifactlet.ts
-var ARTIFACTLET_PROTOCOL_VERSION = 1;
+// ../contracts/src/workbenchCuratedDatasets.ts
+var curatedDatasetReferenceSchema = exports_external.string().regex(/^cds_[0-9A-Za-z]{22}$/);
+var CURATED_DATASET_CHART_MAX_BYTES = 4 * 1024 * 1024;
+var curatedDatasetSlugSchema = exports_external.string().max(120).regex(/^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*)+$/, "A dataset slug is `region/name` in lower-case letters, digits, and dashes.");
+var curatedDatasetKindValues = ["polygons", "lines", "points", "table"];
+var curatedDatasetFormatValues = ["topojson", "geojson", "csv", "json", "parquet", "txt"];
+var curatedDatasetVisibilityValues = ["team", "public"];
+var FILE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+var fileUploadRequestSchema = exports_external.object({
+  fileName: exports_external.string().min(1).max(255),
+  title: exports_external.string().trim().min(1).max(200),
+  visibility: exports_external.enum(curatedDatasetVisibilityValues).default("team"),
+  contentBase64: exports_external.string().min(1)
+}).strict();
+var fileVisibilityRequestSchema = exports_external.object({
+  visibility: exports_external.enum(curatedDatasetVisibilityValues)
+}).strict();
+var fileSummarySchema = exports_external.object({
+  id: curatedDatasetReferenceSchema,
+  title: exports_external.string(),
+  fileName: exports_external.string(),
+  extension: exports_external.string(),
+  displayPath: exports_external.string(),
+  bytes: exports_external.number().int().nonnegative(),
+  visibility: exports_external.enum(curatedDatasetVisibilityValues),
+  isOwner: exports_external.boolean(),
+  isLore: exports_external.boolean()
+}).strict();
+var filesListResponseSchema = exports_external.object({
+  files: exports_external.array(fileSummarySchema),
+  nextCursor: curatedDatasetReferenceSchema.nullable()
+}).strict();
+var filePreviewResponseSchema = exports_external.object({
+  text: exports_external.string().nullable(),
+  truncated: exports_external.boolean()
+}).strict();
+var curatedDatasetMetadataSchema = exports_external.object({
+  objects: exports_external.record(exports_external.string(), exports_external.string()).optional(),
+  properties: exports_external.array(exports_external.string()).optional(),
+  joinKey: exports_external.string().optional(),
+  bbox: exports_external.tuple([exports_external.number(), exports_external.number(), exports_external.number(), exports_external.number()]).optional(),
+  projection: exports_external.string().optional(),
+  columns: exports_external.array(exports_external.string()).optional()
+}).strict();
+var curatedDatasetSummarySchema = exports_external.object({
+  id: curatedDatasetReferenceSchema,
+  slug: curatedDatasetSlugSchema,
+  title: exports_external.string().min(1).max(200),
+  description: exports_external.string().max(2000),
+  region: exports_external.string().min(1).max(60),
+  kind: exports_external.enum(curatedDatasetKindValues),
+  format: exports_external.enum(curatedDatasetFormatValues),
+  bytes: exports_external.number().int().nonnegative(),
+  version: exports_external.number().int().positive(),
+  chartable: exports_external.boolean(),
+  metadata: curatedDatasetMetadataSchema,
+  sourceUrl: exports_external.string().optional(),
+  license: exports_external.string().optional(),
+  downloadUrl: exports_external.string().url().optional(),
+  downloadUrlExpiresAt: exports_external.string().optional()
+}).strict();
+var curatedDatasetBuiltEntrySchema = curatedDatasetSummarySchema.omit({
+  id: true,
+  downloadUrl: true,
+  downloadUrlExpiresAt: true
+}).extend({
+  contentType: exports_external.string().min(1),
+  sourceUrl: exports_external.string().url(),
+  license: exports_external.string().min(1),
+  file: exports_external.string().regex(/^[a-z0-9_-]+\.(topojson|geojson|json|csv|parquet)$/),
+  sha256: exports_external.string().regex(/^[0-9a-f]{64}$/)
+}).strict();
+var curatedDatasetBuiltManifestSchema = exports_external.object({
+  builtAt: exports_external.string().datetime(),
+  entries: exports_external.array(curatedDatasetBuiltEntrySchema).min(1)
+}).strict();
+var CURATED_DATASET_SEARCH_MAX_RESULTS = 20;
+var wbCoreCuratedDatasetSearchRequestSchema = exports_external.object({
+  workbenchThreadId: exports_external.string().min(1),
+  query: exports_external.string().trim().max(200),
+  region: exports_external.string().trim().max(60).optional(),
+  limit: exports_external.number().int().positive().max(CURATED_DATASET_SEARCH_MAX_RESULTS).optional()
+}).strict();
+var wbCoreCuratedDatasetSearchResponseSchema = exports_external.object({
+  datasets: exports_external.array(curatedDatasetSummarySchema).max(CURATED_DATASET_SEARCH_MAX_RESULTS)
+}).strict();
+var curatedDatasetListResponseSchema = exports_external.object({
+  datasets: exports_external.array(curatedDatasetSummarySchema)
+}).strict();
+
+// ../contracts/src/workbenchInlineArtifact.ts
+var INLINE_ARTIFACT_PROTOCOL_VERSION = 1;
 var DRAW_CHART_CODE_MAX_BYTES = 60000;
-var ARTIFACTLET_HOST_CSP = [
+var SANDBOX_HOST_CSP = [
   "sandbox allow-scripts",
   "default-src 'none'",
   "script-src 'unsafe-inline' blob:",
@@ -20221,17 +20664,19 @@ var ARTIFACTLET_HOST_CSP = [
   "base-uri 'none'",
   "form-action 'none'"
 ].join("; ");
+var DRAW_CHART_GEO_MAX = 4;
 var drawChartInputSchema = exports_external.object({
   title: exports_external.string().trim().min(1).max(120).describe("Short header for the element, shown above it."),
-  code: exports_external.string().min(1).max(DRAW_CHART_CODE_MAX_BYTES).describe("One TypeScript/JSX module. Default-export a function ({ root, data, api }) that returns a Preact element or draws into root. Imports: d3, preact, preact/hooks only."),
-  data: exports_external.json().optional().describe("The values the module draws. Keep rows here, not in code.")
+  code: exports_external.string().min(1).max(DRAW_CHART_CODE_MAX_BYTES).describe("One TypeScript/JSX module. Default-export a function ({ root, data, geo, api }) that returns a Preact element or draws into root. Imports: d3, topojson-client, preact, preact/hooks only."),
+  data: exports_external.json().optional().describe("The values the module draws. Keep rows here, not in code."),
+  geo: exports_external.array(curatedDatasetReferenceSchema).max(DRAW_CHART_GEO_MAX).optional().describe("Version-pinned dataset ids from search_datasets. Each arrives as geo[id]. For TopoJSON use topojson.feature(geo[id], geo[id].objects[objectName]). Do not copy map geometry into the prompt; approximate point overlays belong in data.")
 }).strict();
-var ARTIFACTLET_SUBMISSION_MAX_BYTES = 16000;
-var artifactletSubmissionSchema = exports_external.object({
+var INLINE_ARTIFACT_SUBMISSION_MAX_BYTES = 16000;
+var inlineArtifactSubmissionSchema = exports_external.object({
   toolCallId: exports_external.string().min(1).max(200),
   value: exports_external.json()
-}).strict().refine((submission) => JSON.stringify(submission.value).length <= ARTIFACTLET_SUBMISSION_MAX_BYTES, `An artifactlet submission is at most ${ARTIFACTLET_SUBMISSION_MAX_BYTES} bytes.`);
-var artifactletThemeSchema = exports_external.object({
+}).strict().refine((submission) => JSON.stringify(submission.value).length <= INLINE_ARTIFACT_SUBMISSION_MAX_BYTES, `An inline artifact submission is at most ${INLINE_ARTIFACT_SUBMISSION_MAX_BYTES} bytes.`);
+var sandboxThemeSchema = exports_external.object({
   scheme: exports_external.enum(["light", "dark"]),
   text: exports_external.string(),
   textMuted: exports_external.string(),
@@ -20242,16 +20687,17 @@ var artifactletThemeSchema = exports_external.object({
   error: exports_external.string(),
   font: exports_external.string()
 }).strict();
-var version2 = exports_external.literal(ARTIFACTLET_PROTOCOL_VERSION);
+var version2 = exports_external.literal(INLINE_ARTIFACT_PROTOCOL_VERSION);
 var nonce = exports_external.string().min(8);
-var artifactletHostMessageSchema = exports_external.discriminatedUnion("type", [
+var sandboxHostMessageSchema = exports_external.discriminatedUnion("type", [
   exports_external.object({
     v: version2,
     type: exports_external.literal("init"),
     nonce,
     code: exports_external.string(),
     data: exports_external.json().optional(),
-    theme: artifactletThemeSchema
+    geo: exports_external.record(exports_external.string(), exports_external.json()).optional(),
+    theme: sandboxThemeSchema
   }).strict(),
   exports_external.object({
     v: version2,
@@ -20261,7 +20707,7 @@ var artifactletHostMessageSchema = exports_external.discriminatedUnion("type", [
     complete: exports_external.boolean()
   }).strict()
 ]);
-var artifactletFrameMessageSchema = exports_external.discriminatedUnion("type", [
+var sandboxFrameMessageSchema = exports_external.discriminatedUnion("type", [
   exports_external.object({ v: version2, type: exports_external.literal("ready") }).strict(),
   exports_external.object({ v: version2, type: exports_external.literal("rendered"), nonce }).strict(),
   exports_external.object({ v: version2, type: exports_external.literal("resize"), nonce, height: exports_external.number().nonnegative() }).strict(),
@@ -20400,6 +20846,8 @@ var wbCoreInputFileSchema = exports_external.object({
   pageCount: exports_external.number().int().positive().max(MAX_PROMPT_PDF_PAGES).optional(),
   textArtifactRef: exports_external.string().min(1).max(2048).optional()
 }).strict().refine((file2) => file2.mediaType === "application/pdf" ? file2.byteLength <= MAX_PROMPT_FILE_TOTAL_BYTES : file2.byteLength <= MAX_PROMPT_TEXT_FILE_BYTES, "Text attachments cannot exceed 1 MB").refine((file2) => file2.mediaType === "application/pdf" || file2.pageCount === undefined, "Only PDF attachments may declare a page count").refine((file2) => file2.mediaType === "application/pdf" || file2.textArtifactRef === undefined, "Only PDF attachments may declare an extracted text reference");
+var wbCoreInputImagesSchema = exports_external.array(wbCoreInputImageSchema).min(1).max(MAX_PROMPT_ATTACHMENTS).refine((images) => images.reduce((bytes, image) => bytes + image.byteLength, 0) <= MAX_PROMPT_ATTACHMENT_TOTAL_BYTES, "Image attachments exceed the Turn payload limit");
+var wbCoreInputFilesSchema = exports_external.array(wbCoreInputFileSchema).min(1).max(MAX_PROMPT_FILES).refine((files) => files.reduce((bytes, file2) => bytes + file2.byteLength, 0) <= MAX_PROMPT_FILE_TOTAL_BYTES, "File attachments exceed the Turn payload limit");
 var wbCoreUserPromptInputSchema = exports_external.object({
   kind: exports_external.literal("turn"),
   prompt: exports_external.string().min(1),
@@ -20410,9 +20858,9 @@ var wbCoreUserPromptInputSchema = exports_external.object({
     artifactPath: exports_external.string().min(1).max(1000),
     claimIds: exports_external.array(exports_external.string().regex(/^F-\d{3}$/)).min(1).max(2).refine((ids) => new Set(ids).size === ids.length)
   }).strict().optional(),
-  images: exports_external.array(wbCoreInputImageSchema).min(1).max(MAX_PROMPT_ATTACHMENTS).refine((images) => images.reduce((bytes, image) => bytes + image.byteLength, 0) <= MAX_PROMPT_ATTACHMENT_TOTAL_BYTES, "Image attachments exceed the Turn payload limit").optional(),
-  artifactletSubmission: artifactletSubmissionSchema.optional(),
-  files: exports_external.array(wbCoreInputFileSchema).min(1).max(MAX_PROMPT_FILES).refine((files) => files.reduce((bytes, file2) => bytes + file2.byteLength, 0) <= MAX_PROMPT_FILE_TOTAL_BYTES, "File attachments exceed the Turn payload limit").optional()
+  images: wbCoreInputImagesSchema.optional(),
+  artifactletSubmission: inlineArtifactSubmissionSchema.optional(),
+  files: wbCoreInputFilesSchema.optional()
 }).strict();
 var wbCoreMultisubmitGroupInputSchema = exports_external.object({
   kind: exports_external.literal("multisubmit_group"),
@@ -20503,7 +20951,7 @@ var inboundEmailForwardedSourceSchema = exports_external.object({
     subject: exports_external.string().min(1),
     to: exports_external.string().min(1).nullable(),
     cc: exports_external.string().min(1).nullable()
-  }).strict().refine((headers) => headers.to !== null || headers.cc !== null, {
+  }).strict().refine((headers2) => headers2.to !== null || headers2.cc !== null, {
     message: "A forwarded envelope must name a To or Cc recipient",
     path: ["to"]
   }),
@@ -20516,6 +20964,8 @@ var inboundEmailContentSchema = exports_external.object({
 var wbCoreEmailInputSchema = exports_external.object({
   kind: exports_external.literal("email"),
   emailContent: inboundEmailContentSchema,
+  images: wbCoreInputImagesSchema.optional(),
+  files: wbCoreInputFilesSchema.optional(),
   dedupeKey: exports_external.string().min(1),
   origin: exports_external.literal("service_event")
 }).strict();
@@ -20638,11 +21088,21 @@ var projectE2bTemplateSchema = exports_external.object({
   name: exports_external.string().trim().min(1).max(255),
   label: exports_external.string().trim().min(1).max(255)
 });
-var projectSecretKeySchema = exports_external.string().trim().min(1).max(128).regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Secret keys must be valid environment variable names.");
+var projectKeySchema = exports_external.string().trim().min(1).max(128).regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Project keys must be valid environment variable names.").refine((key) => key !== "__proto__", { message: "This project key is reserved." });
+var projectValueSchema = exports_external.string().max(65536).refine((value) => !value.includes("\x00"), {
+  message: "Project values cannot contain NUL bytes."
+});
+var projectSecretKeySchema = projectKeySchema;
+var projectConfigKeySchema = projectKeySchema;
+var projectConfigValueSchema = projectValueSchema;
+var projectSecretValueSchema = projectValueSchema.min(1);
 var projectSecretSchema = exports_external.object({
   key: projectSecretKeySchema,
   updated_at: exports_external.string().datetime()
 });
+var projectConfigSchema = exports_external.record(projectConfigKeySchema, projectConfigValueSchema);
+var projectConfigResponseSchema = exports_external.object({ config: projectConfigSchema });
+var putProjectConfigRequestSchema = exports_external.object({ value: projectConfigValueSchema }).strict();
 var projectThreadSchema = exports_external.object({
   id: exports_external.string().min(1),
   title: exports_external.string().min(1),
@@ -20656,6 +21116,7 @@ var projectSchema = exports_external.object({
   can_edit: exports_external.boolean(),
   created_at: exports_external.string().datetime(),
   updated_at: exports_external.string().datetime(),
+  config: projectConfigSchema,
   secrets: exports_external.array(projectSecretSchema),
   threads: exports_external.array(projectThreadSchema)
 });
@@ -20673,10 +21134,7 @@ var updateProjectRequestSchema = exports_external.object({
   name: exports_external.string().trim().min(1).max(255).optional(),
   visibility: projectVisibilitySchema.optional(),
   e2b_template_name: exports_external.string().trim().min(1).max(255).optional()
-}).strict().refine(({ name, visibility, e2b_template_name: e2bTemplateName }) => name !== undefined || visibility !== undefined || e2bTemplateName !== undefined, { message: "At least one project field is required." });
-var projectSecretValueSchema = exports_external.string().min(1).max(65536).refine((value) => !value.includes("\x00"), {
-  message: "Secret values cannot contain NUL bytes."
-});
+}).strict().refine(({ name: name2, visibility, e2b_template_name: e2bTemplateName }) => name2 !== undefined || visibility !== undefined || e2bTemplateName !== undefined, { message: "At least one project field is required." });
 var revealProjectSecretResponseSchema = exports_external.object({
   value: projectSecretValueSchema
 });
@@ -21087,10 +21545,12 @@ var zodObjectToMcpJsonSchema = (schema) => {
   const shape = zodObjectShape(schema);
   return zodShapeToMcpJsonSchema(shape ?? {});
 };
+// ../contracts/src/artifactVersionId.ts
+var artifactVersionIdSchema = exports_external.string().regex(/^(artv|dovr)_[0-9A-Za-z]{22}$/);
 
 // ../contracts/src/index.ts
 var defaultThreadFileParseSizeLimitInBytes = 50 * 1024 * 1024;
-var c10 = initContract();
+var c12 = initContract();
 var SMS_IDENTITY_EMAIL_DOMAIN = "sms.lore.link";
 var publicEmailDomains = [
   "gmail.com",
@@ -21191,7 +21651,7 @@ var threadSummarySchema = exports_external.object({
 var threadDetailsSchema = threadSummarySchema.extend({
   messages: exports_external.array(messageSchema)
 });
-var errorSchema10 = exports_external.object({
+var errorSchema11 = exports_external.object({
   message: exports_external.string()
 });
 var demoNotSeededResponseSchema = exports_external.object({
@@ -21231,6 +21691,20 @@ var userSchema = exports_external.object({
   thread_data_deletion_requested_at: exports_external.string().nullable(),
   attribution_source: userAttributionSourceSchema.nullable(),
   attribution_source_detail: exports_external.string().nullable()
+});
+var acceptedSenderEmailResourceSchema = exports_external.object({
+  id: exports_external.string().min(1),
+  address: exports_external.email(),
+  state: exports_external.enum(["pending", "active"]),
+  verified_at: exports_external.string().nullable()
+});
+var acceptedSenderEmailListResponseSchema = exports_external.object({
+  inbox_address: exports_external.email().nullable(),
+  primary_address: exports_external.email().nullable(),
+  senders: exports_external.array(acceptedSenderEmailResourceSchema)
+});
+var addAcceptedSenderEmailRequestSchema = exports_external.object({
+  address: exports_external.string().trim().toLowerCase().pipe(exports_external.email())
 });
 var posthogUserPropertiesSchema = exports_external.object({
   email: exports_external.string().nullable(),
@@ -21374,7 +21848,12 @@ var startSmsVerificationRequestSchema = exports_external.object({
 });
 var startSmsVerificationResponseSchema = exports_external.object({
   verification_id: exports_external.string(),
-  expires_at: exports_external.string().datetime()
+  expires_at: exports_external.string().datetime(),
+  session: exports_external.object({
+    access_token: exports_external.string(),
+    refresh_token: exports_external.string(),
+    is_new_account: exports_external.boolean()
+  }).optional()
 });
 var verifySmsCodeRequestSchema = exports_external.object({
   verification_id: exports_external.string().min(1),
@@ -21641,6 +22120,7 @@ var threadBlockListResponseSchema = exports_external.object({
   list_type: exports_external.literal("thread_block"),
   has_more: exports_external.boolean(),
   objects: exports_external.array(threadBlockObjectSchema),
+  history_end_block_id: exports_external.string().min(1).nullable().optional(),
   desktop_sync_resource_id: exports_external.string().min(1).optional(),
   desktop_sync_revision: exports_external.string().regex(/^\d+$/).optional()
 });
@@ -21854,7 +22334,11 @@ var askThreadsTraceStepSchema = exports_external.object({
     error_kind: exports_external.enum(["unknown_person", "ambiguous_person", "visibility_rejection", "timeout", "retrieval_error"]).optional(),
     skip_reason: exports_external.enum(["no_searchable_content"]).optional(),
     timeout_source: exports_external.enum(["injected_budget", "driver_tool_budget", "ask_deadline"]).optional(),
-    termination_reason: exports_external.enum(["answered", "abstained", "capped", "timed_out", "tool_error", "gathering_deadline"]).optional(),
+    termination_reason: exports_external.enum(["answered", "abstained", "capped", "timed_out", "tool_error", "gathering_deadline", "no_progress"]).optional(),
+    new_evidence_count: exports_external.number().int().nonnegative().optional(),
+    new_aggregate_count: exports_external.number().int().nonnegative().optional(),
+    reused_calls: exports_external.number().int().nonnegative().optional(),
+    consecutive_no_progress: exports_external.number().int().nonnegative().optional(),
     registered_sources: exports_external.number().int().nonnegative().optional(),
     candidate_count: exports_external.number().int().nonnegative().optional(),
     collapsed_count: exports_external.number().int().nonnegative().optional(),
@@ -22216,7 +22700,7 @@ var wbCoreModelSchema = exports_external.enum(Object.keys(WB_CORE_MODEL_CONFIGUR
 var DEFAULT_WB_CORE_MODEL_CONFIGURATION = WB_CORE_MODEL_CONFIGURATIONS["gpt-5.6-luna"];
 var WB_MODE_MODEL_CONFIGURATION = {
   general: DEFAULT_WB_CORE_MODEL_CONFIGURATION,
-  create: WB_CORE_MODEL_CONFIGURATIONS["z-ai/glm-5.3-flash"],
+  create: WB_CORE_MODEL_CONFIGURATIONS["gpt-5.6-luna"],
   comment: { model: "gpt-5.6-luna", reasoning_level: "low" }
 };
 var createThreadRequestWithoutModelConfigurationSchema = createThreadRequestBaseSchema.extend({
@@ -22249,6 +22733,15 @@ var createThreadResponseSchema = exports_external.intersection(exports_external.
 var createThreadActorRequestSchema = exports_external.object({
   client_id: exports_external.uuid().describe("Stable client identity, reused for actor provisioning and reconnects")
 });
+var submitThreadPromptRequestSchema = createThreadActorRequestSchema.extend({
+  client_metadata: wbCoreClientMetadataSchema.optional(),
+  input: exports_external.union([wbCoreUserPromptInputSchema, wbCoreMultisubmitGroupInputSchema])
+}).strict();
+var submitThreadPromptResponseSchema = exports_external.object({
+  status: exports_external.enum(["completed", "timedOut"]),
+  response: wbCoreInputAcceptanceSchema.optional()
+});
+var submitThreadPromptErrorSchema = errorSchema11.extend({ automatic_retry: exports_external.boolean() });
 var turnClientMillisecondsSchema = exports_external.number().int().min(0).max(24 * 60 * 60 * 1000);
 var threadTurnClientTimingsRequestSchema = exports_external.object({
   client: exports_external.enum(["ios", "desktop", "web"]),
@@ -22765,7 +23258,7 @@ var sharedSkillTemplateSchema = exports_external.object({
   is_templatized: exports_external.literal(true)
 });
 var artifactSourceSchema = exports_external.enum(["cowork", "native"]);
-var artifactCreationOriginSchema = exports_external.enum(["deliberate_output", "browser_capture", "prompt_attachment"]);
+var artifactCreationOriginSchema = exports_external.enum(["deliberate_output", "browser_capture", "prompt_attachment", "inline_view"]);
 var artifactKindSchema = exports_external.enum(["upload", "output", "workbench_output"]);
 var coworkArtifactKindSchema = artifactKindSchema.extract(["upload", "output"]);
 var artifactVisibilitySchema = exports_external.enum(["private", "workspace", "public"]);
@@ -22973,6 +23466,7 @@ var artifactDetailResponseSchema = artifactSummarySchema.extend({
   current_version_ordinal: exports_external.number().int().positive().nullable().describe("The current version's position in the history (1 is the first save), or null when the artifact has no version history."),
   current_version_saved_at: exports_external.string().nullable().describe("ISO-8601 time the current version was written, or null when the artifact has no version history."),
   document_content: exports_external.string().nullable().describe("A Lore Document's stored bytes, inline: the v2 AST envelope for `lore_document_v2`, canonical HTML for a not-yet-rewritten `lore_document_v1`. null for every artifact that is not a document, and for a document whose bytes could not be read."),
+  inline_view_content: exports_external.string().nullable().optional().describe("An inline view's stored bytes, inline: the JSON tool input of the `draw_chart` or `show_artifactlet` call that drew it. null for every other artifact, and for a view whose bytes could not be read."),
   artifact_visibility: artifactVisibilitySchema.describe("The artifact's own published visibility \u2014 what `setArtifactVisibility` edits."),
   thread_visibility: artifactVisibilitySchema.describe("The owning thread's visibility, which always applies in addition to the artifact's own."),
   code_storage: artifactCodeStorageLocationSchema.nullable().optional().describe("Where the current version's bytes live in Code Storage, or null.")
@@ -23080,7 +23574,7 @@ var uploadThreadAttachmentResponseSchema = exports_external.object({
 }).strict();
 var saveDocumentArtifactRequestSchema = exports_external.object({
   content: exports_external.string().min(1).describe("The edited document, as either interchange form: the v2 AST envelope (`lore_document_v2` JSON \u2014 what the editor sends) or HTML (what models write, and what older editors sent). Canonicalized server-side before storage; storage is the v2 AST form."),
-  base_version_id: exports_external.string().min(1).describe("The version this edit was made against, e.g. dovr_... \u2014 the `current_version_id` the editor loaded. Re-checked under the write lock: if it no longer names the current version someone else wrote meanwhile and this save is refused with 409 rather than silently overwriting them.")
+  base_version_id: exports_external.string().min(1).describe("The version this edit was made against, e.g. artv_... (older versions are dovr_...) \u2014 the `current_version_id` the editor loaded. Re-checked under the write lock: if it no longer names the current version someone else wrote meanwhile and this save is refused with 409 rather than silently overwriting them.")
 });
 var saveDocumentArtifactResponseSchema = exports_external.object({
   version_id: exports_external.string().describe("The current version after this save \u2014 the new one, or the unchanged current version when `no_op`. Pass it back as the next save's `base_version_id`."),
@@ -23089,14 +23583,14 @@ var saveDocumentArtifactResponseSchema = exports_external.object({
   canonical_html: exports_external.string().describe("The canonical HTML rendering of what is now stored. Kept for editors that predate v2 storage; `canonical_content` is the stored bytes themselves."),
   canonical_content: exports_external.string().optional().describe("The v2 AST envelope bytes that are now stored. Returned so the editor can reconcile to the canonical form \u2014 freshly minted block ids, scoped styles \u2014 without a refetch. Absent only from servers that predate v2 storage.")
 });
-var saveDocumentArtifactConflictResponseSchema = errorSchema10.extend({
+var saveDocumentArtifactConflictResponseSchema = errorSchema11.extend({
   current_version_id: exports_external.string().describe("The version the document is actually at now; refetch and rebase on it.")
 });
-var saveDocumentArtifactRejectionResponseSchema = errorSchema10.extend({
+var saveDocumentArtifactRejectionResponseSchema = errorSchema11.extend({
   document_rejection: documentRejectionSchema
 });
 var artifactVersionSummarySchema = exports_external.object({
-  id: exports_external.string().describe("Version id, e.g. dovr_\u2026"),
+  id: exports_external.string().describe("Version id, e.g. artv_\u2026 (older versions are dovr_\u2026)"),
   ordinal: exports_external.number().int().positive().describe("Position in the history; 1 is the first version."),
   origin: exports_external.enum(["model", "human", "imported"]).describe("Who wrote these bytes."),
   editor: exports_external.object({ id: exports_external.string(), display_name: exports_external.string().nullable() }).nullable().describe("The person who authored a human version, or null."),
@@ -23129,7 +23623,7 @@ var restoreArtifactVersionResponseSchema = exports_external.object({
   no_op: exports_external.boolean().describe("True when the restored bytes were already current: no version row and no upload."),
   restored_from: exports_external.object({ version_id: exports_external.string(), ordinal: exports_external.number().int().positive() }).describe("The version whose bytes were restored.")
 });
-var restoreArtifactVersionRefusalResponseSchema = errorSchema10.extend({
+var restoreArtifactVersionRefusalResponseSchema = errorSchema11.extend({
   code: exports_external.enum(["content_reclaimed", "document_rejected"]),
   document_rejection: documentRejectionSchema.optional()
 });
@@ -23514,6 +24008,73 @@ var adminActiveUsersResponseSchema = exports_external.object({
   weekly: exports_external.array(adminActiveUsersBucketSchema),
   monthly: exports_external.array(adminActiveUsersBucketSchema),
   allTime: exports_external.array(adminActiveUsersBucketSchema)
+});
+var adminTurnTimingsWindowSchema = exports_external.enum(["24h", "7d", "30d"]);
+var adminTurnTimingsQuerySchema = exports_external.object({
+  window: adminTurnTimingsWindowSchema.default("7d"),
+  mode: exports_external.string().trim().min(1).max(16).optional(),
+  client: exports_external.string().trim().min(1).max(16).optional(),
+  limit: exports_external.coerce.number().int().min(1).max(500).default(500)
+});
+var nullableMs = exports_external.number().int().nullable();
+var adminTurnTimingAuthorSchema = exports_external.object({
+  user_id: exports_external.string(),
+  display_name: exports_external.string(),
+  handle: exports_external.string().nullable()
+});
+var adminTurnTimingSchema = exports_external.object({
+  thread_id: exports_external.string(),
+  turn_id: exports_external.string(),
+  mode: exports_external.string(),
+  model: exports_external.string(),
+  reasoning_level: exports_external.string().nullable(),
+  accepted_at: exports_external.string(),
+  stream_started_at: exports_external.string().nullable(),
+  first_chunk_at: exports_external.string().nullable(),
+  first_draft_at: exports_external.string().nullable(),
+  final_draft_at: exports_external.string().nullable(),
+  persisted_at: exports_external.string().nullable(),
+  settled_at: exports_external.string().nullable(),
+  stop_reason: exports_external.string().nullable(),
+  page_check_ms: nullableMs,
+  page_check_status: exports_external.string().nullable(),
+  draft_frames: exports_external.number().int().nullable(),
+  draft_chars: exports_external.number().int().nullable(),
+  completions: exports_external.number().int().nullable(),
+  input_tokens: exports_external.number().int().nullable(),
+  output_tokens: exports_external.number().int().nullable(),
+  artifact_id: exports_external.string().nullable(),
+  artifact_version_id: exports_external.string().nullable(),
+  post_id: exports_external.string().nullable(),
+  organization_id: exports_external.string().nullable(),
+  author: adminTurnTimingAuthorSchema.nullable(),
+  prompt: exports_external.string().nullable(),
+  estimated_cost_usd: exports_external.number().nullable(),
+  client: exports_external.string().nullable(),
+  client_app_version: exports_external.string().nullable(),
+  client_accepted_ms: nullableMs,
+  client_first_draft_ms: nullableMs,
+  client_first_load_ms: nullableMs,
+  client_first_paint_ms: nullableMs,
+  client_artifact_ready_ms: nullableMs,
+  client_settled_ms: nullableMs,
+  ttft_server_ms: nullableMs,
+  ttfd_server_ms: nullableMs,
+  reasoning_ms: nullableMs,
+  html_stream_ms: nullableMs,
+  persist_ms: nullableMs,
+  total_server_ms: nullableMs,
+  ttft_felt_ms: nullableMs,
+  first_paint_felt_ms: nullableMs,
+  total_felt_ms: nullableMs,
+  render_ms: nullableMs
+});
+var adminTurnTimingsResponseSchema = exports_external.object({
+  window: adminTurnTimingsWindowSchema,
+  turns: exports_external.array(adminTurnTimingSchema),
+  total: exports_external.number().int().nonnegative(),
+  modes: exports_external.array(exports_external.string()),
+  clients: exports_external.array(exports_external.string())
 });
 var emailTemplateFieldSchema = exports_external.object({
   key: exports_external.string().min(1),
@@ -24084,7 +24645,7 @@ var ampEnrollmentErrorSchema = exports_external.object({
 var ampAuthorizationHeadersSchema = exports_external.object({
   authorization: exports_external.string().min(1).optional()
 });
-var apiContract = c10.router({
+var apiContract = c12.router({
   health: {
     method: "GET",
     path: "/health",
@@ -24140,9 +24701,9 @@ var apiContract = c10.router({
     }),
     responses: {
       200: whoAmIResponseSchema,
-      401: errorSchema10,
-      500: errorSchema10,
-      502: errorSchema10,
+      401: errorSchema11,
+      500: errorSchema11,
+      502: errorSchema11,
       503: demoNotSeededResponseSchema
     },
     summary: "Validate a WorkOS Bearer token and return member plus user fields"
@@ -24152,7 +24713,7 @@ var apiContract = c10.router({
     path: "/amp/enrollment/challenges",
     headers: ampAuthorizationHeadersSchema,
     body: exports_external.strictObject({}),
-    responses: { 201: ampEnrollmentChallengeSchema, 401: errorSchema10, 403: ampEnrollmentErrorSchema, 503: ampEnrollmentErrorSchema },
+    responses: { 201: ampEnrollmentChallengeSchema, 401: errorSchema11, 403: ampEnrollmentErrorSchema, 503: ampEnrollmentErrorSchema },
     summary: "Create an Amp enrollment challenge for the authenticated Lore member"
   },
   completeAmpEnrollmentChallenge: {
@@ -24167,7 +24728,7 @@ var apiContract = c10.router({
     method: "GET",
     path: "/amp/connection",
     headers: ampAuthorizationHeadersSchema,
-    responses: { 200: ampConnectionSchema, 401: errorSchema10, 403: ampEnrollmentErrorSchema, 503: ampEnrollmentErrorSchema },
+    responses: { 200: ampConnectionSchema, 401: errorSchema11, 403: ampEnrollmentErrorSchema, 503: ampEnrollmentErrorSchema },
     summary: "Get the authenticated Lore member connection state"
   },
   revokeAmpConnection: {
@@ -24175,7 +24736,7 @@ var apiContract = c10.router({
     path: "/amp/connection",
     headers: ampAuthorizationHeadersSchema,
     body: exports_external.undefined(),
-    responses: { 200: ampConnectionSchema, 401: errorSchema10, 403: ampEnrollmentErrorSchema, 503: ampEnrollmentErrorSchema },
+    responses: { 200: ampConnectionSchema, 401: errorSchema11, 403: ampEnrollmentErrorSchema, 503: ampEnrollmentErrorSchema },
     summary: "Revoke the authenticated Lore member connection"
   },
   createAmpSyncRun: {
@@ -24183,7 +24744,7 @@ var apiContract = c10.router({
     path: "/amp/sync-runs",
     headers: ampAuthorizationHeadersSchema,
     body: exports_external.strictObject({ kind: ampSyncRunKindSchema, selection: exports_external.literal("all") }),
-    responses: { 201: ampSyncRunSchema, 401: errorSchema10, 403: ampSyncRunErrorSchema, 503: ampSyncRunErrorSchema },
+    responses: { 201: ampSyncRunSchema, 401: errorSchema11, 403: ampSyncRunErrorSchema, 503: ampSyncRunErrorSchema },
     summary: "Create an aggregate Amp history sync run for the authenticated member"
   },
   updateAmpSyncRun: {
@@ -24197,14 +24758,14 @@ var apiContract = c10.router({
       inventory_cutoff_at: exports_external.iso.datetime().nullable().optional(),
       inventory_cursor: exports_external.string().max(256).nullable().optional()
     }),
-    responses: { 200: ampSyncRunSchema, 400: ampSyncRunErrorSchema, 401: errorSchema10, 403: ampSyncRunErrorSchema, 404: ampSyncRunErrorSchema, 409: ampSyncRunErrorSchema, 503: ampSyncRunErrorSchema },
+    responses: { 200: ampSyncRunSchema, 400: ampSyncRunErrorSchema, 401: errorSchema11, 403: ampSyncRunErrorSchema, 404: ampSyncRunErrorSchema, 409: ampSyncRunErrorSchema, 503: ampSyncRunErrorSchema },
     summary: "Monotonically update an authenticated member Amp sync run"
   },
   listAmpCohortStatus: {
     method: "GET",
     path: "/amp/cohort-status",
     headers: ampAuthorizationHeadersSchema,
-    responses: { 200: ampCohortStatusSchema, 401: errorSchema10, 403: ampSyncRunErrorSchema, 503: ampSyncRunErrorSchema },
+    responses: { 200: ampCohortStatusSchema, 401: errorSchema11, 403: ampSyncRunErrorSchema, 503: ampSyncRunErrorSchema },
     summary: "List aggregate Amp enrollment and backfill status for the active cohort (admin only)"
   },
   getDesktopAuthConfig: {
@@ -24212,7 +24773,7 @@ var apiContract = c10.router({
     path: "/desktop-auth/config",
     responses: {
       200: desktopAuthConfigResponseSchema,
-      503: errorSchema10
+      503: errorSchema11
     },
     summary: "Return public WorkOS configuration for the Lore desktop app (dedicated native client, separate from the web client)"
   },
@@ -24224,7 +24785,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: desktopStatusResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "Return whether the viewer has installed and recently connected the Lore desktop app, plus its latest upload timestamp."
   },
@@ -24237,10 +24798,10 @@ var apiContract = c10.router({
     body: recordHeartbeatRequestSchema,
     responses: {
       200: recordHeartbeatResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      422: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      422: errorSchema11
     },
     summary: "Record (or refresh) a presence heartbeat for the authenticated user against one of their own threads. Idempotent; the daemon should call this every ~30s while a session is open."
   },
@@ -24253,7 +24814,7 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: recordProductPresenceResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "Record (or refresh) an authenticated Lore web-app presence heartbeat for the current user. Browser clients call this while the product is open."
   },
@@ -24266,7 +24827,7 @@ var apiContract = c10.router({
     body: recordDesktopHeartbeatRequestSchema,
     responses: {
       200: recordDesktopHeartbeatResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "Record a liveness heartbeat for the authenticated user's desktop app. Idempotent; the app calls this ~every 60s and on each completed upload (upload_completed:true)."
   },
@@ -24278,8 +24839,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: liveThreadListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11
     },
     summary: "List people with user-block activity in the last 10 minutes. Includes the viewer\u2019s workspace and followed authors, deduped per author, max 10."
   },
@@ -24292,7 +24853,7 @@ var apiContract = c10.router({
     query: listThreadsQuerySchema,
     responses: {
       200: threadListResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "List threads visible to the authenticated user"
   },
@@ -24304,7 +24865,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: desktopThreadSyncManifestSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "Reconcile Desktop thread metadata and deletion tombstones"
   },
@@ -24317,10 +24878,10 @@ var apiContract = c10.router({
     body: createThreadRequestSchema,
     responses: {
       201: createThreadResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10,
-      503: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11,
+      503: errorSchema11
     },
     summary: "Create a Workbench thread and its keyed Workbench Core actor"
   },
@@ -24336,11 +24897,25 @@ var apiContract = c10.router({
     body: createThreadActorRequestSchema,
     responses: {
       201: createThreadResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      503: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11,
+      503: errorSchema11
     },
     summary: "Provision and describe the Workbench Core actor for an existing Workbench thread"
+  },
+  submitThreadPrompt: {
+    method: "POST",
+    path: "/threads/:id/prompts",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    body: submitThreadPromptRequestSchema,
+    responses: {
+      200: submitThreadPromptResponseSchema,
+      401: errorSchema11,
+      404: errorSchema11,
+      503: submitThreadPromptErrorSchema
+    },
+    summary: "Submit a prompt to an authored Workbench thread and wait for durable acceptance"
   },
   reportThreadTurnClientTimings: {
     method: "POST",
@@ -24357,8 +24932,8 @@ var apiContract = c10.router({
       202: exports_external.object({
         accepted: exports_external.boolean()
       }),
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Record the device's timing of one Workbench Turn against the actor's record of it"
   },
@@ -24374,10 +24949,10 @@ var apiContract = c10.router({
     body: createMultisubmitGroupRequestSchema,
     responses: {
       201: createMultisubmitGroupResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10,
-      503: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11,
+      503: errorSchema11
     },
     summary: "Create one group of model-specific child threads under a Workbench thread"
   },
@@ -24393,10 +24968,10 @@ var apiContract = c10.router({
     body: createSideChatRequestSchema,
     responses: {
       201: createSideChatResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10,
-      503: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11,
+      503: errorSchema11
     },
     summary: "Fork one or more Workbench threads from an assistant-text selection"
   },
@@ -24411,7 +24986,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: threadResourceSchema,
-      404: errorSchema10
+      404: errorSchema11
     },
     summary: "Load a visible thread by id"
   },
@@ -24426,7 +25001,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: threadParseStatusResponseSchema,
-      404: errorSchema10
+      404: errorSchema11
     },
     summary: "Load only the transcript parsing status for a visible thread"
   },
@@ -24442,9 +25017,9 @@ var apiContract = c10.router({
     body: resolveThreadShareHighlightRequestSchema,
     responses: {
       200: resolveThreadShareHighlightResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11
     },
     summary: "Resolve a natural-language share highlight to a canonical /thread URL with block anchors"
   },
@@ -24460,7 +25035,7 @@ var apiContract = c10.router({
     body: exports_external.object({}),
     responses: {
       202: requestThreadAccessResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "Notify a thread owner that a signed-in viewer is requesting access"
   },
@@ -24473,7 +25048,7 @@ var apiContract = c10.router({
     body: askThreadsRequestSchema,
     responses: {
       200: askThreadsResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "Answer a question from visible threads"
   },
@@ -24489,8 +25064,8 @@ var apiContract = c10.router({
     body: forkThreadRequestSchema,
     responses: {
       200: forkSummarySchema,
-      403: errorSchema10,
-      404: errorSchema10
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Generate a distilled source handoff for continuing a visible coding-assistant session"
   },
@@ -24506,7 +25081,7 @@ var apiContract = c10.router({
     query: threadBlockListQuerySchema,
     responses: {
       200: threadBlockListResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "List blocks for a visible thread"
   },
@@ -24523,8 +25098,8 @@ var apiContract = c10.router({
     body: createThreadBlockCommentThreadRequestSchema,
     responses: {
       201: createThreadBlockCommentThreadResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Create a new block-level comment thread on a visible thread block"
   },
@@ -24542,9 +25117,9 @@ var apiContract = c10.router({
     body: createThreadBlockCommentRequestSchema,
     responses: {
       201: createThreadBlockCommentResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11
     },
     summary: "Reply to a block-level comment thread on a visible thread block"
   },
@@ -24562,8 +25137,8 @@ var apiContract = c10.router({
     body: updateThreadBlockCommentThreadRequestSchema,
     responses: {
       200: updateThreadBlockCommentThreadResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Resolve or reopen a block-level comment thread on a visible thread block"
   },
@@ -24576,7 +25151,7 @@ var apiContract = c10.router({
     query: listSkillsQuerySchema,
     responses: {
       200: skillIndexResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "List visible workspace skills"
   },
@@ -24586,7 +25161,7 @@ var apiContract = c10.router({
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
     responses: {
       200: workbenchSkillBindingsResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "List skills enabled for the current user in Workbench"
   },
@@ -24598,9 +25173,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).nullish(),
     responses: {
       200: workbenchSkillBindingSchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11
     },
     summary: "Pin the current accepted skill version for Workbench"
   },
@@ -24612,7 +25187,7 @@ var apiContract = c10.router({
     body: exports_external.object({}).nullish(),
     responses: {
       200: exports_external.object({ disabled: exports_external.literal(true) }),
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "Disable a skill for the current user in Workbench"
   },
@@ -24625,7 +25200,7 @@ var apiContract = c10.router({
     query: reconcileLocalSkillsQuerySchema,
     responses: {
       200: localSkillReconciliationResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "Reconcile scanned local skills with visible server-side skills by ID or content hash"
   },
@@ -24637,7 +25212,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: sharedSkillsResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "List public skills the viewer installed or copied (Shared with you)"
   },
@@ -24655,8 +25230,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: skillDetailResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Get visible skill details by stable skill ID"
   },
@@ -24671,7 +25246,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: exports_external.union([sharedSkillTemplateSchema, sharedSkillPreviewSchema]),
-      404: errorSchema10
+      404: errorSchema11
     },
     summary: "Public no-login preview of a skill shared by link (install requires auth)"
   },
@@ -24686,7 +25261,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: sharedSkillPreviewSchema,
-      404: errorSchema10
+      404: errorSchema11
     },
     summary: "Public no-login metadata preview of a skill by id (install requires auth)"
   },
@@ -24703,9 +25278,9 @@ var apiContract = c10.router({
     responses: {
       200: skillVersionDraftResponseSchema,
       202: skillVersionDraftResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
       409: skillVersionDraftConflictSchema
     },
     summary: "Start or resume background templatization of a shared skill"
@@ -24717,9 +25292,9 @@ var apiContract = c10.router({
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
     responses: {
       200: skillVersionDraftResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Get the current viewer's templatization draft for a skill"
   },
@@ -24735,9 +25310,9 @@ var apiContract = c10.router({
     body: publishSkillShareTemplateRequestSchema,
     responses: {
       200: skillShareTemplateSubmissionResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
       409: skillVersionDraftConflictSchema
     },
     summary: "Publish an immutable templatized skill version"
@@ -24755,10 +25330,10 @@ var apiContract = c10.router({
     body: updateSkillVersionDraftRequestSchema,
     responses: {
       200: skillVersionDraftResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
       409: skillVersionDraftConflictSchema
     },
     summary: "Autosave a templatization draft with optimistic concurrency"
@@ -24773,9 +25348,9 @@ var apiContract = c10.router({
     }),
     responses: {
       200: skillVersionDraftResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
       409: skillVersionDraftConflictSchema
     },
     summary: "Atomically rebase a templatization draft onto the current skill version"
@@ -24788,9 +25363,9 @@ var apiContract = c10.router({
     body: exports_external.object({}),
     responses: {
       200: skillVersionDraftResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
       409: skillVersionDraftConflictSchema
     },
     summary: "Retry persistence of a retained generated result without rerunning the model"
@@ -24807,9 +25382,9 @@ var apiContract = c10.router({
     body: setSkillVisibilityRequestSchema,
     responses: {
       200: skillDetailResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Set a skill's visibility (owner only); minting a share link when set to public"
   },
@@ -24822,7 +25397,7 @@ var apiContract = c10.router({
     query: listPostsQuerySchema,
     responses: {
       200: postFeedResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "List published posts for the feed (blended ranking), a profile, or Studio (newest first)"
   },
@@ -24834,7 +25409,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: creationsResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "List the viewer's generating and unposted Create-flow creations for Studio, newest first"
   },
@@ -24849,8 +25424,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: postSummarySchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Get one post, for its permalink"
   },
@@ -24862,7 +25437,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: postOpenGraphPreviewSchema,
-      404: errorSchema10
+      404: errorSchema11
     },
     summary: "Anonymous, link-capability preview for a public post page and unfurl."
   },
@@ -24875,9 +25450,9 @@ var apiContract = c10.router({
     body: createPostRequestSchema,
     responses: {
       201: postSummarySchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11
     },
     summary: "Publish an artifact version to the feed"
   },
@@ -24893,8 +25468,8 @@ var apiContract = c10.router({
     body: exports_external.void(),
     responses: {
       204: exports_external.void(),
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Delete your own post, removing it from every feed"
   },
@@ -24906,8 +25481,8 @@ var apiContract = c10.router({
     body: exports_external.void(),
     responses: {
       200: postEngagementSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Like a visible post"
   },
@@ -24919,8 +25494,8 @@ var apiContract = c10.router({
     body: exports_external.void(),
     responses: {
       200: postEngagementSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Remove the current viewer's like from a visible post"
   },
@@ -24932,8 +25507,8 @@ var apiContract = c10.router({
     body: exports_external.void(),
     responses: {
       200: postEngagementSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Bookmark a visible post"
   },
@@ -24945,8 +25520,8 @@ var apiContract = c10.router({
     body: exports_external.void(),
     responses: {
       200: postEngagementSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Remove the current viewer's bookmark from a visible post"
   },
@@ -24958,8 +25533,8 @@ var apiContract = c10.router({
     query: listPostCommentsQuerySchema,
     responses: {
       200: postCommentPageResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "List comments on a visible post, newest first"
   },
@@ -24971,8 +25546,8 @@ var apiContract = c10.router({
     body: createPostCommentRequestSchema,
     responses: {
       201: createPostCommentResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Comment on a visible post"
   },
@@ -24987,9 +25562,9 @@ var apiContract = c10.router({
     body: exports_external.void(),
     responses: {
       200: postEngagementSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Delete an authored comment or a comment on the current viewer's post"
   },
@@ -25001,8 +25576,8 @@ var apiContract = c10.router({
     body: recordPostShareRequestSchema,
     responses: {
       200: recordPostShareResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Record one successful post share idempotently"
   },
@@ -25013,7 +25588,7 @@ var apiContract = c10.router({
     query: listNotificationsQuerySchema,
     responses: {
       200: socialNotificationPageResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "List the current viewer's social notifications, newest first"
   },
@@ -25024,8 +25599,8 @@ var apiContract = c10.router({
     body: markNotificationsReadRequestSchema,
     responses: {
       204: exports_external.void(),
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Mark the current viewer's notifications read through one loaded item"
   },
@@ -25038,7 +25613,7 @@ var apiContract = c10.router({
     query: listArtifactsQuerySchema,
     responses: {
       200: artifactIndexResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "List visible artifacts (files produced by Cowork or native threads)"
   },
@@ -25053,8 +25628,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: artifactDetailResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Get a visible artifact with a presigned download URL"
   },
@@ -25066,7 +25641,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: artifactOpenGraphPreviewSchema,
-      404: errorSchema10
+      404: errorSchema11
     },
     summary: "Anonymous preview metadata for a public artifact link and unfurl"
   },
@@ -25082,10 +25657,10 @@ var apiContract = c10.router({
     body: saveDocumentArtifactRequestSchema,
     responses: {
       200: saveDocumentArtifactResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10,
+      401: errorSchema11,
+      404: errorSchema11,
       409: saveDocumentArtifactConflictResponseSchema,
-      413: errorSchema10,
+      413: errorSchema11,
       422: saveDocumentArtifactRejectionResponseSchema
     },
     summary: "Save an edited Lore Document as a new human-authored version"
@@ -25097,8 +25672,8 @@ var apiContract = c10.router({
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
     responses: {
       200: listArtifactVersionsResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "List an artifact's version history, newest first"
   },
@@ -25112,8 +25687,8 @@ var apiContract = c10.router({
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
     responses: {
       200: artifactVersionContentResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Read one version of an artifact: inline text when readable, plus a presigned download URL"
   },
@@ -25124,8 +25699,8 @@ var apiContract = c10.router({
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
     responses: {
       200: artifactVersionCoverResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Get a cached static image of an artifact version visible to the viewer"
   },
@@ -25140,8 +25715,8 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: restoreArtifactVersionResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10,
+      401: errorSchema11,
+      404: errorSchema11,
       422: restoreArtifactVersionRefusalResponseSchema
     },
     summary: "Restore an older version of an artifact by appending its bytes as a new, attributed version"
@@ -25155,8 +25730,8 @@ var apiContract = c10.router({
     body: presignBackfillArtifactsRequestSchema,
     responses: {
       200: presignBackfillArtifactsResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Presign artifact-byte uploads for an existing session thread (backfill)"
   },
@@ -25169,8 +25744,8 @@ var apiContract = c10.router({
     body: commitBackfillArtifactsRequestSchema,
     responses: {
       200: commitBackfillArtifactsResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Promote backfilled artifact bytes into artifact rows"
   },
@@ -25183,10 +25758,10 @@ var apiContract = c10.router({
     body: publishArtifactRequestSchema,
     responses: {
       200: publishArtifactResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      404: errorSchema10,
-      413: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      404: errorSchema11,
+      413: errorSchema11
     },
     summary: "Publish a live local artifact to its session thread and get a shareable web URL"
   },
@@ -25201,8 +25776,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: artifactCodeStorageResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "An artifact's version rows beside its Code Storage commit log, with a match status per version"
   },
@@ -25218,9 +25793,9 @@ var apiContract = c10.router({
     body: setArtifactVisibilityRequestSchema,
     responses: {
       200: artifactDetailResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Set an artifact's own visibility (author only); the thread's visibility always still applies"
   },
@@ -25236,9 +25811,9 @@ var apiContract = c10.router({
     body: renameArtifactRequestSchema,
     responses: {
       200: artifactDetailResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Rename an artifact's person-facing title (author only)"
   },
@@ -25253,8 +25828,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: listArtifactCommentThreadsResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "List comment threads on a visible artifact, anchors and replies included"
   },
@@ -25270,8 +25845,8 @@ var apiContract = c10.router({
     body: publishArtifactCommentPresenceRequestSchema,
     responses: {
       204: exports_external.void(),
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Publish transient viewer and typing presence for a visible artifact"
   },
@@ -25287,9 +25862,9 @@ var apiContract = c10.router({
     body: createArtifactCommentThreadRequestSchema,
     responses: {
       201: artifactCommentThreadSchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11
     },
     summary: "Start a comment thread on a visible artifact, optionally anchored inside its document"
   },
@@ -25306,9 +25881,9 @@ var apiContract = c10.router({
     body: createArtifactCommentRequestSchema,
     responses: {
       201: artifactCommentSchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11
     },
     summary: "Reply to a comment thread on a visible artifact"
   },
@@ -25326,10 +25901,10 @@ var apiContract = c10.router({
     body: updateArtifactCommentRequestSchema,
     responses: {
       200: artifactCommentSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11
     },
     summary: "Edit your own comment on a visible artifact (the comment's author only)"
   },
@@ -25347,9 +25922,9 @@ var apiContract = c10.router({
     body: exports_external.undefined(),
     responses: {
       200: artifactCommentSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Soft-delete your own comment on a visible artifact (the comment's author only); the comment keeps its slot"
   },
@@ -25366,8 +25941,8 @@ var apiContract = c10.router({
     body: updateArtifactCommentThreadRequestSchema,
     responses: {
       200: updateArtifactCommentThreadResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Resolve or reopen a comment thread on a visible artifact"
   },
@@ -25381,11 +25956,11 @@ var apiContract = c10.router({
     body: uploadThreadAttachmentRequestSchema,
     responses: {
       200: uploadThreadAttachmentResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      413: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      413: errorSchema11
     },
     summary: "Upload one image for a Lore or Workbench prompt and get its artifact reference"
   },
@@ -25405,10 +25980,10 @@ var apiContract = c10.router({
     }),
     responses: {
       200: skillPackageDownloadResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11
     },
     summary: "Download metadata for an accepted skill package or visible proposal package"
   },
@@ -25424,9 +25999,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: skillInstallationResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Register the current user as an installer of a visible skill"
   },
@@ -25442,7 +26017,7 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: skillInstallationSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "Unregister the current user installation for a skill (idempotent)"
   },
@@ -25458,9 +26033,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: unpublishSkillResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Unpublish an owned workspace skill and remove it from the team catalog"
   },
@@ -25476,11 +26051,11 @@ var apiContract = c10.router({
     body: createSkillShareRequestSchema,
     responses: {
       200: skillShareResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      422: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      422: errorSchema11
     },
     summary: "Grant a person view access to a skill by Lore user id or email (owner only). Re-adding a revoked grantee un-revokes; capped at 50 active grants per skill."
   },
@@ -25495,9 +26070,9 @@ var apiContract = c10.router({
     }),
     responses: {
       200: skillSharesListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "List the active per-person grants on a skill with pending/active status (owner only)."
   },
@@ -25514,9 +26089,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: skillShareResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Soft-revoke a per-person grant on a skill (owner only)."
   },
@@ -25532,9 +26107,9 @@ var apiContract = c10.router({
     body: updateSkillInstallationRequestSchema,
     responses: {
       200: skillInstallationSchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      422: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11,
+      422: errorSchema11
     },
     summary: "Record the accepted skill version installed by the current user"
   },
@@ -25550,8 +26125,8 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: skillCopyResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Record that the viewer copied a public skill (for the Shared with you tab)"
   },
@@ -25562,9 +26137,9 @@ var apiContract = c10.router({
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
     responses: {
       200: skillProposalListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "List package proposals visible to the current user for a skill"
   },
@@ -25579,11 +26154,11 @@ var apiContract = c10.router({
     body: approveSkillProposalRequestSchema,
     responses: {
       200: skillPackageVersionResourceSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11
     },
     summary: "Approve a package proposal by proposal ID"
   },
@@ -25598,10 +26173,10 @@ var apiContract = c10.router({
     body: rejectSkillProposalRequestSchema.optional(),
     responses: {
       200: skillProposalResourceSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Reject a package proposal by proposal ID"
   },
@@ -25617,9 +26192,9 @@ var apiContract = c10.router({
     body: updateThreadRequestSchema,
     responses: {
       200: threadResourceSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Update thread title, visibility, or archival state (author only)"
   },
@@ -25635,9 +26210,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       204: exports_external.null(),
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Soft-delete a thread (author only)"
   },
@@ -25655,10 +26230,10 @@ var apiContract = c10.router({
       200: exports_external.object({
         cover_status: threadCoverStatusSchema
       }),
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      429: errorSchema10.extend({
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      429: errorSchema11.extend({
         retry_after_seconds: exports_external.number().int().nonnegative()
       })
     },
@@ -25676,11 +26251,11 @@ var apiContract = c10.router({
     body: threadCoverUploadRequestSchema,
     responses: {
       200: threadCoverUploadResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      413: errorSchema10,
-      422: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      413: errorSchema11,
+      422: errorSchema11
     },
     summary: "Upload a custom cover image for a thread. Author or Tanagram admin only. Bytes go to the same storage substrate the AI cover uses (S3 in prod, filesystem in dev), and the threads row is updated atomically with the new cover_storage_url, cover_status='ready', cover_generated_at=now, cover_model='user-uploaded' so subsequent re-rolls treat the upload like any other ready cover."
   },
@@ -25696,11 +26271,11 @@ var apiContract = c10.router({
     body: createThreadShareRequestSchema,
     responses: {
       200: threadShareResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      422: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      422: errorSchema11
     },
     summary: "Grant a person view access to a thread by Lore user id or email (author only). Re-adding a revoked grantee un-revokes; capped at 50 active grants per thread."
   },
@@ -25715,9 +26290,9 @@ var apiContract = c10.router({
     }),
     responses: {
       200: threadSharesListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "List the active per-person grants on a thread with pending/active status (author only)."
   },
@@ -25734,9 +26309,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: threadShareResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Soft-revoke a per-person grant on a thread (author only)."
   },
@@ -25754,7 +26329,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: threadPreviewResponseSchema,
-      404: errorSchema10
+      404: errorSchema11
     },
     summary: "Visibility-redacted metadata for OG / social preview consumers. Optional auth: a viewer to whom the thread is visible (including via a share) gets the full preview; others get the private/workspace stub."
   },
@@ -25769,7 +26344,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: userProfileResourceSchema,
-      404: errorSchema10
+      404: errorSchema11
     },
     summary: "Public profile for a user. Optional auth \u2014 unauthenticated viewers see only public thread metadata; signed-in viewers see counts scoped to the threads they'd normally be able to access."
   },
@@ -25782,11 +26357,52 @@ var apiContract = c10.router({
     body: updateCurrentUserRequestSchema,
     responses: {
       200: userSchema,
-      401: errorSchema10,
-      409: errorSchema10,
-      422: errorSchema10
+      401: errorSchema11,
+      409: errorSchema11,
+      422: errorSchema11
     },
     summary: "Update the authenticated user profile"
+  },
+  listAcceptedSenderEmails: {
+    method: "GET",
+    path: "/users/me/accepted-sender-emails",
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    responses: {
+      200: acceptedSenderEmailListResponseSchema,
+      401: errorSchema11
+    },
+    summary: "List email addresses that may start Workbench sessions for the current user"
+  },
+  addAcceptedSenderEmail: {
+    method: "POST",
+    path: "/users/me/accepted-sender-emails",
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: addAcceptedSenderEmailRequestSchema,
+    responses: {
+      201: acceptedSenderEmailResourceSchema,
+      401: errorSchema11,
+      409: errorSchema11
+    },
+    summary: "Add a pending email-to-Workbench sender address"
+  },
+  removeAcceptedSenderEmail: {
+    method: "DELETE",
+    path: "/users/me/accepted-sender-emails/:id",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: exports_external.object({}).nullish(),
+    responses: {
+      200: exports_external.object({ removed: exports_external.literal(true) }),
+      401: errorSchema11,
+      404: errorSchema11
+    },
+    summary: "Remove an additional email-to-Workbench sender address"
   },
   deleteMyAccount: {
     method: "DELETE",
@@ -25797,8 +26413,8 @@ var apiContract = c10.router({
     body: exports_external.object({}).nullish(),
     responses: {
       200: deleteMyAccountResponseSchema,
-      401: errorSchema10,
-      503: errorSchema10
+      401: errorSchema11,
+      503: errorSchema11
     },
     summary: "Permanently delete the authenticated account: the WorkOS user is removed, the local identity (phone number, synthetic email, handle) is released so the same phone number can sign up fresh, and the account\u2019s posts are taken down."
   },
@@ -25811,7 +26427,7 @@ var apiContract = c10.router({
     body: exports_external.object({}),
     responses: {
       202: deleteMyThreadDataResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "Queue deletion of the authenticated user\u2019s Lore threads, parsed thread content, and related uploaded thread storage objects."
   },
@@ -25824,7 +26440,7 @@ var apiContract = c10.router({
     body: exports_external.object({}),
     responses: {
       200: reenableMyThreadUploadsResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "Clear the authenticated user\u2019s thread upload disable marker."
   },
@@ -25837,7 +26453,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: profileByHandleResponseSchema,
-      404: errorSchema10
+      404: errorSchema11
     },
     summary: "Resolve a public profile by handle \u2014 same shape as GET /users/:id but keyed on the user's chosen handle."
   },
@@ -25849,7 +26465,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: referralListResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "Total count plus the most-recent referees the authenticated user has attributed via `/?invited_by=\u2026` invite links. Mirrors the inviter side of users.referred_by_user_id."
   },
@@ -25865,7 +26481,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: userActivityListResponseSchema,
-      404: errorSchema10
+      404: errorSchema11
     },
     summary: "Reverse-chronological activity feed for a user, scoped to what the viewer can see (same visibility rules as listThreads)."
   },
@@ -25878,7 +26494,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: userContributionsResponseSchema,
-      404: errorSchema10
+      404: errorSchema11
     },
     summary: "Daily contribution counts for the trailing 365 days \u2014 counts thread blocks the user authored on threads visible to the viewer."
   },
@@ -25891,7 +26507,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: userFollowListResponseSchema,
-      404: errorSchema10
+      404: errorSchema11
     },
     summary: "List the users following a given user."
   },
@@ -25904,7 +26520,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: userFollowListResponseSchema,
-      404: errorSchema10
+      404: errorSchema11
     },
     summary: "List the users a given user is following."
   },
@@ -25917,7 +26533,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: followSuggestionListResponseSchema,
-      404: errorSchema10
+      404: errorSchema11
     },
     summary: "Mutual-follow suggestions for a viewer: walks the viewer's followees one hop further and ranks candidates by mutual count. Replaces a 1 \u2192 24 client-side fan-out across `/users/:seed/following`."
   },
@@ -25931,9 +26547,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: blockUserResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      422: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11,
+      422: errorSchema11
     },
     summary: "Block another user and remove follows in both directions. Idempotent \u2014 repeating the call is a no-op."
   },
@@ -25947,10 +26563,10 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: followUserResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10,
-      422: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11,
+      422: errorSchema11
     },
     summary: "Follow another user. Idempotent \u2014 repeating the call is a no-op."
   },
@@ -25964,8 +26580,8 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: unfollowUserResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11
     },
     summary: "Unfollow a user. Idempotent \u2014 repeating the call is a no-op."
   },
@@ -25978,9 +26594,9 @@ var apiContract = c10.router({
     body: profileImageUploadRequestSchema,
     responses: {
       200: profileImageUploadResponseSchema,
-      401: errorSchema10,
-      413: errorSchema10,
-      422: errorSchema10
+      401: errorSchema11,
+      413: errorSchema11,
+      422: errorSchema11
     },
     summary: "Upload an avatar or banner image (base64-encoded JSON body). The API streams the bytes to its configured storage substrate using its own credentials and returns the canonical storage URL the client passes to PATCH /users/me."
   },
@@ -25992,7 +26608,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: organizationMemberListResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "List members of the authenticated user\u2019s organization"
   },
@@ -26005,10 +26621,10 @@ var apiContract = c10.router({
     body: createOrganizationInviteRequestSchema,
     responses: {
       201: createOrganizationInviteResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      409: errorSchema10,
-      422: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      409: errorSchema11,
+      422: errorSchema11
     },
     summary: "Invite a teammate to the authenticated user\u2019s workspace via WorkOS AuthKit"
   },
@@ -26021,9 +26637,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: ensureWorkOSOrganizationResponseSchema,
-      401: errorSchema10,
-      422: errorSchema10,
-      503: errorSchema10
+      401: errorSchema11,
+      422: errorSchema11,
+      503: errorSchema11
     },
     summary: "Create or reuse a WorkOS organization for the authenticated user\u2019s non-public email domain and add the user as a member."
   },
@@ -26035,7 +26651,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: uploadSessionListResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "List recent upload sessions for the authenticated user"
   },
@@ -26048,8 +26664,8 @@ var apiContract = c10.router({
     query: listUploadApiKeysQuerySchema,
     responses: {
       200: uploadApiKeyListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11
     },
     summary: "List Upload API keys owned by the authenticated user in a workspace"
   },
@@ -26062,9 +26678,9 @@ var apiContract = c10.router({
     body: createUploadApiKeyRequestSchema,
     responses: {
       201: createUploadApiKeyResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11
     },
     summary: "Create an Upload API key and return the raw key exactly once"
   },
@@ -26080,9 +26696,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: uploadApiKeyResourceSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Revoke an Upload API key owned by the authenticated user"
   },
@@ -26095,9 +26711,9 @@ var apiContract = c10.router({
     query: listWorkosUserApiKeysQuerySchema,
     responses: {
       200: workosUserApiKeyListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      502: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      502: errorSchema11
     },
     summary: "List WorkOS user API keys owned by the authenticated user in a workspace"
   },
@@ -26110,10 +26726,10 @@ var apiContract = c10.router({
     body: createWorkosUserApiKeyRequestSchema,
     responses: {
       201: createWorkosUserApiKeyResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      502: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11,
+      502: errorSchema11
     },
     summary: "Create a WorkOS user API key and return the raw key exactly once"
   },
@@ -26129,10 +26745,10 @@ var apiContract = c10.router({
     body: expireWorkosUserApiKeyRequestSchema.optional(),
     responses: {
       200: workosUserApiKeyResourceSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      502: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      502: errorSchema11
     },
     summary: "Expire a WorkOS user API key owned by the authenticated user"
   },
@@ -26148,10 +26764,10 @@ var apiContract = c10.router({
     body: deleteWorkosUserApiKeyRequestSchema.optional(),
     responses: {
       204: exports_external.undefined(),
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      502: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      502: errorSchema11
     },
     summary: "Delete a WorkOS user API key owned by the authenticated user"
   },
@@ -26168,9 +26784,9 @@ var apiContract = c10.router({
     }),
     responses: {
       201: uploadSessionResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      409: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      409: errorSchema11
     },
     summary: "Create an upload session with presigned URLs for file uploads"
   },
@@ -26189,12 +26805,12 @@ var apiContract = c10.router({
     }),
     responses: {
       200: completeUploadSessionResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10,
-      422: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11,
+      422: errorSchema11
     },
     summary: "Complete an upload session after files have been uploaded to storage"
   },
@@ -26207,8 +26823,8 @@ var apiContract = c10.router({
     body: claudeCodeSyncStatusRequestSchema,
     responses: {
       200: claudeCodeSyncStatusResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11
     },
     summary: "Return server-side Claude Code block sync status for Spanner JSONL replay"
   },
@@ -26220,8 +26836,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminStatsSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11
     },
     summary: "Cross-org operational counts. Tanagram admins only."
   },
@@ -26233,8 +26849,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminOrganizationListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11
     },
     summary: "List every organization with member and thread counts. Tanagram admins only."
   },
@@ -26247,8 +26863,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminUserListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11
     },
     summary: "List every user with their org memberships and thread count. Tanagram admins only."
   },
@@ -26261,8 +26877,8 @@ var apiContract = c10.router({
     query: adminListThreadsQuerySchema,
     responses: {
       200: adminThreadListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11
     },
     summary: "List live threads across every organization. Tanagram admins only."
   },
@@ -26274,8 +26890,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminTweetLeadListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11
     },
     summary: "List unreplied tweet leads from the last 24h, ranked by relevance. Tanagram admins only."
   },
@@ -26289,9 +26905,9 @@ var apiContract = c10.router({
     body: adminUpdateTweetLeadRequestSchema,
     responses: {
       200: tweetLeadSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Update a tweet lead status (replied/dismissed/new). Tanagram admins only."
   },
@@ -26304,10 +26920,10 @@ var apiContract = c10.router({
     query: adminLookupThreadQuerySchema,
     responses: {
       200: adminThreadLookupResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Look up a thread by thread id, thread file id, or harness session id. Tanagram admins only."
   },
@@ -26318,10 +26934,10 @@ var apiContract = c10.router({
     body: adminForceFollowRequestSchema,
     responses: {
       200: adminForceFollowResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      422: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      422: errorSchema11
     },
     summary: "Force follower->followee edge. Admin-only and non-destructive."
   },
@@ -26331,8 +26947,8 @@ var apiContract = c10.router({
     headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
     responses: {
       200: contentCreationProfileListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11
     },
     summary: "List seeded Content Creation profiles. Tanagram members only."
   },
@@ -26343,11 +26959,11 @@ var apiContract = c10.router({
     body: createContentCreationProfileRequestSchema,
     responses: {
       201: contentCreationProfileSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      409: errorSchema10,
-      413: errorSchema10,
-      422: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      409: errorSchema11,
+      413: errorSchema11,
+      422: errorSchema11
     },
     summary: "Create a seeded profile for Content Creation posts. Tanagram members only."
   },
@@ -26361,12 +26977,12 @@ var apiContract = c10.router({
     body: updateContentCreationProfileRequestSchema,
     responses: {
       200: contentCreationProfileSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10,
-      413: errorSchema10,
-      422: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11,
+      413: errorSchema11,
+      422: errorSchema11
     },
     summary: "Update a seeded profile handle, bio, or avatar. Tanagram members only."
   },
@@ -26377,11 +26993,11 @@ var apiContract = c10.router({
     body: createContentCreationPostRequestSchema,
     responses: {
       201: postSummarySchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      413: errorSchema10,
-      422: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      413: errorSchema11,
+      422: errorSchema11
     },
     summary: "Publish an uploaded artifact file to the feed as a seeded profile. Tanagram members only."
   },
@@ -26395,9 +27011,9 @@ var apiContract = c10.router({
     body: exports_external.void(),
     responses: {
       204: exports_external.void(),
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Take down a post authored by a seeded profile. Tanagram members only; refuses posts by real accounts."
   },
@@ -26411,11 +27027,11 @@ var apiContract = c10.router({
     body: reassignContentCreationPostAuthorRequestSchema,
     responses: {
       200: postSummarySchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10,
-      422: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11,
+      422: errorSchema11
     },
     summary: "Hand a seeded post to a real account, permanently. Tanagram members only; " + "refuses posts already owned by a real account, so the move cannot be undone."
   },
@@ -26426,8 +27042,8 @@ var apiContract = c10.router({
     query: adminListPostsQuerySchema,
     responses: {
       200: adminPostListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11
     },
     summary: "Moderation list: every post newest-first, tombstones included. Admins only."
   },
@@ -26441,10 +27057,10 @@ var apiContract = c10.router({
     body: adminTakedownPostRequestSchema,
     responses: {
       200: adminPostSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11
     },
     summary: "Take a post down. Soft and reversible: the row keeps its slot with deleted_at and the operator recorded. Admins only."
   },
@@ -26458,10 +27074,10 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: adminPostSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11
     },
     summary: "Undo a takedown. Refuses a post its own author deleted, and one whose version is live again. Admins only."
   },
@@ -26477,9 +27093,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       204: exports_external.null(),
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Permanently remove a thread. Tanagram admins only."
   },
@@ -26495,9 +27111,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: adminDeleteSkillResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Permanently remove a skill and its sync records. Tanagram admins only."
   },
@@ -26510,9 +27126,9 @@ var apiContract = c10.router({
     query: adminSkillLookupQuerySchema,
     responses: {
       200: adminSkillLookupResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11
     },
     summary: "Find skills by owner email and exact skill name. Tanagram admins only."
   },
@@ -26527,9 +27143,9 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminSkillRootKindResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Read the stored root kind for a skill. Tanagram admins only."
   },
@@ -26545,10 +27161,10 @@ var apiContract = c10.router({
     body: adminUpdateSkillRootKindRequestSchema,
     responses: {
       200: adminUpdateSkillRootKindResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Change only the stored root kind for a skill. Tanagram admins only."
   },
@@ -26564,9 +27180,9 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: adminReparseThreadFileResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Re-enqueue parsing for a thread file. Tanagram admins only."
   },
@@ -26582,11 +27198,11 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       200: adminReprojectThreadResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10,
-      500: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11,
+      500: errorSchema11
     },
     summary: "Re-project a thread from its current uploaded transcript or OTEL session. Tanagram admins only."
   },
@@ -26602,9 +27218,9 @@ var apiContract = c10.router({
     query: adminThreadReprojectionStatusQuerySchema,
     responses: {
       200: adminThreadReprojectionStatusResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Get the outcome of an admin-triggered thread re-projection."
   },
@@ -26625,7 +27241,7 @@ var apiContract = c10.router({
     body: createWaitlistEntryRequestSchema,
     responses: {
       201: waitlistEntrySchema,
-      409: errorSchema10
+      409: errorSchema11
     },
     summary: "Create an unauthenticated waitlist entry keyed by (location, contact)."
   },
@@ -26635,9 +27251,9 @@ var apiContract = c10.router({
     body: startSmsVerificationRequestSchema,
     responses: {
       200: startSmsVerificationResponseSchema,
-      400: errorSchema10,
-      429: errorSchema10,
-      503: errorSchema10
+      400: errorSchema11,
+      429: errorSchema11,
+      503: errorSchema11
     },
     summary: "Send a one-time code to a US phone number to begin SMS onboarding."
   },
@@ -26647,9 +27263,9 @@ var apiContract = c10.router({
     body: verifySmsCodeRequestSchema,
     responses: {
       200: verifySmsCodeResponseSchema,
-      400: errorSchema10,
-      429: errorSchema10,
-      503: errorSchema10
+      400: errorSchema11,
+      429: errorSchema11,
+      503: errorSchema11
     },
     summary: "Redeem an SMS one-time code for a WorkOS AuthKit session, creating the account on first use."
   },
@@ -26659,8 +27275,8 @@ var apiContract = c10.router({
     body: refreshSmsSessionRequestSchema,
     responses: {
       200: refreshSmsSessionResponseSchema,
-      401: errorSchema10,
-      503: errorSchema10
+      401: errorSchema11,
+      503: errorSchema11
     },
     summary: "Exchange an SMS session refresh token for a fresh access token."
   },
@@ -26670,8 +27286,8 @@ var apiContract = c10.router({
     body: submitContactMessageRequestSchema,
     responses: {
       200: submitContactMessageResponseSchema,
-      429: errorSchema10,
-      503: errorSchema10
+      429: errorSchema11,
+      503: errorSchema11
     },
     summary: "Submit a contact-form message from the marketing site; emails the Lore team."
   },
@@ -26684,9 +27300,9 @@ var apiContract = c10.router({
     body: createFeedbackRequestSchema,
     responses: {
       201: feedbackEntrySchema,
-      401: errorSchema10,
-      422: errorSchema10,
-      429: errorSchema10
+      401: errorSchema11,
+      422: errorSchema11,
+      429: errorSchema11
     },
     summary: "Submit in-app feedback. Persists to lore.feedback_entries and best-effort posts to the #lore-feedback Slack channel. Rate-limited to 30 submissions/hour per user."
   },
@@ -26699,9 +27315,9 @@ var apiContract = c10.router({
     body: createReportRequestSchema,
     responses: {
       201: reportEntrySchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      422: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11,
+      422: errorSchema11
     },
     summary: "Report a visible post or another user for moderation. Repeated reports of the same target by one reporter return the original report."
   },
@@ -26717,10 +27333,10 @@ var apiContract = c10.router({
     body: exports_external.object({}).optional(),
     responses: {
       201: shareTokenResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11
     },
     summary: "Mint a short share-link token for a public thread. Author only. The token powers `/s/:token` short URLs and enables k-factor attribution."
   },
@@ -26736,7 +27352,7 @@ var apiContract = c10.router({
     query: resolveShareTokenQuerySchema,
     responses: {
       200: shareTokenResponseSchema,
-      404: errorSchema10
+      404: errorSchema11
     },
     summary: "Resolve a share-link token to its thread and record the view. Works for signed-out viewers; if a bearer token is present we attribute the view to that Lore user for analytics."
   },
@@ -26748,8 +27364,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminGrowthResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11
     },
     summary: "Share-link k-factor, funnel, sparkline, and top sharers by window. Tanagram admins only."
   },
@@ -26761,10 +27377,24 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminActiveUsersResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11
     },
     summary: "DAU/WAU/MAU/all-time active-user buckets \u2014 distinct users with plugin publishes and web writes + presence on the thread-event spine, plus desktop-app daily activity touches (user_activity_daily); auth/token issuance excluded. Tanagram admins only."
+  },
+  adminTurnTimings: {
+    method: "GET",
+    path: "/admin/turn-timings",
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    query: adminTurnTimingsQuerySchema,
+    responses: {
+      200: adminTurnTimingsResponseSchema,
+      401: errorSchema11,
+      403: errorSchema11
+    },
+    summary: "Workbench Turn timings from lore.wb_turn_durations for the admin waterfall/heatmap: server stamps, device felt offsets, derived durations. Tanagram admins only."
   },
   adminUserPipeline: {
     method: "GET",
@@ -26777,9 +27407,9 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminUserPipelineResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Per-user upload-pipeline health drilldown: heartbeat/web presence, 14-day OTEL ingest + rejections, projection ledger, upload sessions, thread parsing, and a computed verdict. Tanagram admins only."
   },
@@ -26791,8 +27421,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminReferralsAnalyticsResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11
     },
     summary: "Cross-organization invite-link funnel: lifetime + 30-day counts, 60-day daily timeseries, top inviters, recent attributions. Tanagram admins only."
   },
@@ -26804,9 +27434,9 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminOnboardingSourcesResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      503: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      503: errorSchema11
     },
     summary: "Signed-up persons grouped by PostHog `initial_source` first-touch attribution. Powers bucket 1 of /admin's Onboarding flow tab; sourced via HogQL."
   },
@@ -26818,8 +27448,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminEmailTemplateListResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11
     },
     summary: "List transactional email templates and their editable preview fields. Tanagram admins only."
   },
@@ -26835,10 +27465,10 @@ var apiContract = c10.router({
     body: adminEmailTemplatePreviewRequestSchema,
     responses: {
       200: renderedEmailSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Render a transactional email template with supplied values. Tanagram admins only."
   },
@@ -26854,11 +27484,11 @@ var apiContract = c10.router({
     body: adminEmailTemplateSendRequestSchema,
     responses: {
       200: adminEmailTemplateSendResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      503: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      503: errorSchema11
     },
     summary: "Send a transactional email template through Resend. Tanagram admins only."
   },
@@ -26870,7 +27500,7 @@ var apiContract = c10.router({
     }),
     responses: {
       200: billingStateResponseSchema,
-      401: errorSchema10
+      401: errorSchema11
     },
     summary: "Resolve the caller's plan, features, seat count, and any admin override."
   },
@@ -26883,10 +27513,10 @@ var apiContract = c10.router({
     body: createCheckoutSessionRequestSchema,
     responses: {
       200: createCheckoutSessionResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      503: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11,
+      503: errorSchema11
     },
     summary: "Start a Stripe Checkout session for Team ($20/seat/mo, min 2)."
   },
@@ -26901,9 +27531,9 @@ var apiContract = c10.router({
     }).optional(),
     responses: {
       200: createBillingPortalResponseSchema,
-      401: errorSchema10,
-      404: errorSchema10,
-      503: errorSchema10
+      401: errorSchema11,
+      404: errorSchema11,
+      503: errorSchema11
     },
     summary: "Open the Stripe customer portal so the subject can manage their subscription."
   },
@@ -26916,11 +27546,11 @@ var apiContract = c10.router({
     body: updateTeamSeatsRequestSchema,
     responses: {
       200: billingSubjectSummarySchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      503: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      503: errorSchema11
     },
     summary: "Adjust the caller-organization's Team seat quantity (admin of that org only)."
   },
@@ -26932,10 +27562,10 @@ var apiContract = c10.router({
     }),
     responses: {
       200: creditSettingsResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      503: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11,
+      503: errorSchema11
     },
     summary: "Get the caller-organization's credit pool balance + auto-recharge settings."
   },
@@ -26948,10 +27578,10 @@ var apiContract = c10.router({
     body: updateCreditSettingsRequestSchema,
     responses: {
       200: creditSettingsResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      503: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11,
+      503: errorSchema11
     },
     summary: "Update the caller-organization's auto-recharge settings (billing admin only)."
   },
@@ -26964,10 +27594,10 @@ var apiContract = c10.router({
     body: createCreditTopUpRequestSchema,
     responses: {
       200: createCreditTopUpResponseSchema,
-      400: errorSchema10,
-      401: errorSchema10,
-      403: errorSchema10,
-      503: errorSchema10
+      400: errorSchema11,
+      401: errorSchema11,
+      403: errorSchema11,
+      503: errorSchema11
     },
     summary: "Manually top up the caller-organization's credit pool by charging the saved card."
   },
@@ -26979,8 +27609,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminBillingOverviewResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11
     },
     summary: "List every user and org with current plan + override for the admin panel."
   },
@@ -26992,8 +27622,8 @@ var apiContract = c10.router({
     }),
     responses: {
       200: adminCreditPoolsResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11
     },
     summary: "Per-team credit-pool utilization, blended margin, breakage, and overage."
   },
@@ -27009,10 +27639,10 @@ var apiContract = c10.router({
     body: exports_external.object({}),
     responses: {
       200: adminBootstrapCreditPoolResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10,
-      409: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11,
+      409: errorSchema11
     },
     summary: "Create an organization current-period pool with a promotional grant."
   },
@@ -27028,9 +27658,9 @@ var apiContract = c10.router({
     body: adminPlanOverrideRequestSchema,
     responses: {
       200: adminBillingSubjectSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Admin override for a user's plan tier. Null clears the override."
   },
@@ -27046,15 +27676,16 @@ var apiContract = c10.router({
     body: adminPlanOverrideRequestSchema,
     responses: {
       200: adminBillingSubjectSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      404: errorSchema10
+      401: errorSchema11,
+      403: errorSchema11,
+      404: errorSchema11
     },
     summary: "Admin override for an organization's plan tier. Null clears the override."
   },
   otelPathFilters: otelPathFiltersContract,
   binders: bindersContract,
   checkpoints: checkpointsContract,
+  scheduledTasks: scheduledTasksContract,
   favorites: favoritesContract,
   references: referencesContract,
   search: searchContract,
@@ -27329,14 +27960,14 @@ async function withTokenRefreshLock(stateDir, fn, opts = {}) {
       await fsp.mkdir(lockDir, { mode: 448 });
       try {
         await fsp.writeFile(ownerPath, ownerId, { mode: 384 });
-      } catch (error51) {
+      } catch (error52) {
         await fsp.rm(lockDir, { recursive: true, force: true });
-        throw error51;
+        throw error52;
       }
       acquired = true;
-    } catch (error51) {
-      if (!isEexist(error51))
-        throw error51;
+    } catch (error52) {
+      if (!isEexist(error52))
+        throw error52;
       const stale = await isStaleLock(lockDir, staleMs, nowFn);
       if (stale) {
         await fsp.rm(lockDir, { recursive: true, force: true });
@@ -27593,10 +28224,10 @@ async function isStaleLock(lockDir, staleMs, nowFn) {
   try {
     const stat = await fsp.stat(lockDir);
     return nowFn() - stat.mtimeMs >= staleMs;
-  } catch (error51) {
-    if (isEnoent(error51))
+  } catch (error52) {
+    if (isEnoent(error52))
       return false;
-    throw error51;
+    throw error52;
   }
 }
 async function releaseRefreshLock(lockDir, ownerPath, ownerId) {
@@ -27604,9 +28235,9 @@ async function releaseRefreshLock(lockDir, ownerPath, ownerId) {
     const currentOwner = await fsp.readFile(ownerPath, "utf8");
     if (currentOwner !== ownerId)
       return;
-  } catch (error51) {
-    if (!isEnoent(error51))
-      throw error51;
+  } catch (error52) {
+    if (!isEnoent(error52))
+      throw error52;
   }
   await fsp.rm(lockDir, { recursive: true, force: true });
 }
@@ -27761,11 +28392,11 @@ function legacyPluginTokensFile(home = os.homedir()) {
 function readTrimmedFile(filePath) {
   try {
     return fs.readFileSync(filePath, "utf8").trim();
-  } catch (error51) {
-    if (typeof error51 === "object" && error51 !== null && "code" in error51 && error51.code === "ENOENT") {
+  } catch (error52) {
+    if (typeof error52 === "object" && error52 !== null && "code" in error52 && error52.code === "ENOENT") {
       return null;
     }
-    throw error51;
+    throw error52;
   }
 }
 function migrateLegacyPluginTokens(filePath) {
@@ -27928,18 +28559,6 @@ var AUTHKIT_SCOPES2 = AUTHKIT_SCOPES;
 var REFRESH_SKEW_MS = 30000;
 var TRUTHY_TOKEN_ENV = new Set(["1", "true", "yes", "on"]);
 var DESKTOP_MANAGED_CLIENT_KEY = "desktop";
-var LORE_API_KEY_ENV = "LORE_API_KEY";
-function apiKeyFromEnv() {
-  const value = process.env[LORE_API_KEY_ENV]?.trim();
-  return value && value.length > 0 ? value : null;
-}
-async function resolveApiKeyCredential(home) {
-  const envKey = apiKeyFromEnv();
-  if (envKey)
-    return envKey;
-  const stored = await readApiKey(stateDir(home));
-  return stored?.value ?? null;
-}
 var inFlight2 = null;
 var activeRefreshLockStateDir = null;
 function isExternallyManagedTokenMode() {
@@ -27959,9 +28578,6 @@ async function doGet(opts) {
   const nowFn = opts.now ?? Date.now;
   const fetchFn = opts.fetchImpl ?? fetch;
   const home = opts.home;
-  const apiKey = await resolveApiKeyCredential(home);
-  if (apiKey)
-    return apiKey;
   if (isExternallyManagedTokenMode()) {
     const tokens3 = await readClientTokens(stateDir(home), DESKTOP_MANAGED_CLIENT_KEY);
     if (tokens3 === null) {
@@ -27995,12 +28611,12 @@ async function refreshAndPersist(current, nowFn, fetchFn, home) {
   let tokenEndpoint;
   try {
     ({ tokenEndpoint } = await discoverEndpoints({ fetchImpl: fetchFn, home, now: nowFn }));
-  } catch (error51) {
-    if (!(error51 instanceof OAuthNoAuthorizationServerError))
-      throw error51;
+  } catch (error52) {
+    if (!(error52 instanceof OAuthNoAuthorizationServerError))
+      throw error52;
     const fallback = tokenEndpointFromAccessTokenIssuer(current.access_token);
     if (fallback === null)
-      throw error51;
+      throw error52;
     tokenEndpoint = fallback;
   }
   try {
@@ -28013,21 +28629,18 @@ async function refreshAndPersist(current, nowFn, fetchFn, home) {
     });
     await writeTokens(updated, home);
     return updated.access_token;
-  } catch (error51) {
-    if (error51 instanceof OAuthInvalidGrantError) {
+  } catch (error52) {
+    if (error52 instanceof OAuthInvalidGrantError) {
       await deleteTokens(home);
       throw new AuthRequiredError;
     }
-    throw error51;
+    throw error52;
   }
 }
 async function forceRefreshAccessToken(opts) {
   const nowFn = opts.now ?? Date.now;
   const fetchFn = opts.fetchImpl ?? fetch;
   const home = opts.home;
-  if (await resolveApiKeyCredential(home)) {
-    throw new AuthRequiredError;
-  }
   if (isExternallyManagedTokenMode()) {
     const tokens2 = await readClientTokens(stateDir(home), DESKTOP_MANAGED_CLIENT_KEY);
     if (tokens2 === null || tokens2.access_token === opts.previousAccessToken) {
@@ -28070,11 +28683,11 @@ var jsonRpcResponseSchema = exports_external.union([
 
 class CloudMcpError extends Error {
   code;
-  constructor(toolName, error51) {
-    super(error51.message);
+  constructor(toolName, error52) {
+    super(error52.message);
     this.name = "CloudMcpError";
-    this.code = error51.code;
-    this.cause = { toolName, code: error51.code, data: error51.data };
+    this.code = error52.code;
+    this.cause = { toolName, code: error52.code, data: error52.data };
   }
 }
 var ERROR_BODY_EXCERPT_LIMIT = 512;
@@ -28414,9 +29027,9 @@ function readCodexSessionId(transcriptPath) {
   if (firstLine !== null) {
     try {
       const parsed = JSON.parse(firstLine);
-      const id = nonBlank(parsed.payload?.id);
-      if (id !== null)
-        return id;
+      const id2 = nonBlank(parsed.payload?.id);
+      if (id2 !== null)
+        return id2;
     } catch {}
   }
   return inferSessionIdFromFilename(transcriptPath);
@@ -28891,11 +29504,11 @@ function createShareCurrentAmpThreadTool(deps) {
           highlight: optionalString(input.highlight)
         }, deps);
         return toAmpToolResult(result);
-      } catch (error51) {
+      } catch (error52) {
         return [
           {
             type: "text",
-            text: `Could not share the Amp thread to Lore. Pass thread_id explicitly, set AMP_CURRENT_THREAD_ID, or run the Lore share command from an active Amp thread. ${error51.message}`
+            text: `Could not share the Amp thread to Lore. Pass thread_id explicitly, set AMP_CURRENT_THREAD_ID, or run the Lore share command from an active Amp thread. ${error52.message}`
           }
         ];
       }
@@ -29153,42 +29766,52 @@ async function pollDeviceToken(opts) {
 
 // server-src/lib/auth/provision.ts
 import os9 from "os";
-var LORE_API_KEY_ENV2 = "LORE_API_KEY";
+var LORE_API_KEY_ENV = "LORE_API_KEY";
 function envApiKey() {
-  const value = process.env[LORE_API_KEY_ENV2]?.trim();
+  const value = process.env[LORE_API_KEY_ENV]?.trim();
   return value && value.length > 0 ? value : null;
 }
 function pluginApiKeyName(hostname3) {
   return `plugin@${hostname3}`;
 }
-function extractRawKey(result) {
-  if (!result || typeof result !== "object")
-    return null;
-  const content = result.content;
-  if (!Array.isArray(content))
-    return null;
-  for (const node of content) {
-    if (node && typeof node === "object" && node.type === "text" && typeof node.text === "string") {
-      try {
-        const parsed = JSON.parse(node.text);
-        if (typeof parsed.raw_key === "string" && parsed.raw_key.length > 0) {
-          return parsed.raw_key;
-        }
-      } catch {}
+var createUploadApiKey = async (name2, opts) => {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const accessToken = await getValidAccessToken(opts);
+  const post = (bearer) => fetchImpl(`${cloudMcpBaseUrl()}/api/upload_api_keys`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${bearer}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ name: name2 })
+  });
+  let response = await post(accessToken);
+  if (response.status === 401) {
+    const refreshedToken = await forceRefreshAccessToken({
+      previousAccessToken: accessToken,
+      ...opts
+    });
+    response = await post(refreshedToken);
+    if (response.status === 401) {
+      await deleteTokens(opts.home);
+      throw new AuthRequiredError;
     }
   }
-  return null;
-}
+  if (!response.ok) {
+    throw new Error(`Upload API key creation failed: HTTP ${response.status}`);
+  }
+  const parsed = createUploadApiKeyResponseSchema.safeParse(await response.json().catch(() => null));
+  return parsed.success ? parsed.data.raw_key : null;
+};
 async function provisionSharedApiKey(opts = {}) {
   const now = opts.now ?? Date.now;
   const hostname3 = opts.hostname ?? os9.hostname();
-  const call = opts.callCloudToolImpl ?? callCloudTool;
+  const createKey = opts.createUploadApiKeyImpl ?? createUploadApiKey;
   if (envApiKey() !== null)
     return { provisioned: false };
   if (await readApiKey(stateDir(opts.home)) !== null)
     return { provisioned: false };
-  const result = await call("create_api_key", { name: pluginApiKeyName(hostname3) }, { home: opts.home, fetchImpl: opts.fetchImpl });
-  const rawKey = extractRawKey(result);
+  const rawKey = await createKey(pluginApiKeyName(hostname3), { home: opts.home, fetchImpl: opts.fetchImpl });
   if (!rawKey)
     return { provisioned: false };
   await writeApiKey(stateDir(opts.home), { value: rawKey, created_at: now() });
@@ -29423,8 +30046,8 @@ async function shareActiveThread(ctx, deps = {
       return;
     }
     await ctx.ui.notify(formatShareResult(result));
-  } catch (error51) {
-    await ctx.ui.notify(`Failed to share Amp thread to Lore: ${error51.message}`);
+  } catch (error52) {
+    await ctx.ui.notify(`Failed to share Amp thread to Lore: ${error52.message}`);
   }
 }
 async function copyThreadUrlToClipboard(ctx, threadUrl) {
@@ -29444,8 +30067,8 @@ async function showCopyableThreadUrl(ctx, threadUrl) {
       submitButtonText: "Done"
     });
     return [];
-  } catch (error51) {
-    return [`Could not show copyable Lore URL dialog: ${error51.message}.`];
+  } catch (error52) {
+    return [`Could not show copyable Lore URL dialog: ${error52.message}.`];
   }
 }
 async function appendShareUrlToThread(ctx, threadUrl) {
@@ -29459,8 +30082,8 @@ async function appendShareUrlToThread(ctx, threadUrl) {
       }
     ]);
     return;
-  } catch (error51) {
-    return error51.message;
+  } catch (error52) {
+    return error52.message;
   }
 }
 function otelApiOrigin(env = process.env) {
