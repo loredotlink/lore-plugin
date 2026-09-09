@@ -155,7 +155,7 @@ Amp uses TypeScript plugin files instead of the Claude/Codex manifests. Local in
 - Project plugin: `.amp/plugins/*.ts`
 - System plugin: `~/.config/amp/plugins/*.ts`
 
-The canonical implementation is `amp/lore.ts`. `packages/lore-plugin/.amp/plugins/lore.ts` is a thin local-layout entrypoint that re-exports the canonical implementation so there is an obvious file in Amp's expected shape without duplicated registrations. Keep that package layout intact; neither `.amp/plugins/lore.ts` nor `amp/lore.ts` is standalone — they import shared files from this checkout.
+The canonical source implementation is `amp/lore.ts`. `packages/lore-plugin/.amp/plugins/lore.ts` is a thin local-development entrypoint that re-exports it without duplicated registrations. Both source files import shared workspace packages and are not standalone. `amp/lore-bundled.js` is the checked-in, self-contained user-install artifact generated from that source by `scripts/build.sh`; standalone installs must load this bundle.
 
 For local development in the Lore monorepo, run Amp from `packages/lore-plugin` so it can load `packages/lore-plugin/.amp/plugins/lore.ts`. For a user-level local install while iterating on a monorepo checkout, symlink the canonical Amp implementation file and keep the relative package files available:
 
@@ -165,6 +165,8 @@ ln -s "$(pwd)/packages/lore-plugin/amp/lore.ts" ~/.config/amp/plugins/lore.ts
 ```
 
 If you run those commands from `packages/lore-plugin`, use `$(pwd)/amp/lore.ts` as the symlink target instead. After installing or changing the plugin, reload Amp from the command palette with `plugins: reload`.
+
+For a standalone install from the public mirror, follow `README.md`; it copies `amp/lore-bundled.js` under Amp's required `lore.ts` install name and needs no dependency installation. Do not symlink the bundle: Amp follows the symlink to the package directory and resolves the sibling source entrypoint, which restores the workspace dependency.
 
 No Amp marketplace distribution is assumed or documented for this MVP.
 

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import type { PluginCommandContext } from '@ampcode/plugin';
+import type { PluginAPI, PluginCommandContext } from '@ampcode/plugin';
 
 import {
   configureLoreStateDirForInstalledAmpPlugin,
@@ -179,6 +179,81 @@ describe('bundled Amp plugin artifact', () => {
     expect(bundle).not.toContain('@lore/identity-store');
     expect(bundle).not.toContain('@lore/contracts');
     expect(bundle).not.toContain('@lore/transcript-locate');
+  });
+
+  test('is the documented standalone install and loads the safe Amp catalog outside the workspace', async () => {
+    const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+    const readme = fs.readFileSync(path.join(packageRoot, 'README.md'), 'utf8');
+    expect(readme).toContain(
+      'cp ~/.local/share/lore-plugin/amp/lore-bundled.js ~/.config/amp/plugins/lore.ts',
+    );
+    expect(readme).toContain('rm -f ~/.config/amp/plugins/lore.ts');
+    expect(readme).not.toContain('cd ~/.local/share/lore-plugin');
+    expect(readme).not.toContain('bun install --frozen-lockfile');
+    expect(readme).not.toContain('ln -sf ~/.local/share/lore-plugin/amp/');
+
+    const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lore-amp-standalone-test-'));
+    const savedStateDir = process.env.LORE_PLUGIN_STATE_DIR;
+    try {
+      const externalPlugin = path.join(externalRoot, 'lore.js');
+      fs.copyFileSync(path.join(packageRoot, 'amp', 'lore-bundled.js'), externalPlugin);
+      process.env.LORE_PLUGIN_STATE_DIR = path.join(externalRoot, 'state');
+
+      const installedPlugin = path.join(externalRoot, 'config', 'amp', 'plugins', 'lore.ts');
+      const legacySource = path.join(externalRoot, 'checkout', 'amp', 'lore.ts');
+      fs.mkdirSync(path.dirname(installedPlugin), { recursive: true });
+      fs.mkdirSync(path.dirname(legacySource), { recursive: true });
+      fs.writeFileSync(legacySource, 'legacy source');
+      fs.symlinkSync(legacySource, installedPlugin);
+      fs.rmSync(installedPlugin);
+      fs.copyFileSync(externalPlugin, installedPlugin);
+      expect(fs.lstatSync(installedPlugin).isSymbolicLink()).toBe(false);
+      expect(fs.readFileSync(legacySource, 'utf8')).toBe('legacy source');
+
+      const commandIds: string[] = [];
+      const registeredTools: Array<Parameters<PluginAPI['registerTool']>[0]> = [];
+      const plugin = (await import(`${pathToFileURL(externalPlugin).href}?external=${Date.now()}`)).default as (amp: {
+        logger: { log: (message: string) => void };
+        system: { ampURL: URL };
+        registerCommand: (id: string) => void;
+        registerTool: (tool: Parameters<PluginAPI['registerTool']>[0]) => void;
+        $: () => Promise<{ exitCode: number; stdout: string; stderr: string }>;
+      }) => void;
+      plugin({
+        logger: { log: () => undefined },
+        system: { ampURL: new URL('https://ampcode.com/') },
+        registerCommand: (id) => {
+          commandIds.push(id);
+        },
+        registerTool: (tool) => {
+          registeredTools.push(tool);
+        },
+        $: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+      });
+
+      expect(commandIds).toEqual(['lore.share-active-amp-thread']);
+      expect(registeredTools.map(({ name }) => name).sort()).toEqual([
+        'fork_thread',
+        'get_thread',
+        'list_threads',
+        'lore_login',
+        'lore_login_resume',
+        'search_threads',
+        'share_current_amp_thread',
+      ]);
+
+      const listThreads = registeredTools.find(({ name }) => name === 'list_threads');
+      expect(await listThreads?.execute({}, { ui: null!, logger: { log: () => undefined }, thread: null! })).toEqual([
+        {
+          type: 'text',
+          text: expect.stringContaining('lore_login'),
+        },
+      ]);
+    } finally {
+      if (savedStateDir === undefined) delete process.env.LORE_PLUGIN_STATE_DIR;
+      else process.env.LORE_PLUGIN_STATE_DIR = savedStateDir;
+      fs.rmSync(externalRoot, { recursive: true, force: true });
+    }
   });
 });
 

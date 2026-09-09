@@ -33,7 +33,7 @@ Start a new Codex session after installation. Type `@share` and select the Lore 
 - Project plugin: `.amp/plugins/*.ts`
 - System plugin: `~/.config/amp/plugins/*.ts`
 
-Use the script below to clone this repo and symlink the Amp plugin into a location that Amp will recognize:
+Use the script below to clone this repo and copy the standalone Amp plugin into a location that Amp will recognize:
 
 ```bash
 if [ -d ~/.local/share/lore-plugin/.git ]; then
@@ -42,11 +42,9 @@ else
   git clone https://github.com/loredotlink/lore-plugin ~/.local/share/lore-plugin
 fi
 
-cd ~/.local/share/lore-plugin
-bun install --frozen-lockfile
-
 mkdir -p ~/.config/amp/plugins
-ln -sf ~/.local/share/lore-plugin/amp/lore.ts ~/.config/amp/plugins/lore.ts
+rm -f ~/.config/amp/plugins/lore.ts
+cp ~/.local/share/lore-plugin/amp/lore-bundled.js ~/.config/amp/plugins/lore.ts
 
 amp plugins list
 ```
