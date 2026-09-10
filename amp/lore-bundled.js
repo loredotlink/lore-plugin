@@ -22206,28 +22206,6 @@ var threadCardCoverSchema = exports_external.object({
 var threadCardSchema = exports_external.object({
   cover: threadCardCoverSchema
 });
-var cardFeedItemSchema = exports_external.object({
-  id: exports_external.string().min(1),
-  title: exports_external.string().min(1),
-  author: exports_external.object({
-    id: exports_external.string().min(1),
-    display_name: exports_external.string(),
-    handle: exports_external.string().nullable(),
-    avatar_url: exports_external.string().nullable()
-  }),
-  cover: exports_external.object({
-    url: exports_external.string(),
-    url_expires_at: exports_external.string()
-  }),
-  started_at: exports_external.string(),
-  cover_generated_at: exports_external.string()
-});
-var cardFeedResponseSchema = exports_external.object({
-  type: exports_external.literal("list"),
-  list_type: exports_external.literal("card_feed_item"),
-  has_more: exports_external.boolean(),
-  objects: exports_external.array(cardFeedItemSchema)
-});
 var forkThreadRequestSchema = exports_external.object({
   forker_intent: exports_external.string().min(1).max(2000).describe("What the forking user wants to do next with this session")
 });
@@ -27223,17 +27201,6 @@ var apiContract = c12.router({
       404: errorSchema11
     },
     summary: "Get the outcome of an admin-triggered thread re-projection."
-  },
-  listCardFeed: {
-    method: "GET",
-    path: "/cards/feed",
-    query: exports_external.object({
-      limit: exports_external.coerce.number().int().min(1).max(48).optional()
-    }),
-    responses: {
-      200: cardFeedResponseSchema
-    },
-    summary: "Slim feed of public threads with a ready cover image, ordered by cover_generated_at descending. Powers the landing-page UGC card scroll. Returns presigned cover URLs inline so the grid renders without a follow-up round trip per card."
   },
   createWaitlistEntry: {
     method: "POST",
