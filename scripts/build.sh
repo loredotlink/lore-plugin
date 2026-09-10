@@ -37,13 +37,6 @@ bun build \
   --outfile amp/lore-bundled.js
 
 bun build \
-  --target=bun \
-  --format=esm \
-  --external=@ampcode/plugin \
-  amp/orb.ts \
-  --outfile amp/lore-orb-bundled.js
-
-bun build \
   --compile \
   --target=bun-darwin-arm64 \
   server-src/index.ts \
@@ -53,7 +46,5 @@ chmod +x server/lore-mcp
 
 echo "Built: $(pwd)/amp/lore-bundled.js" >&2
 ls -la amp/lore-bundled.js >&2
-echo "Built: $(pwd)/amp/lore-orb-bundled.js" >&2
-ls -la amp/lore-orb-bundled.js >&2
 echo "Built: $(pwd)/server/lore-mcp" >&2
 ls -la server/lore-mcp >&2

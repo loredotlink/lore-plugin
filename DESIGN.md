@@ -23,7 +23,7 @@ Amp is intentionally different: the Amp adapter exports an explicitly resolved A
 
 The plugin is a discovery, manual-share, local-read, authentication, and cloud-consumption surface. It does not configure, install, enable, disable, inspect, or execute background capture.
 
-The Lore desktop app owns capture and the **Configure Session Uploads** UI. Plugin code must not maintain a parallel consent/configuration state machine. The only plugin state retained is a share counter used to show the desktop discovery tip after the first three successful manual shares; legacy consent and dismissal fields are ignored when older state files are read.
+Background capture is outside this package. Plugin code does not maintain capture consent, configuration, discovery prompts, or passive-share state. Its persisted state is limited to authentication and endpoint discovery data.
 
 ## Package layout
 
@@ -126,7 +126,7 @@ Claude Code/Cowork/Codex flow:
 4. The tool reads transcript, uploads, and outputs locally
 5. The tool maps the detected runtime to a Lore harness
 6. The tool calls the Lore cloud `share_session` API
-7. The tool returns `{ thread_id, thread_url }` plus an optional tip
+7. The tool returns `{ thread_id, thread_url, clipboard_copied }`
 
 Harness mapping:
 

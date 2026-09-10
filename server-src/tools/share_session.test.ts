@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import {
   mcpShareSessionPluginResultSchema,
   mcpShareSessionResultSchema,
@@ -6,58 +6,53 @@ import {
   type McpShareSessionPluginResult,
   type McpShareSessionResult,
   type McpTextCallToolResult,
-} from '@lore/contracts/mcp';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import {
-  runShareSession,
-  shareSessionFromDisk,
-  shareSessionTool,
-} from './share_session';
-import { AuthRequiredError, AUTH_REQUIRED_MESSAGE } from '../lib/errors';
-import { writeTokens, readTokens, type Tokens } from '../lib/auth/store';
-import { __resetCloudBaseUrlForTests } from '../lib/cloudBaseUrl';
-import { __resetInFlightForTests } from '../lib/auth/refresh';
+} from "@lore/contracts/mcp";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { runShareSession, shareSessionFromDisk, shareSessionTool } from "./share_session";
+import { AuthRequiredError, AUTH_REQUIRED_MESSAGE } from "../lib/errors";
+import { writeTokens, readTokens, type Tokens } from "../lib/auth/store";
+import { __resetCloudBaseUrlForTests } from "../lib/cloudBaseUrl";
+import { __resetInFlightForTests } from "../lib/auth/refresh";
 import {
   discoverEndpoints,
   __resetInFlightForTests as __resetDiscoveryInFlightForTests,
-} from '../lib/auth/discovery';
-import { ClaudeCodeSource } from '../lib/session/claudeCode';
-import { CodexSource } from '../lib/session/codex';
-import { CoworkSource } from '../lib/session/cowork';
-import { writePluginState, readPluginState } from '../lib/pluginState';
-import { encodeCwdToDir } from '@lore/transcript-locate';
+} from "../lib/auth/discovery";
+import { ClaudeCodeSource } from "../lib/session/claudeCode";
+import { CodexSource } from "../lib/session/codex";
+import { CoworkSource } from "../lib/session/cowork";
+import { encodeCwdToDir } from "@lore/transcript-locate";
 
 function makeTmpHome(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'share-session-test-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "share-session-test-"));
 }
 function rmrf(dir: string): void {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 function validTokens(): Tokens {
   return {
-    access_token: 'access-LIVE',
-    refresh_token: 'refresh-LIVE',
+    access_token: "access-LIVE",
+    refresh_token: "refresh-LIVE",
     expires_at: Date.now() + 60 * 60 * 1000,
-    scope: 'mcp.read mcp.write',
+    scope: "mcp.read mcp.write",
   };
 }
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json' },
+    headers: { "content-type": "application/json" },
   });
 }
 function textToolResult(payload: unknown): McpTextCallToolResult {
   return mcpTextCallToolResultSchema.parse({
-    content: [{ type: 'text', text: JSON.stringify(payload) }],
+    content: [{ type: "text", text: JSON.stringify(payload) }],
   });
 }
 
 function rpcShareSuccess(id: string, result: McpShareSessionResult): Response {
   const payload = mcpShareSessionResultSchema.parse(result);
-  return jsonResponse({ jsonrpc: '2.0', id, result: textToolResult(payload) });
+  return jsonResponse({ jsonrpc: "2.0", id, result: textToolResult(payload) });
 }
 
 function readCloudShareResult(result: unknown): McpShareSessionResult {
@@ -67,20 +62,7 @@ function readCloudShareResult(result: unknown): McpShareSessionResult {
 
 function readPluginShareResult(result: unknown): McpShareSessionPluginResult {
   const toolResult = mcpTextCallToolResultSchema.parse(result);
-  return mcpShareSessionPluginResultSchema.parse(
-    JSON.parse(toolResult.content[0]!.text),
-  );
-}
-
-function includesWatcherTip(result: unknown): boolean {
-  return mcpTextCallToolResultSchema
-    .parse(result)
-    .content.some((block) =>
-      block.text.startsWith('Tip:')
-      && block.text.includes('macOS app')
-      && block.text.includes('/docs/overview')
-      && block.text.includes('auto-share')
-    );
+  return mcpShareSessionPluginResultSchema.parse(JSON.parse(toolResult.content[0]!.text));
 }
 
 interface Captured {
@@ -88,14 +70,12 @@ interface Captured {
   body: { id: string; params: { name: string; arguments: unknown } };
 }
 
-function captureFetch(
-  responder: (req: Captured) => Response | Promise<Response>,
-): { fetchImpl: typeof fetch; calls: Captured[] } {
+function captureFetch(responder: (req: Captured) => Response | Promise<Response>): {
+  fetchImpl: typeof fetch;
+  calls: Captured[];
+} {
   const calls: Captured[] = [];
-  const fetchImpl = (async (
-    url: string,
-    init?: RequestInit,
-  ): Promise<Response> => {
+  const fetchImpl = (async (url: string, init?: RequestInit): Promise<Response> => {
     const body = JSON.parse(init?.body as string);
     const cap: Captured = { url: String(url), body };
     calls.push(cap);
@@ -111,16 +91,19 @@ function captureFetch(
 // the discovery cache so the routing fetch only handles /mcp + the token
 // endpoint. (`captureFetch` can't serve discovery: it JSON.parses the request
 // body, which discovery GETs don't have.)
-const TOKEN_ENDPOINT = 'https://signin.lore.tanagram.ai/oauth2/token';
+const TOKEN_ENDPOINT = "https://signin.lore.tanagram.ai/oauth2/token";
 function discoveryResponse(url: string): Response | null {
-  if (url.includes('oauth-protected-resource')) {
+  if (url.includes("oauth-protected-resource")) {
     return jsonResponse({
-      resource: 'https://api.lore.tanagram.ai',
-      authorization_servers: ['https://signin.lore.tanagram.ai'],
+      resource: "https://api.lore.tanagram.ai",
+      authorization_servers: ["https://signin.lore.tanagram.ai"],
     });
   }
-  if (url.includes('oauth-authorization-server')) {
-    return jsonResponse({ issuer: 'https://signin.lore.tanagram.ai', token_endpoint: TOKEN_ENDPOINT });
+  if (url.includes("oauth-authorization-server")) {
+    return jsonResponse({
+      issuer: "https://signin.lore.tanagram.ai",
+      token_endpoint: TOKEN_ENDPOINT,
+    });
   }
   return null;
 }
@@ -134,13 +117,13 @@ async function primeDiscoveryCache(h: string): Promise<void> {
   __resetDiscoveryInFlightForTests();
 }
 
-describe('share_session tool', () => {
+describe("share_session tool", () => {
   let home: string;
   beforeEach(() => {
     home = makeTmpHome();
     __resetInFlightForTests();
     __resetDiscoveryInFlightForTests();
-    process.env.LORE_MCP_BASE_URL = 'http://localhost:4000';
+    process.env.LORE_MCP_BASE_URL = "http://localhost:4000";
     __resetCloudBaseUrlForTests();
   });
   afterEach(() => {
@@ -151,151 +134,128 @@ describe('share_session tool', () => {
     __resetDiscoveryInFlightForTests();
   });
 
-  test('cloud-call core preserves omitted visibility for callers that use the cloud preference', async () => {
+  test("cloud-call core preserves omitted visibility for callers that use the cloud preference", async () => {
     await writeTokens(validTokens(), home);
-    const expected = { thread_id: 't_abc', thread_url: 'https://lore/t_abc' };
-    const { fetchImpl, calls } = captureFetch((req) =>
-      rpcShareSuccess(req.body.id, expected),
-    );
-    const result = await runShareSession(
-      { transcript: 'hello world' },
-      { fetchImpl, home },
-    );
+    const expected = { thread_id: "t_abc", thread_url: "https://lore/t_abc" };
+    const { fetchImpl, calls } = captureFetch((req) => rpcShareSuccess(req.body.id, expected));
+    const result = await runShareSession({ transcript: "hello world" }, { fetchImpl, home });
     expect(readCloudShareResult(result)).toEqual(expected);
-    expect(calls[0]!.body.params.name).toBe('share_session');
+    expect(calls[0]!.body.params.name).toBe("share_session");
     expect(calls[0]!.body.params.arguments).toEqual({
-      transcript: 'hello world',
-      harness: 'cowork',
+      transcript: "hello world",
+      harness: "cowork",
     });
   });
 
-  test('plugin-supplied harness wins over caller-supplied harness', async () => {
+  test("plugin-supplied harness wins over caller-supplied harness", async () => {
     // Caller cannot do this via the schema (additionalProperties: false),
     // but the pure core spreads in the safe order even when called
     // directly. Lock the contract.
     await writeTokens(validTokens(), home);
     const { fetchImpl, calls } = captureFetch((req) =>
       rpcShareSuccess(req.body.id, {
-        thread_id: 'x',
-        thread_url: 'https://lore/x',
+        thread_id: "x",
+        thread_url: "https://lore/x",
       }),
     );
     await runShareSession(
-      { transcript: 't', harness: 'something_else' } as Record<
-        string,
-        unknown
-      >,
+      { transcript: "t", harness: "something_else" } as Record<string, unknown>,
       { fetchImpl, home },
     );
-    expect(
-      (calls[0]!.body.params.arguments as { harness: string }).harness,
-    ).toBe('cowork');
+    expect((calls[0]!.body.params.arguments as { harness: string }).harness).toBe("cowork");
   });
 
-  test('cloud-call core preserves explicit visibility', async () => {
+  test("cloud-call core preserves explicit visibility", async () => {
     await writeTokens(validTokens(), home);
     const { fetchImpl, calls } = captureFetch((req) =>
       rpcShareSuccess(req.body.id, {
-        thread_id: 'x',
-        thread_url: 'https://lore/x',
+        thread_id: "x",
+        thread_url: "https://lore/x",
       }),
     );
 
-    await runShareSession(
-      { transcript: 't', visibility: 'public' },
-      { fetchImpl, home },
-    );
+    await runShareSession({ transcript: "t", visibility: "public" }, { fetchImpl, home });
 
-    expect(
-      (calls[0]!.body.params.arguments as { visibility: string }).visibility,
-    ).toBe('public');
+    expect((calls[0]!.body.params.arguments as { visibility: string }).visibility).toBe("public");
   });
 
-  test('no tokens on disk → returns authRequiredToMcpError shape', async () => {
+  test("no tokens on disk → returns authRequiredToMcpError shape", async () => {
     const { fetchImpl, calls } = captureFetch(() => jsonResponse({}));
-    const result = await runShareSession(
-      { transcript: 't' },
-      { fetchImpl, home },
-    );
+    const result = await runShareSession({ transcript: "t" }, { fetchImpl, home });
     expect(result).toEqual({
       isError: true,
-      content: [{ type: 'text', text: AUTH_REQUIRED_MESSAGE }],
+      content: [{ type: "text", text: AUTH_REQUIRED_MESSAGE }],
     });
     // No fetch issued since getValidAccessToken short-circuited.
     expect(calls.length).toBe(0);
   });
 
-  test('cloud 401 with a dead refresh token → tokens deleted and auth-required result returned', async () => {
+  test("cloud 401 with a dead refresh token → tokens deleted and auth-required result returned", async () => {
     await writeTokens(validTokens(), home);
     await primeDiscoveryCache(home);
     // /mcp rejects; the forced refresh reveals a dead token → confirmed dead
     // session → tokens cleared + auth-required result.
     const fetchImpl = (async (url: string) => {
       const s = String(url);
-      if (s === 'http://localhost:4000/mcp') return jsonResponse({ error: 'unauthorized' }, 401);
-      if (s === TOKEN_ENDPOINT) return jsonResponse({ error: 'invalid_grant' }, 400);
+      if (s === "http://localhost:4000/mcp") return jsonResponse({ error: "unauthorized" }, 401);
+      if (s === TOKEN_ENDPOINT) return jsonResponse({ error: "invalid_grant" }, 400);
       return discoveryResponse(s) ?? jsonResponse({}, 500);
     }) as unknown as typeof fetch;
-    const result = await runShareSession(
-      { transcript: 't' },
-      { fetchImpl, home },
-    );
+    const result = await runShareSession({ transcript: "t" }, { fetchImpl, home });
     expect(result).toEqual({
       isError: true,
-      content: [{ type: 'text', text: AUTH_REQUIRED_MESSAGE }],
+      content: [{ type: "text", text: AUTH_REQUIRED_MESSAGE }],
     });
     expect(await readTokens(home)).toBeNull();
   });
 
-  test('cloud JSON-RPC error (e.g. workspace_required) → re-throws', async () => {
+  test("cloud JSON-RPC error (e.g. workspace_required) → re-throws", async () => {
     await writeTokens(validTokens(), home);
     const { fetchImpl } = captureFetch((req) =>
       jsonResponse({
-        jsonrpc: '2.0',
+        jsonrpc: "2.0",
         id: req.body.id,
-        error: { code: -32602, message: 'workspace_required' },
+        error: { code: -32602, message: "workspace_required" },
       }),
     );
     let caught: unknown;
     try {
-      await runShareSession({ transcript: 't' }, { fetchImpl, home });
+      await runShareSession({ transcript: "t" }, { fetchImpl, home });
     } catch (e) {
       caught = e;
     }
     expect(caught).toBeInstanceOf(Error);
     expect(caught).not.toBeInstanceOf(AuthRequiredError);
-    expect((caught as Error).message).toContain('workspace_required');
+    expect((caught as Error).message).toContain("workspace_required");
   });
 
-  test('input schema exposes local selection/presentation fields and visibility — not `harness` or `transcript`', () => {
+  test("input schema exposes local selection/presentation fields and visibility — not `harness` or `transcript`", () => {
     // The agent can choose a session, highlight, title, and visibility while the
     // plugin handles the read internally. Exposing `transcript`
     // would re-introduce the round-trip-through-agent-context bug
     // that motivated the local-resolve refactor.
     expect(shareSessionTool.inputSchema.properties).toBeDefined();
-    const propertyNames = Object.keys(
-      shareSessionTool.inputSchema.properties!,
-    );
-    expect(propertyNames).toEqual(['session_id', 'highlight', 'title', 'visibility']);
+    const propertyNames = Object.keys(shareSessionTool.inputSchema.properties!);
+    expect(propertyNames).toEqual(["session_id", "highlight", "title", "visibility"]);
     expect(shareSessionTool.inputSchema.properties!.visibility).toEqual({
-      type: 'string',
-      enum: ['private', 'workspace', 'public'],
+      type: "string",
+      enum: ["private", "workspace", "public"],
     });
     expect(shareSessionTool.inputSchema.additionalProperties).toBe(false);
     expect(shareSessionTool.inputSchema.required ?? []).toEqual([]);
   });
 });
 
-describe('shareSessionFromDisk', () => {
+describe("shareSessionFromDisk", () => {
   let home: string;
   let sessionsRoot: string;
   let source: CoworkSource;
   beforeEach(() => {
     home = makeTmpHome();
-    sessionsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'share-session-root-'));
+    sessionsRoot = fs.mkdtempSync(path.join(os.tmpdir(), "share-session-root-"));
     source = new CoworkSource({ sessionsRoot });
     __resetInFlightForTests();
-    process.env.LORE_MCP_BASE_URL = 'http://localhost:4000';
+    process.env.LORE_MCP_BASE_URL = "http://localhost:4000";
     __resetCloudBaseUrlForTests();
   });
   afterEach(() => {
@@ -315,15 +275,15 @@ describe('shareSessionFromDisk', () => {
    */
   function stageSession(
     transcript: string,
-    accountId = 'account-A',
-    orgId = 'org-A',
-    sessionId = 'sess-A',
+    accountId = "account-A",
+    orgId = "org-A",
+    sessionId = "sess-A",
     mtimeMs?: number,
   ): string {
     const sessionDir = path.join(sessionsRoot, accountId, orgId);
     const innerDir = path.join(sessionDir, `local_${sessionId}`);
     fs.mkdirSync(innerDir, { recursive: true });
-    const transcriptPath = path.join(innerDir, 'audit.jsonl');
+    const transcriptPath = path.join(innerDir, "audit.jsonl");
     fs.writeFileSync(transcriptPath, transcript);
     if (mtimeMs !== undefined) {
       fs.utimesSync(transcriptPath, new Date(mtimeMs), new Date(mtimeMs));
@@ -341,20 +301,15 @@ describe('shareSessionFromDisk', () => {
     });
   }
 
-  test('happy path: reads transcript from disk and forwards to cloud — agent never sees transcript bytes', async () => {
+  test("happy path: reads transcript from disk and forwards to cloud — agent never sees transcript bytes", async () => {
     await writeTokens(validTokens(), home);
-    const transcriptBytes = 'envelope-wrapped-jsonl-line-1\nenvelope-line-2\n';
+    const transcriptBytes = "envelope-wrapped-jsonl-line-1\nenvelope-line-2\n";
     stageSession(transcriptBytes);
 
-    const expected = { thread_id: 't_42', thread_url: 'https://lore/t_42' };
-    const { fetchImpl, calls } = captureFetch((req) =>
-      rpcShareSuccess(req.body.id, expected),
-    );
+    const expected = { thread_id: "t_42", thread_url: "https://lore/t_42" };
+    const { fetchImpl, calls } = captureFetch((req) => rpcShareSuccess(req.body.id, expected));
 
-    const result = await shareSessionFromDiskForTest(
-      {},
-      { fetchImpl, home, source, env: {} },
-    );
+    const result = await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
 
     expect(readPluginShareResult(result)).toEqual({
       ...expected,
@@ -364,157 +319,154 @@ describe('shareSessionFromDisk', () => {
     // the cloud — they appear in the outbound RPC, never in the
     // function's return value.
     expect(calls.length).toBe(1);
-    expect(calls[0]!.body.params.name).toBe('share_session');
+    expect(calls[0]!.body.params.name).toBe("share_session");
     expect(calls[0]!.body.params.arguments).toEqual({
       transcript: transcriptBytes,
       uploads: [],
       outputs: [],
-      harness: 'cowork',
-      visibility: 'workspace',
+      harness: "cowork",
+      visibility: "workspace",
     });
   });
 
-  test('forwards an explicit public visibility to the cloud share tool', async () => {
+  test("forwards an explicit public visibility to the cloud share tool", async () => {
     await writeTokens(validTokens(), home);
-    stageSession('public-transcript');
+    stageSession("public-transcript");
 
     const { fetchImpl, calls } = captureFetch((req) =>
       rpcShareSuccess(req.body.id, {
-        thread_id: 't_public',
-        thread_url: 'https://lore/t_public',
+        thread_id: "t_public",
+        thread_url: "https://lore/t_public",
       }),
     );
 
     await shareSessionFromDiskForTest(
-      { visibility: 'public' },
+      { visibility: "public" },
       { fetchImpl, home, source, env: {} },
     );
 
     expect(calls[0]!.body.params.arguments).toEqual({
-      transcript: 'public-transcript',
+      transcript: "public-transcript",
       uploads: [],
       outputs: [],
-      harness: 'cowork',
-      visibility: 'public',
+      harness: "cowork",
+      visibility: "public",
     });
   });
 
-  test('forwards a trimmed highlight query to the cloud share tool', async () => {
+  test("forwards a trimmed highlight query to the cloud share tool", async () => {
     await writeTokens(validTokens(), home);
-    stageSession('highlight-transcript');
+    stageSession("highlight-transcript");
 
     const { fetchImpl, calls } = captureFetch((req) =>
-      rpcShareSuccess(req.body.id, { thread_id: 't_highlight', thread_url: 'https://lore/t_highlight#tb_1' }),
+      rpcShareSuccess(req.body.id, {
+        thread_id: "t_highlight",
+        thread_url: "https://lore/t_highlight#tb_1",
+      }),
     );
 
     await shareSessionFromDiskForTest(
-      { highlight: ' where the parser changed ' },
+      { highlight: " where the parser changed " },
       { fetchImpl, home, source, env: {} },
     );
 
     expect(calls[0]!.body.params.arguments).toEqual({
-      transcript: 'highlight-transcript',
+      transcript: "highlight-transcript",
       uploads: [],
       outputs: [],
-      highlight: 'where the parser changed',
-      harness: 'cowork',
-      visibility: 'workspace',
+      highlight: "where the parser changed",
+      harness: "cowork",
+      visibility: "workspace",
     });
   });
 
-  test('omits blank highlight queries from the cloud share args', async () => {
+  test("omits blank highlight queries from the cloud share args", async () => {
     await writeTokens(validTokens(), home);
-    stageSession('blank-highlight-transcript');
+    stageSession("blank-highlight-transcript");
 
     const { fetchImpl, calls } = captureFetch((req) =>
-      rpcShareSuccess(req.body.id, { thread_id: 't_blank', thread_url: 'https://lore/t_blank' }),
+      rpcShareSuccess(req.body.id, { thread_id: "t_blank", thread_url: "https://lore/t_blank" }),
+    );
+
+    await shareSessionFromDiskForTest({ highlight: "   " }, { fetchImpl, home, source, env: {} });
+
+    expect(calls[0]!.body.params.arguments).toEqual({
+      transcript: "blank-highlight-transcript",
+      uploads: [],
+      outputs: [],
+      harness: "cowork",
+      visibility: "workspace",
+    });
+  });
+
+  test("forwards a trimmed title to the cloud share tool", async () => {
+    await writeTokens(validTokens(), home);
+    stageSession("title-transcript");
+
+    const { fetchImpl, calls } = captureFetch((req) =>
+      rpcShareSuccess(req.body.id, { thread_id: "t_title", thread_url: "https://lore/t_title" }),
     );
 
     await shareSessionFromDiskForTest(
-      { highlight: '   ' },
+      { title: "  My Custom Thread  " },
       { fetchImpl, home, source, env: {} },
     );
 
     expect(calls[0]!.body.params.arguments).toEqual({
-      transcript: 'blank-highlight-transcript',
+      transcript: "title-transcript",
       uploads: [],
       outputs: [],
-      harness: 'cowork',
-      visibility: 'workspace',
+      title: "My Custom Thread",
+      harness: "cowork",
+      visibility: "workspace",
     });
   });
 
-  test('forwards a trimmed title to the cloud share tool', async () => {
+  test("omits a blank title from the cloud share args", async () => {
     await writeTokens(validTokens(), home);
-    stageSession('title-transcript');
+    stageSession("blank-title-transcript");
 
     const { fetchImpl, calls } = captureFetch((req) =>
-      rpcShareSuccess(req.body.id, { thread_id: 't_title', thread_url: 'https://lore/t_title' }),
+      rpcShareSuccess(req.body.id, {
+        thread_id: "t_blank_title",
+        thread_url: "https://lore/t_blank_title",
+      }),
     );
 
-    await shareSessionFromDiskForTest(
-      { title: '  My Custom Thread  ' },
-      { fetchImpl, home, source, env: {} },
-    );
+    await shareSessionFromDiskForTest({ title: "   " }, { fetchImpl, home, source, env: {} });
 
     expect(calls[0]!.body.params.arguments).toEqual({
-      transcript: 'title-transcript',
+      transcript: "blank-title-transcript",
       uploads: [],
       outputs: [],
-      title: 'My Custom Thread',
-      harness: 'cowork',
-      visibility: 'workspace',
+      harness: "cowork",
+      visibility: "workspace",
     });
   });
 
-  test('omits a blank title from the cloud share args', async () => {
+  test("Codex sessions upload with harness=codex", async () => {
     await writeTokens(validTokens(), home);
-    stageSession('blank-title-transcript');
-
-    const { fetchImpl, calls } = captureFetch((req) =>
-      rpcShareSuccess(req.body.id, { thread_id: 't_blank_title', thread_url: 'https://lore/t_blank_title' }),
-    );
-
-    await shareSessionFromDiskForTest(
-      { title: '   ' },
-      { fetchImpl, home, source, env: {} },
-    );
-
-    expect(calls[0]!.body.params.arguments).toEqual({
-      transcript: 'blank-title-transcript',
-      uploads: [],
-      outputs: [],
-      harness: 'cowork',
-      visibility: 'workspace',
-    });
-  });
-
-  test('Codex sessions upload with harness=codex', async () => {
-    await writeTokens(validTokens(), home);
-    const codexRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'share-session-codex-root-'));
+    const codexRoot = fs.mkdtempSync(path.join(os.tmpdir(), "share-session-codex-root-"));
     try {
-      const dayDir = path.join(codexRoot, '2026', '05', '21');
+      const dayDir = path.join(codexRoot, "2026", "05", "21");
       fs.mkdirSync(dayDir, { recursive: true });
-      const sessionId = '019e4b45-dc7c-7de2-a506-85efeaaa7a2d';
-      const transcriptPath = path.join(
-        dayDir,
-        `rollout-2026-05-21T12-02-10-${sessionId}.jsonl`,
-      );
+      const sessionId = "019e4b45-dc7c-7de2-a506-85efeaaa7a2d";
+      const transcriptPath = path.join(dayDir, `rollout-2026-05-21T12-02-10-${sessionId}.jsonl`);
       fs.writeFileSync(
         transcriptPath,
         `${JSON.stringify({
-          timestamp: '2026-05-21T16:03:47.562Z',
-          type: 'session_meta',
-          payload: { id: sessionId, cwd: '/tmp/example' },
+          timestamp: "2026-05-21T16:03:47.562Z",
+          type: "session_meta",
+          payload: { id: sessionId, cwd: "/tmp/example" },
         })}\nresponse_item\n`,
-        'utf8',
+        "utf8",
       );
 
       const source = new CodexSource({ sessionsRoot: codexRoot });
       const { fetchImpl, calls } = captureFetch((req) =>
         rpcShareSuccess(req.body.id, {
-          thread_id: 'x',
-          thread_url: 'https://lore/x',
+          thread_id: "x",
+          thread_url: "https://lore/x",
         }),
       );
       await shareSessionFromDiskForTest(
@@ -523,85 +475,85 @@ describe('shareSessionFromDisk', () => {
       );
 
       expect(calls[0]!.body.params.arguments).toEqual({
-        transcript: fs.readFileSync(transcriptPath, 'utf8'),
+        transcript: fs.readFileSync(transcriptPath, "utf8"),
         uploads: [],
         outputs: [],
-        harness: 'codex',
-        visibility: 'workspace',
+        harness: "codex",
+        visibility: "workspace",
       });
     } finally {
       rmrf(codexRoot);
     }
   });
 
-  test('explicit session_id arg picks that session', async () => {
+  test("explicit session_id arg picks that session", async () => {
     await writeTokens(validTokens(), home);
-    stageSession('older-transcript', 'account-A', 'org-old', 'sess-old');
-    stageSession('newer-transcript', 'account-A', 'org-new', 'sess-new');
+    stageSession("older-transcript", "account-A", "org-old", "sess-old");
+    stageSession("newer-transcript", "account-A", "org-new", "sess-new");
 
     const { fetchImpl, calls } = captureFetch((req) =>
       rpcShareSuccess(req.body.id, {
-        thread_id: 'x',
-        thread_url: 'https://lore/x',
+        thread_id: "x",
+        thread_url: "https://lore/x",
       }),
     );
     await shareSessionFromDiskForTest(
-      { session_id: 'sess-old' },
+      { session_id: "sess-old" },
       { fetchImpl, home, source, env: {} },
     );
-    expect(
-      (calls[0]!.body.params.arguments as { transcript: string }).transcript,
-    ).toBe('older-transcript');
+    expect((calls[0]!.body.params.arguments as { transcript: string }).transcript).toBe(
+      "older-transcript",
+    );
   });
 
-  test('Claude hook session id wins over the MCP process stale session env', async () => {
+  test("Claude hook session id wins over the MCP process stale session env", async () => {
     await writeTokens(validTokens(), home);
-    const projectsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'share-session-claude-root-'));
+    const projectsRoot = fs.mkdtempSync(path.join(os.tmpdir(), "share-session-claude-root-"));
     try {
-      const cwd = '/Users/q/repos/lore';
+      const cwd = "/Users/q/repos/lore";
       const projectDir = path.join(projectsRoot, encodeCwdToDir(cwd));
       fs.mkdirSync(projectDir, { recursive: true });
-      fs.writeFileSync(path.join(projectDir, 'stale-session.jsonl'), 'stale-transcript');
-      fs.writeFileSync(path.join(projectDir, 'current-session.jsonl'), 'current-transcript');
+      fs.writeFileSync(path.join(projectDir, "stale-session.jsonl"), "stale-transcript");
+      fs.writeFileSync(path.join(projectDir, "current-session.jsonl"), "current-transcript");
       const claudeSource = new ClaudeCodeSource({ projectsRoot, cwd });
       const { fetchImpl, calls } = captureFetch((req) =>
         rpcShareSuccess(req.body.id, {
-          thread_id: 'current-thread',
-          thread_url: 'https://lore/current-thread',
+          thread_id: "current-thread",
+          thread_url: "https://lore/current-thread",
         }),
       );
 
       await shareSessionFromDiskForTest(
-        { session_id: 'current-session' },
+        { session_id: "current-session" },
         {
           fetchImpl,
           home,
           source: claudeSource,
-          env: { CLAUDE_CODE_SESSION_ID: 'stale-session' },
+          env: { CLAUDE_CODE_SESSION_ID: "stale-session" },
         },
       );
 
       expect(calls).toHaveLength(1);
       expect(calls[0]!.body.params.arguments).toEqual({
-        transcript: 'current-transcript',
+        transcript: "current-transcript",
         uploads: [],
         outputs: [],
-        harness: 'claudeCode',
-        visibility: 'workspace',
+        harness: "claudeCode",
+        visibility: "workspace",
       });
     } finally {
       rmrf(projectsRoot);
     }
   });
 
-  test('implicit Claude share fails closed before upload when the hook id is absent', async () => {
+  test("implicit Claude share fails closed before upload when the hook id is absent", async () => {
     await writeTokens(validTokens(), home);
-    const projectsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'share-session-claude-root-'));
+    const projectsRoot = fs.mkdtempSync(path.join(os.tmpdir(), "share-session-claude-root-"));
     try {
-      const cwd = '/Users/q/repos/lore';
+      const cwd = "/Users/q/repos/lore";
       const projectDir = path.join(projectsRoot, encodeCwdToDir(cwd));
       fs.mkdirSync(projectDir, { recursive: true });
-      fs.writeFileSync(path.join(projectDir, 'stale-session.jsonl'), 'stale-transcript');
+      fs.writeFileSync(path.join(projectDir, "stale-session.jsonl"), "stale-transcript");
       const claudeSource = new ClaudeCodeSource({ projectsRoot, cwd });
       const { fetchImpl, calls } = captureFetch(() => jsonResponse({}));
 
@@ -612,45 +564,42 @@ describe('shareSessionFromDisk', () => {
             fetchImpl,
             home,
             source: claudeSource,
-            env: { CLAUDE_CODE_SESSION_ID: 'stale-session' },
+            env: { CLAUDE_CODE_SESSION_ID: "stale-session" },
           },
         ),
-      ).rejects.toThrow('current Claude Code session id is unavailable');
+      ).rejects.toThrow("current Claude Code session id is unavailable");
       expect(calls).toHaveLength(0);
     } finally {
       rmrf(projectsRoot);
     }
   });
 
-  test('no session_id and no env → resolves newest by mtime', async () => {
+  test("no session_id and no env → resolves newest by mtime", async () => {
     await writeTokens(validTokens(), home);
-    stageSession('older-transcript', 'account-A', 'org-old', 'sess-old', 1_000);
-    stageSession('newer-transcript', 'account-A', 'org-new', 'sess-new', 2_000);
+    stageSession("older-transcript", "account-A", "org-old", "sess-old", 1_000);
+    stageSession("newer-transcript", "account-A", "org-new", "sess-new", 2_000);
 
     const { fetchImpl, calls } = captureFetch((req) =>
       rpcShareSuccess(req.body.id, {
-        thread_id: 'x',
-        thread_url: 'https://lore/x',
+        thread_id: "x",
+        thread_url: "https://lore/x",
       }),
     );
-    await shareSessionFromDiskForTest(
-      {},
-      { fetchImpl, home, source, env: {} },
+    await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
+    expect((calls[0]!.body.params.arguments as { transcript: string }).transcript).toBe(
+      "newer-transcript",
     );
-    expect(
-      (calls[0]!.body.params.arguments as { transcript: string }).transcript,
-    ).toBe('newer-transcript');
   });
 
-  test('COWORK_SESSION_ID env wins over newest-by-mtime when no arg', async () => {
+  test("COWORK_SESSION_ID env wins over newest-by-mtime when no arg", async () => {
     await writeTokens(validTokens(), home);
-    stageSession('env-pick', 'account-A', 'org-env', 'sess-env', 1_000);
-    stageSession('newer-transcript', 'account-A', 'org-new', 'sess-new', 2_000);
+    stageSession("env-pick", "account-A", "org-env", "sess-env", 1_000);
+    stageSession("newer-transcript", "account-A", "org-new", "sess-new", 2_000);
 
     const { fetchImpl, calls } = captureFetch((req) =>
       rpcShareSuccess(req.body.id, {
-        thread_id: 'x',
-        thread_url: 'https://lore/x',
+        thread_id: "x",
+        thread_url: "https://lore/x",
       }),
     );
     await shareSessionFromDiskForTest(
@@ -659,75 +608,67 @@ describe('shareSessionFromDisk', () => {
         fetchImpl,
         home,
         source,
-        env: { COWORK_SESSION_ID: 'sess-env' },
+        env: { COWORK_SESSION_ID: "sess-env" },
       },
     );
-    expect(
-      (calls[0]!.body.params.arguments as { transcript: string }).transcript,
-    ).toBe('env-pick');
+    expect((calls[0]!.body.params.arguments as { transcript: string }).transcript).toBe("env-pick");
   });
 
-  test('no sessions on disk → throws InvalidParams (propagated from runReadLocalSession)', async () => {
+  test("no sessions on disk → throws InvalidParams (propagated from runReadLocalSession)", async () => {
     await writeTokens(validTokens(), home);
     const { fetchImpl, calls } = captureFetch(() => jsonResponse({}));
 
     let caught: unknown;
     try {
-      await shareSessionFromDiskForTest(
-        {},
-        { fetchImpl, home, source, env: {} },
-      );
+      await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
     } catch (e) {
       caught = e;
     }
     expect(caught).toBeInstanceOf(Error);
-    expect((caught as Error).message).toContain('no Cowork session found');
+    expect((caught as Error).message).toContain("no Cowork session found");
     // We never reached the cloud call.
     expect(calls.length).toBe(0);
   });
 
-  test('explicit session_id that does not exist → throws InvalidParams', async () => {
+  test("explicit session_id that does not exist → throws InvalidParams", async () => {
     await writeTokens(validTokens(), home);
-    stageSession('some-transcript');
+    stageSession("some-transcript");
 
     const { fetchImpl, calls } = captureFetch(() => jsonResponse({}));
     let caught: unknown;
     try {
       await shareSessionFromDiskForTest(
-        { session_id: 'nope' },
+        { session_id: "nope" },
         { fetchImpl, home, source, env: {} },
       );
     } catch (e) {
       caught = e;
     }
     expect(caught).toBeInstanceOf(Error);
-    expect((caught as Error).message).toContain('session not found: nope');
+    expect((caught as Error).message).toContain("session not found: nope");
     expect(calls.length).toBe(0);
   });
 
-  test('cloud auth-required still surfaces through the orchestration layer', async () => {
+  test("cloud auth-required still surfaces through the orchestration layer", async () => {
     // No tokens written → getValidAccessToken short-circuits inside
     // runShareSession, which returns the auth-required shape. The
     // orchestration layer must pass it through unchanged.
-    stageSession('some-transcript');
+    stageSession("some-transcript");
     const { fetchImpl, calls } = captureFetch(() => jsonResponse({}));
-    const result = await shareSessionFromDiskForTest(
-      {},
-      { fetchImpl, home, source, env: {} },
-    );
+    const result = await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
     expect(result).toEqual({
       isError: true,
-      content: [{ type: 'text', text: AUTH_REQUIRED_MESSAGE }],
+      content: [{ type: "text", text: AUTH_REQUIRED_MESSAGE }],
     });
     expect(calls.length).toBe(0);
   });
 
-  test('copies the returned Lore URL to the clipboard and reports success', async () => {
+  test("copies the returned Lore URL to the clipboard and reports success", async () => {
     await writeTokens(validTokens(), home);
-    stageSession('clipboard-transcript');
+    stageSession("clipboard-transcript");
     const copied: string[] = [];
     const { fetchImpl } = captureFetch((req) =>
-      rpcShareSuccess(req.body.id, { thread_id: 't_clip', thread_url: 'https://lore/t_clip' }),
+      rpcShareSuccess(req.body.id, { thread_id: "t_clip", thread_url: "https://lore/t_clip" }),
     );
 
     const result = await shareSessionFromDisk(
@@ -744,44 +685,39 @@ describe('shareSessionFromDisk', () => {
       },
     );
 
-    expect(copied).toEqual(['https://lore/t_clip']);
+    expect(copied).toEqual(["https://lore/t_clip"]);
     expect(readPluginShareResult(result)).toEqual({
-      thread_id: 't_clip',
-      thread_url: 'https://lore/t_clip',
+      thread_id: "t_clip",
+      thread_url: "https://lore/t_clip",
       clipboard_copied: true,
     });
   });
 
-  if (os.platform() === 'darwin') {
-    test('production clipboard path pipes the returned Lore URL to pbcopy', async () => {
+  if (os.platform() === "darwin") {
+    test("production clipboard path pipes the returned Lore URL to pbcopy", async () => {
       await writeTokens(validTokens(), home);
-      stageSession('production-clipboard-transcript');
-      const binDir = path.join(home, 'bin');
-      const captureFile = path.join(home, 'pbcopy-input.txt');
+      stageSession("production-clipboard-transcript");
+      const binDir = path.join(home, "bin");
+      const captureFile = path.join(home, "pbcopy-input.txt");
       fs.mkdirSync(binDir);
       fs.writeFileSync(
-        path.join(binDir, 'pbcopy'),
+        path.join(binDir, "pbcopy"),
         `#!/bin/bash\n/bin/cat > ${JSON.stringify(captureFile)}\n`,
         { mode: 0o755 },
       );
       const { fetchImpl } = captureFetch((req) =>
         rpcShareSuccess(req.body.id, {
-          thread_id: 't_production_clip',
-          thread_url: 'https://lore/t_production_clip',
+          thread_id: "t_production_clip",
+          thread_url: "https://lore/t_production_clip",
         }),
       );
       const originalPath = process.env.PATH;
 
       try {
         process.env.PATH = binDir;
-        const result = await shareSessionFromDisk(
-          {},
-          { fetchImpl, home, source, env: {} },
-        );
+        const result = await shareSessionFromDisk({}, { fetchImpl, home, source, env: {} });
 
-        expect(fs.readFileSync(captureFile, 'utf8')).toBe(
-          'https://lore/t_production_clip',
-        );
+        expect(fs.readFileSync(captureFile, "utf8")).toBe("https://lore/t_production_clip");
         expect(readPluginShareResult(result).clipboard_copied).toBe(true);
       } finally {
         if (originalPath === undefined) delete process.env.PATH;
@@ -790,11 +726,14 @@ describe('shareSessionFromDisk', () => {
     });
   }
 
-  test('clipboard failures do not fail the share', async () => {
+  test("clipboard failures do not fail the share", async () => {
     await writeTokens(validTokens(), home);
-    stageSession('clipboard-failure-transcript');
+    stageSession("clipboard-failure-transcript");
     const { fetchImpl } = captureFetch((req) =>
-      rpcShareSuccess(req.body.id, { thread_id: 't_clip_fail', thread_url: 'https://lore/t_clip_fail' }),
+      rpcShareSuccess(req.body.id, {
+        thread_id: "t_clip_fail",
+        thread_url: "https://lore/t_clip_fail",
+      }),
     );
 
     const result = await shareSessionFromDisk(
@@ -805,27 +744,27 @@ describe('shareSessionFromDisk', () => {
         source,
         env: {},
         copyToClipboard: async () => {
-          throw new Error('clipboard unavailable');
+          throw new Error("clipboard unavailable");
         },
       },
     );
 
     expect(readPluginShareResult(result)).toEqual({
-      thread_id: 't_clip_fail',
-      thread_url: 'https://lore/t_clip_fail',
+      thread_id: "t_clip_fail",
+      thread_url: "https://lore/t_clip_fail",
       clipboard_copied: false,
     });
   });
 
-  test('rejects an enveloped share payload that violates the shared contract', async () => {
+  test("rejects an enveloped share payload that violates the shared contract", async () => {
     await writeTokens(validTokens(), home);
-    stageSession('invalid-share-result-transcript');
+    stageSession("invalid-share-result-transcript");
     const copied: string[] = [];
     const { fetchImpl } = captureFetch((req) =>
       jsonResponse({
-        jsonrpc: '2.0',
+        jsonrpc: "2.0",
         id: req.body.id,
-        result: textToolResult({ thread_id: 't_missing_url' }),
+        result: textToolResult({ thread_id: "t_missing_url" }),
       }),
     );
 
@@ -843,14 +782,19 @@ describe('shareSessionFromDisk', () => {
           },
         },
       ),
-    ).rejects.toThrow('cloud share_session result did not match its contract');
+    ).rejects.toThrow("cloud share_session result did not match its contract");
     expect(copied).toEqual([]);
   });
 
-  test('auth-required result does not attempt clipboard copy', async () => {
-    stageSession('auth-no-clipboard-transcript');
+  test("auth-required result does not attempt clipboard copy", async () => {
+    stageSession("auth-no-clipboard-transcript");
     const copied: string[] = [];
-    const { fetchImpl } = makeSuccessFetch();
+    const { fetchImpl } = captureFetch((req) =>
+      rpcShareSuccess(req.body.id, {
+        thread_id: "t_auth",
+        thread_url: "https://lore/t_auth",
+      }),
+    );
 
     const result = await shareSessionFromDisk(
       {},
@@ -868,102 +812,8 @@ describe('shareSessionFromDisk', () => {
 
     expect(result).toEqual({
       isError: true,
-      content: [{ type: 'text', text: AUTH_REQUIRED_MESSAGE }],
+      content: [{ type: "text", text: AUTH_REQUIRED_MESSAGE }],
     });
     expect(copied).toEqual([]);
-  });
-
-  // ── Watcher soft-prompt tests ─────────────────────────────────────────────
-
-  function makeSuccessFetch(): ReturnType<typeof captureFetch> {
-    return captureFetch((req) =>
-      rpcShareSuccess(req.body.id, { thread_id: 't_tip', thread_url: 'https://lore/t_tip' }),
-    );
-  }
-
-  test('watcher tip is appended on the first share (share_count=0)', async () => {
-    await writeTokens(validTokens(), home);
-    stageSession('transcript-a');
-    const { fetchImpl } = makeSuccessFetch();
-    const result = await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
-    expect(readPluginShareResult(result)).toMatchObject({
-      thread_id: 't_tip',
-      thread_url: 'https://lore/t_tip',
-    });
-    expect(includesWatcherTip(result)).toBe(true);
-  });
-
-  test('watcher tip is appended on the second share (share_count=1)', async () => {
-    await writeTokens(validTokens(), home);
-    await writePluginState({ share_count: 1 }, home);
-    stageSession('transcript-b');
-    const { fetchImpl } = makeSuccessFetch();
-    const result = await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
-    expect(includesWatcherTip(result)).toBe(true);
-  });
-
-  test('watcher tip is appended on the third share (share_count=2)', async () => {
-    await writeTokens(validTokens(), home);
-    await writePluginState({ share_count: 2 }, home);
-    stageSession('transcript-c');
-    const { fetchImpl } = makeSuccessFetch();
-    const result = await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
-    expect(includesWatcherTip(result)).toBe(true);
-  });
-
-  test('watcher tip is suppressed on the fourth share (share_count=3)', async () => {
-    await writeTokens(validTokens(), home);
-    await writePluginState({ share_count: 3 }, home);
-    stageSession('transcript-d');
-    const { fetchImpl } = makeSuccessFetch();
-    const result = await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
-    expect(includesWatcherTip(result)).toBe(false);
-  });
-
-  test('share_count increments on every successful share, including when tip is suppressed', async () => {
-    await writeTokens(validTokens(), home);
-    await writePluginState({ share_count: 3 }, home);
-    stageSession('transcript-f');
-    const { fetchImpl } = makeSuccessFetch();
-    await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
-    const state = await readPluginState(home);
-    expect(state.share_count).toBe(4);
-  });
-
-  test('share_count increments on every successful share, including when tip shows', async () => {
-    await writeTokens(validTokens(), home);
-    stageSession('transcript-g'); // share_count starts at 0
-    const { fetchImpl } = makeSuccessFetch();
-    await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
-    const state = await readPluginState(home);
-    expect(state.share_count).toBe(1);
-  });
-
-  test('plugin state I/O error does not fail the share', async () => {
-    await writeTokens(validTokens(), home);
-    // Write a malformed state file so readPluginState throws.
-    const p = require('../lib/pluginState').pluginStateFilePath(home);
-    const parent = require('node:path').dirname(p);
-    require('node:fs').mkdirSync(parent, { recursive: true });
-    require('node:fs').writeFileSync(p, 'not-json');
-
-    stageSession('transcript-h');
-    const { fetchImpl } = makeSuccessFetch();
-    // Should not throw; should still return the cloud result.
-    const result = await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
-    expect(readPluginShareResult(result)).toMatchObject({
-      thread_id: 't_tip',
-      thread_url: 'https://lore/t_tip',
-    });
-  });
-
-  test('auth-required result does not increment share_count', async () => {
-    // No tokens: share fails with auth-required, plugin state must not change.
-    stageSession('transcript-i');
-    const { fetchImpl } = makeSuccessFetch();
-    await shareSessionFromDiskForTest({}, { fetchImpl, home, source, env: {} });
-    // File should not have been created (still at defaults).
-    const state = await readPluginState(home);
-    expect(state.share_count).toBe(0);
   });
 });

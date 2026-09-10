@@ -39,34 +39,27 @@
  *   the defense-in-depth pair; the merge-order rule above is the runtime
  *   half.
  */
-import {
-  ErrorCode,
-  McpError,
-} from '@modelcontextprotocol/sdk/types.js';
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import {
   mcpShareSessionPluginResultSchema,
   mcpShareSessionPluginToolSpec,
   mcpShareSessionResultSchema,
   type McpShareSessionPluginResult,
   type McpTextCallToolResult,
-} from '@lore/contracts/mcp';
+} from "@lore/contracts/mcp";
 
-import type { ToolDefinition } from '../lib/tool.js';
-import { callCloudTool } from '../lib/cloudCall.js';
-import { AuthRequiredError, authRequiredToMcpError } from '../lib/errors.js';
-import { detectSource, type SessionSource } from '../lib/session/index.js';
-import { runReadLocalSession } from './readLocalSession.js';
-import { copyToClipboard } from '../lib/clipboard.js';
-import { readPluginState, writePluginState } from '../lib/pluginState.js';
-
-const WATCHER_TIP =
-  'Tip: install our macOS app (https://lore.link/docs/overview) to auto-share new sessions in the background.';
+import type { ToolDefinition } from "../lib/tool.js";
+import { callCloudTool } from "../lib/cloudCall.js";
+import { AuthRequiredError, authRequiredToMcpError } from "../lib/errors.js";
+import { detectSource, type SessionSource } from "../lib/session/index.js";
+import { runReadLocalSession } from "./readLocalSession.js";
+import { copyToClipboard } from "../lib/clipboard.js";
 
 export type ShareSessionArgs = {
   session_id?: string;
   highlight?: string;
   title?: string;
-  visibility?: 'private' | 'workspace' | 'public';
+  visibility?: "private" | "workspace" | "public";
 };
 
 /**
@@ -78,9 +71,9 @@ export type ShareSessionArgs = {
  * as `codex`.
  */
 const RUNTIME_TO_HARNESS: Record<string, string> = {
-  'claude-code': 'claudeCode',
-  cowork: 'cowork',
-  codex: 'codex',
+  "claude-code": "claudeCode",
+  cowork: "cowork",
+  codex: "codex",
 };
 
 /**
@@ -93,15 +86,11 @@ export async function runShareSession(
   opts: { fetchImpl?: typeof fetch; home?: string; harness?: string } = {},
 ): Promise<McpTextCallToolResult> {
   try {
-    const harness = opts.harness ?? 'cowork';
+    const harness = opts.harness ?? "cowork";
     // Keep the runtime-derived harness authoritative. Visibility stays
     // untouched here because Amp callers use omission to request the cloud
     // preference; the stdio boundary applies its own workspace default below.
-    return await callCloudTool(
-      'share_session',
-      { ...args, harness },
-      opts,
-    );
+    return await callCloudTool("share_session", { ...args, harness }, opts);
   } catch (err) {
     if (err instanceof AuthRequiredError) {
       return authRequiredToMcpError();
@@ -143,10 +132,10 @@ export async function shareSessionFromDisk(
   const source = opts.source ?? detectSource(opts.env);
   const env = opts.env ?? process.env;
   const explicitSessionId = args.session_id?.trim();
-  if (source.runtime === 'claude-code' && !explicitSessionId) {
+  if (source.runtime === "claude-code" && !explicitSessionId) {
     throw new McpError(
       ErrorCode.InvalidParams,
-      'current Claude Code session id is unavailable; reload or update the Lore plugin, then retry',
+      "current Claude Code session id is unavailable; reload or update the Lore plugin, then retry",
     );
   }
   const session = runReadLocalSession({
@@ -163,9 +152,13 @@ export async function shareSessionFromDisk(
       outputs: session.outputs,
       ...(highlight ? { highlight } : {}),
       ...(title ? { title } : {}),
-      visibility: args.visibility ?? 'workspace',
+      visibility: args.visibility ?? "workspace",
     },
-    { fetchImpl: opts.fetchImpl, home: opts.home, harness: RUNTIME_TO_HARNESS[source.runtime] ?? source.runtime },
+    {
+      fetchImpl: opts.fetchImpl,
+      home: opts.home,
+      harness: RUNTIME_TO_HARNESS[source.runtime] ?? source.runtime,
+    },
   );
 
   // If the share failed (auth-required shape), skip state mutation.
@@ -178,31 +171,7 @@ export async function shareSessionFromDisk(
     opts.copyToClipboard ?? copyToClipboard,
   );
 
-  // Read state, compute tip visibility, write incremented state.
-  // Errors here must NOT fail the share — log to stderr and move on.
-  let tipText: string | null = null;
-  try {
-    const state = await readPluginState(opts.home);
-    const showTip = state.share_count < 3;
-    await writePluginState({ ...state, share_count: state.share_count + 1 }, opts.home);
-    if (showTip) {
-      tipText = WATCHER_TIP;
-    }
-  } catch (err) {
-    console.error('[lore-plugin] warning: failed to update plugin state:', (err as Error).message);
-  }
-
-  if (tipText === null) {
-    return resultWithClipboard;
-  }
-
-  return {
-    ...resultWithClipboard,
-    content: [
-      ...resultWithClipboard.content,
-      { type: 'text', text: tipText },
-    ],
-  };
+  return resultWithClipboard;
 }
 
 async function attachClipboardStatus(
@@ -213,12 +182,12 @@ async function attachClipboardStatus(
   try {
     payload = JSON.parse(result.content[0]!.text);
   } catch {
-    throw new Error('cloud share_session result was not valid JSON');
+    throw new Error("cloud share_session result was not valid JSON");
   }
 
   const parsed = mcpShareSessionResultSchema.safeParse(payload);
   if (!parsed.success) {
-    throw new Error('cloud share_session result did not match its contract');
+    throw new Error("cloud share_session result did not match its contract");
   }
 
   let clipboardCopied = false;
@@ -228,11 +197,10 @@ async function attachClipboardStatus(
     clipboardCopied = false;
   }
 
-  const pluginResult: McpShareSessionPluginResult =
-    mcpShareSessionPluginResultSchema.parse({
-      ...parsed.data,
-      clipboard_copied: clipboardCopied,
-    });
+  const pluginResult: McpShareSessionPluginResult = mcpShareSessionPluginResultSchema.parse({
+    ...parsed.data,
+    clipboard_copied: clipboardCopied,
+  });
   return {
     ...result,
     content: [

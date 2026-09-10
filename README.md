@@ -73,7 +73,7 @@ Then reload plugins from Amp's command palette with `plugins: reload`. The comma
 
 In Claude Code, Cowork, and Codex, you can also share to Lore using natural language (e.g. "share this session to Lore").
 
-The plugin intentionally does not configure or manage automatic background capture. Use the Lore desktop app's **Configure Session Uploads** screen.
+The plugin shares sessions only when you explicitly use `/share` or its manual sharing tools.
 
 When you share a thread, you can also specify specific blocks that should be highlighted (e.g. "share the final outcome of this investigation"). Lore resolves the description against parsed thread blocks and returns a `thread_url` with corresponding anchor tags when it finds a confident match. If highlight resolution fails or times out, sharing still succeeds and returns the base thread URL without anchor tags.
 

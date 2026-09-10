@@ -1,29 +1,39 @@
-import { describe, expect, test } from 'bun:test';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import type { PluginAPI, PluginCommandContext } from '@ampcode/plugin';
+import { describe, expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import type { PluginAPI, PluginCommandContext } from "@ampcode/plugin";
 
 import {
   configureLoreStateDirForInstalledAmpPlugin,
   inferLoreStateDirFromAmpPluginUrl,
   shareActiveThread,
-} from './lore';
+} from "./lore";
 
 function makeContext(): PluginCommandContext & {
-  appendedMessages: Array<{ type: 'user-message'; content: string }>;
+  appendedMessages: Array<{ type: "user-message"; content: string }>;
   notifications: string[];
-  inputs: Array<{ title?: string; helpText?: string; initialValue?: string; submitButtonText?: string }>;
+  inputs: Array<{
+    title?: string;
+    helpText?: string;
+    initialValue?: string;
+    submitButtonText?: string;
+  }>;
   openedUrls: Array<string | URL>;
   shellCalls: Array<{ strings: readonly string[]; values: unknown[] }>;
   failClipboard: boolean;
   failOpen: boolean;
   failInput: boolean;
 } {
-  const appendedMessages: Array<{ type: 'user-message'; content: string }> = [];
+  const appendedMessages: Array<{ type: "user-message"; content: string }> = [];
   const notifications: string[] = [];
-  const inputs: Array<{ title?: string; helpText?: string; initialValue?: string; submitButtonText?: string }> = [];
+  const inputs: Array<{
+    title?: string;
+    helpText?: string;
+    initialValue?: string;
+    submitButtonText?: string;
+  }> = [];
   const openedUrls: Array<string | URL> = [];
   const shellCalls: Array<{ strings: readonly string[]; values: unknown[] }> = [];
 
@@ -34,7 +44,7 @@ function makeContext(): PluginCommandContext & {
     openedUrls,
     shellCalls,
     thread: {
-      id: 'T-amp-thread',
+      id: "T-amp-thread",
       append: async (messages) => {
         appendedMessages.push(...messages);
       },
@@ -44,30 +54,35 @@ function makeContext(): PluginCommandContext & {
         notifications.push(message);
       },
       input: async (options) => {
-        if (ctx.failInput) throw new Error('input unavailable');
+        if (ctx.failInput) throw new Error("input unavailable");
         inputs.push(options);
         return undefined;
       },
     },
     system: {
-      ampURL: new URL('https://ampcode.com/'),
+      ampURL: new URL("https://ampcode.com/"),
       open: async (url) => {
-        if (ctx.failOpen) throw new Error('open unavailable');
+        if (ctx.failOpen) throw new Error("open unavailable");
         openedUrls.push(url);
       },
     },
     $: async (strings, ...values) => {
       shellCalls.push({ strings: [...strings], values });
-      if (ctx.failClipboard) return { exitCode: 1, stdout: '', stderr: 'pbcopy unavailable' };
-      return { exitCode: 0, stdout: '', stderr: '' };
+      if (ctx.failClipboard) return { exitCode: 1, stdout: "", stderr: "pbcopy unavailable" };
+      return { exitCode: 0, stdout: "", stderr: "" };
     },
     failClipboard: false,
     failOpen: false,
     failInput: false,
   } as PluginCommandContext & {
-    appendedMessages: Array<{ type: 'user-message'; content: string }>;
+    appendedMessages: Array<{ type: "user-message"; content: string }>;
     notifications: string[];
-    inputs: Array<{ title?: string; helpText?: string; initialValue?: string; submitButtonText?: string }>;
+    inputs: Array<{
+      title?: string;
+      helpText?: string;
+      initialValue?: string;
+      submitButtonText?: string;
+    }>;
     openedUrls: Array<string | URL>;
     shellCalls: Array<{ strings: readonly string[]; values: unknown[] }>;
     failClipboard: boolean;
@@ -78,46 +93,55 @@ function makeContext(): PluginCommandContext & {
   return ctx;
 }
 
-describe('installed Amp plugin state dir inference', () => {
-  test('infers the owning Lore state dir from the materialized harness plugin path', () => {
-    const stateDir = path.join('/tmp', 'home', '.lore-dev-stack');
-    const pluginFile = path.join(stateDir, 'harness', 'amp', 'lore-plugin', 'amp', 'lore.ts');
+describe("installed Amp plugin state dir inference", () => {
+  test("infers the owning Lore state dir from the materialized harness plugin path", () => {
+    const stateDir = path.join("/tmp", "home", ".lore-dev-stack");
+    const pluginFile = path.join(stateDir, "harness", "amp", "lore-plugin", "amp", "lore.ts");
 
     expect(inferLoreStateDirFromAmpPluginUrl(pathToFileURL(pluginFile).href)).toBe(stateDir);
   });
 
-  test('infers the owning Lore state dir from the bundled materialized harness plugin path', () => {
-    const stateDir = path.join('/tmp', 'home', '.lore-dev-stack');
-    const pluginFile = path.join(stateDir, 'harness', 'amp', 'lore-plugin', 'amp', 'lore-bundled.js');
+  test("infers the owning Lore state dir from the bundled materialized harness plugin path", () => {
+    const stateDir = path.join("/tmp", "home", ".lore-dev-stack");
+    const pluginFile = path.join(
+      stateDir,
+      "harness",
+      "amp",
+      "lore-plugin",
+      "amp",
+      "lore-bundled.js",
+    );
 
     expect(inferLoreStateDirFromAmpPluginUrl(pathToFileURL(pluginFile).href)).toBe(stateDir);
   });
 
-  test('infers through Amp plugin symlinks', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lore-amp-plugin-test-'));
+  test("infers through Amp plugin symlinks", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "lore-amp-plugin-test-"));
     try {
-      const stateDir = path.join(root, '.lore-dev-stack');
-      const pluginFile = path.join(stateDir, 'harness', 'amp', 'lore-plugin', 'amp', 'lore.ts');
-      const symlinkFile = path.join(root, '.config', 'amp', 'plugins', 'lore.ts');
+      const stateDir = path.join(root, ".lore-dev-stack");
+      const pluginFile = path.join(stateDir, "harness", "amp", "lore-plugin", "amp", "lore.ts");
+      const symlinkFile = path.join(root, ".config", "amp", "plugins", "lore.ts");
       fs.mkdirSync(path.dirname(pluginFile), { recursive: true });
       fs.mkdirSync(path.dirname(symlinkFile), { recursive: true });
-      fs.writeFileSync(pluginFile, 'export default function plugin() {}\n');
+      fs.writeFileSync(pluginFile, "export default function plugin() {}\n");
       fs.symlinkSync(pluginFile, symlinkFile);
 
-      expect(inferLoreStateDirFromAmpPluginUrl(pathToFileURL(symlinkFile).href)).toBe(fs.realpathSync(stateDir));
+      expect(inferLoreStateDirFromAmpPluginUrl(pathToFileURL(symlinkFile).href)).toBe(
+        fs.realpathSync(stateDir),
+      );
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
 
-  test('returns null for source-tree plugin paths', () => {
-    const sourceFile = path.join('/repo', 'packages', 'lore-plugin', 'amp', 'lore.ts');
+  test("returns null for source-tree plugin paths", () => {
+    const sourceFile = path.join("/repo", "packages", "lore-plugin", "amp", "lore.ts");
 
     expect(inferLoreStateDirFromAmpPluginUrl(pathToFileURL(sourceFile).href)).toBeNull();
   });
 });
 
-describe('configureLoreStateDirForInstalledAmpPlugin — test-suite isolation (TAN-5045)', () => {
+describe("configureLoreStateDirForInstalledAmpPlugin — test-suite isolation (TAN-5045)", () => {
   // The plugin test suite imports this module into ONE shared bun-test
   // process. If the module's top-level inference ran here it would set
   // LORE_PLUGIN_STATE_DIR process-wide, and — because that env var is an
@@ -138,12 +162,12 @@ describe('configureLoreStateDirForInstalledAmpPlugin — test-suite isolation (T
   }
 
   const installedPluginUrl = pathToFileURL(
-    path.join('/tmp', 'home', '.lore-dev-stack', 'harness', 'amp', 'lore-plugin', 'amp', 'lore.ts'),
+    path.join("/tmp", "home", ".lore-dev-stack", "harness", "amp", "lore-plugin", "amp", "lore.ts"),
   ).href;
 
-  test('does NOT mutate LORE_PLUGIN_STATE_DIR when the sandbox flag is set', () => {
+  test("does NOT mutate LORE_PLUGIN_STATE_DIR when the sandbox flag is set", () => {
     withEnv(() => {
-      process.env.LORE_PLUGIN_TEST_SANDBOX = '1';
+      process.env.LORE_PLUGIN_TEST_SANDBOX = "1";
       delete process.env.LORE_PLUGIN_STATE_DIR;
 
       configureLoreStateDirForInstalledAmpPlugin(installedPluginUrl);
@@ -152,7 +176,7 @@ describe('configureLoreStateDirForInstalledAmpPlugin — test-suite isolation (T
     });
   });
 
-  test('infers and sets LORE_PLUGIN_STATE_DIR when the sandbox flag is absent', () => {
+  test("infers and sets LORE_PLUGIN_STATE_DIR when the sandbox flag is absent", () => {
     withEnv(() => {
       delete process.env.LORE_PLUGIN_TEST_SANDBOX;
       delete process.env.LORE_PLUGIN_STATE_DIR;
@@ -163,90 +187,97 @@ describe('configureLoreStateDirForInstalledAmpPlugin — test-suite isolation (T
       // `delete` above and can't see the opaque call reassign it. A fresh
       // object breaks that flow-narrowing.
       const env = { ...process.env };
-      expect(env.LORE_PLUGIN_STATE_DIR).toBe(path.join('/tmp', 'home', '.lore-dev-stack'));
+      expect(env.LORE_PLUGIN_STATE_DIR).toBe(path.join("/tmp", "home", ".lore-dev-stack"));
     });
   });
 });
 
-describe('bundled Amp plugin artifact', () => {
-  test('is checked in without runtime imports of workspace packages', () => {
-    const bundlePath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'lore-bundled.js');
-    const bundle = fs.readFileSync(bundlePath, 'utf8');
+describe("bundled Amp plugin artifact", () => {
+  test("is checked in without runtime imports of workspace packages", () => {
+    const bundlePath = path.join(path.dirname(fileURLToPath(import.meta.url)), "lore-bundled.js");
+    const bundle = fs.readFileSync(bundlePath, "utf8");
 
-    expect(bundle).toContain('export {');
-    expect(bundle).toContain('readMessages.call(thread');
-    expect(bundle).toContain('work.event.status !== "done"');
-    expect(bundle).not.toContain('@lore/identity-store');
-    expect(bundle).not.toContain('@lore/contracts');
-    expect(bundle).not.toContain('@lore/transcript-locate');
+    expect(bundle).toContain("export {");
+    expect(bundle).toContain("amp threads export");
+    expect(bundle).not.toContain("/api/otel/");
+    expect(bundle).not.toContain("passive-thread-upload");
+    expect(bundle).not.toContain("@lore/identity-store");
+    expect(bundle).not.toContain("@lore/contracts");
+    expect(bundle).not.toContain("@lore/transcript-locate");
   });
 
-  test('is the documented standalone install and loads the safe Amp catalog outside the workspace', async () => {
-    const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-    const readme = fs.readFileSync(path.join(packageRoot, 'README.md'), 'utf8');
+  test("is the documented standalone install and loads the safe Amp catalog outside the workspace", async () => {
+    const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+    const readme = fs.readFileSync(path.join(packageRoot, "README.md"), "utf8");
     expect(readme).toContain(
-      'cp ~/.local/share/lore-plugin/amp/lore-bundled.js ~/.config/amp/plugins/lore.ts',
+      "cp ~/.local/share/lore-plugin/amp/lore-bundled.js ~/.config/amp/plugins/lore.ts",
     );
-    expect(readme).toContain('rm -f ~/.config/amp/plugins/lore.ts');
-    expect(readme).not.toContain('cd ~/.local/share/lore-plugin');
-    expect(readme).not.toContain('bun install --frozen-lockfile');
-    expect(readme).not.toContain('ln -sf ~/.local/share/lore-plugin/amp/');
+    expect(readme).toContain("rm -f ~/.config/amp/plugins/lore.ts");
+    expect(readme).not.toContain("cd ~/.local/share/lore-plugin");
+    expect(readme).not.toContain("bun install --frozen-lockfile");
+    expect(readme).not.toContain("ln -sf ~/.local/share/lore-plugin/amp/");
 
-    const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lore-amp-standalone-test-'));
+    const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lore-amp-standalone-test-"));
     const savedStateDir = process.env.LORE_PLUGIN_STATE_DIR;
     try {
-      const externalPlugin = path.join(externalRoot, 'lore.js');
-      fs.copyFileSync(path.join(packageRoot, 'amp', 'lore-bundled.js'), externalPlugin);
-      process.env.LORE_PLUGIN_STATE_DIR = path.join(externalRoot, 'state');
+      const externalPlugin = path.join(externalRoot, "lore.js");
+      fs.copyFileSync(path.join(packageRoot, "amp", "lore-bundled.js"), externalPlugin);
+      process.env.LORE_PLUGIN_STATE_DIR = path.join(externalRoot, "state");
 
-      const installedPlugin = path.join(externalRoot, 'config', 'amp', 'plugins', 'lore.ts');
-      const legacySource = path.join(externalRoot, 'checkout', 'amp', 'lore.ts');
+      const installedPlugin = path.join(externalRoot, "config", "amp", "plugins", "lore.ts");
+      const legacySource = path.join(externalRoot, "checkout", "amp", "lore.ts");
       fs.mkdirSync(path.dirname(installedPlugin), { recursive: true });
       fs.mkdirSync(path.dirname(legacySource), { recursive: true });
-      fs.writeFileSync(legacySource, 'legacy source');
+      fs.writeFileSync(legacySource, "legacy source");
       fs.symlinkSync(legacySource, installedPlugin);
       fs.rmSync(installedPlugin);
       fs.copyFileSync(externalPlugin, installedPlugin);
       expect(fs.lstatSync(installedPlugin).isSymbolicLink()).toBe(false);
-      expect(fs.readFileSync(legacySource, 'utf8')).toBe('legacy source');
+      expect(fs.readFileSync(legacySource, "utf8")).toBe("legacy source");
 
       const commandIds: string[] = [];
-      const registeredTools: Array<Parameters<PluginAPI['registerTool']>[0]> = [];
-      const plugin = (await import(`${pathToFileURL(externalPlugin).href}?external=${Date.now()}`)).default as (amp: {
+      const registeredTools: Array<Parameters<PluginAPI["registerTool"]>[0]> = [];
+      const plugin = (await import(`${pathToFileURL(externalPlugin).href}?external=${Date.now()}`))
+        .default as (amp: {
         logger: { log: (message: string) => void };
         system: { ampURL: URL };
         registerCommand: (id: string) => void;
-        registerTool: (tool: Parameters<PluginAPI['registerTool']>[0]) => void;
+        registerTool: (tool: Parameters<PluginAPI["registerTool"]>[0]) => void;
         $: () => Promise<{ exitCode: number; stdout: string; stderr: string }>;
       }) => void;
       plugin({
         logger: { log: () => undefined },
-        system: { ampURL: new URL('https://ampcode.com/') },
+        system: { ampURL: new URL("https://ampcode.com/") },
         registerCommand: (id) => {
           commandIds.push(id);
         },
         registerTool: (tool) => {
           registeredTools.push(tool);
         },
-        $: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+        $: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
       });
 
-      expect(commandIds).toEqual(['lore.share-active-amp-thread']);
+      expect(commandIds).toEqual(["lore.share-active-amp-thread"]);
       expect(registeredTools.map(({ name }) => name).sort()).toEqual([
-        'fork_thread',
-        'get_thread',
-        'list_threads',
-        'lore_login',
-        'lore_login_resume',
-        'search_threads',
-        'share_current_amp_thread',
+        "fork_thread",
+        "get_thread",
+        "list_threads",
+        "lore_login",
+        "lore_login_resume",
+        "search_threads",
+        "share_current_amp_thread",
       ]);
 
-      const listThreads = registeredTools.find(({ name }) => name === 'list_threads');
-      expect(await listThreads?.execute({}, { ui: null!, logger: { log: () => undefined }, thread: null! })).toEqual([
+      const listThreads = registeredTools.find(({ name }) => name === "list_threads");
+      expect(
+        await listThreads?.execute(
+          {},
+          { ui: null!, logger: { log: () => undefined }, thread: null! },
+        ),
+      ).toEqual([
         {
-          type: 'text',
-          text: expect.stringContaining('lore_login'),
+          type: "text",
+          text: expect.stringContaining("lore_login"),
         },
       ]);
     } finally {
@@ -257,60 +288,62 @@ describe('bundled Amp plugin artifact', () => {
   });
 });
 
-describe('Lore Amp command', () => {
-  test('writes the Lore thread URL into the active Amp thread after sharing', async () => {
+describe("Lore Amp command", () => {
+  test("writes the Lore thread URL into the active Amp thread after sharing", async () => {
     const ctx = makeContext();
 
     await shareActiveThread(ctx, {
       env: {},
-      runAmpExport: async () => JSON.stringify({ title: 'Shared Amp Thread', messages: [] }),
-      share: async () => ({ thread_url: 'https://lore.test/threads/thread-1' }),
+      runAmpExport: async () => JSON.stringify({ title: "Shared Amp Thread", messages: [] }),
+      share: async () => ({ thread_url: "https://lore.test/threads/thread-1" }),
     });
 
     expect(ctx.appendedMessages).toEqual([
       {
-        type: 'user-message',
-        content: 'Shared this Amp thread to Lore: https://lore.test/threads/thread-1',
+        type: "user-message",
+        content: "Shared this Amp thread to Lore: https://lore.test/threads/thread-1",
       },
     ]);
-    expect(ctx.notifications).toEqual(['Shared Amp thread to Lore: https://lore.test/threads/thread-1. Copied Lore URL to clipboard.']);
+    expect(ctx.notifications).toEqual([
+      "Shared Amp thread to Lore: https://lore.test/threads/thread-1. Copied Lore URL to clipboard.",
+    ]);
     expect(ctx.inputs).toEqual([]);
     expect(ctx.openedUrls).toEqual([]);
   });
 
-  test('copies the Lore thread URL to the local clipboard after sharing', async () => {
+  test("copies the Lore thread URL to the local clipboard after sharing", async () => {
     const ctx = makeContext();
 
     await shareActiveThread(ctx, {
       env: {},
-      runAmpExport: async () => JSON.stringify({ title: 'Shared Amp Thread', messages: [] }),
-      share: async () => ({ thread_url: 'https://lore.test/threads/thread-copied' }),
+      runAmpExport: async () => JSON.stringify({ title: "Shared Amp Thread", messages: [] }),
+      share: async () => ({ thread_url: "https://lore.test/threads/thread-copied" }),
     });
 
     expect(ctx.shellCalls).toEqual([
       {
-        strings: ['sh -c ', ' sh ', ''],
-        values: ['printf %s "$1" | pbcopy', 'https://lore.test/threads/thread-copied'],
+        strings: ["sh -c ", " sh ", ""],
+        values: ['printf %s "$1" | pbcopy', "https://lore.test/threads/thread-copied"],
       },
     ]);
     expect(ctx.notifications).toEqual([
-      'Shared Amp thread to Lore: https://lore.test/threads/thread-copied. Copied Lore URL to clipboard.',
+      "Shared Amp thread to Lore: https://lore.test/threads/thread-copied. Copied Lore URL to clipboard.",
     ]);
   });
 
-  test('extracts the Lore thread URL from MCP text content returned by the share tool', async () => {
+  test("extracts the Lore thread URL from MCP text content returned by the share tool", async () => {
     const ctx = makeContext();
 
     await shareActiveThread(ctx, {
       env: {},
-      runAmpExport: async () => JSON.stringify({ title: 'Shared Amp Thread', messages: [] }),
+      runAmpExport: async () => JSON.stringify({ title: "Shared Amp Thread", messages: [] }),
       share: async () => ({
         content: [
           {
-            type: 'text',
+            type: "text",
             text: JSON.stringify({
-              thread_id: 'thread-mcp',
-              thread_url: 'https://lore.test/threads/thread-mcp',
+              thread_id: "thread-mcp",
+              thread_url: "https://lore.test/threads/thread-mcp",
             }),
           },
         ],
@@ -319,99 +352,99 @@ describe('Lore Amp command', () => {
 
     expect(ctx.appendedMessages).toEqual([
       {
-        type: 'user-message',
-        content: 'Shared this Amp thread to Lore: https://lore.test/threads/thread-mcp',
+        type: "user-message",
+        content: "Shared this Amp thread to Lore: https://lore.test/threads/thread-mcp",
       },
     ]);
     expect(ctx.shellCalls).toEqual([
       {
-        strings: ['sh -c ', ' sh ', ''],
-        values: ['printf %s "$1" | pbcopy', 'https://lore.test/threads/thread-mcp'],
+        strings: ["sh -c ", " sh ", ""],
+        values: ['printf %s "$1" | pbcopy', "https://lore.test/threads/thread-mcp"],
       },
     ]);
     expect(ctx.inputs).toEqual([]);
     expect(ctx.openedUrls).toEqual([]);
     expect(ctx.notifications).toEqual([
-      'Shared Amp thread to Lore: https://lore.test/threads/thread-mcp. Copied Lore URL to clipboard.',
+      "Shared Amp thread to Lore: https://lore.test/threads/thread-mcp. Copied Lore URL to clipboard.",
     ]);
   });
 
-  test('shows a copyable URL dialog when Amp does not expose a writable active thread', async () => {
+  test("shows a copyable URL dialog when Amp does not expose a writable active thread", async () => {
     const ctx = makeContext();
     ctx.thread = undefined;
 
     await shareActiveThread(ctx, {
-      env: { AMP_CURRENT_THREAD_ID: 'T-amp-thread' },
-      runAmpExport: async () => JSON.stringify({ title: 'Shared Amp Thread', messages: [] }),
-      share: async () => ({ thread_url: 'https://lore.test/threads/thread-2' }),
+      env: { AMP_CURRENT_THREAD_ID: "T-amp-thread" },
+      runAmpExport: async () => JSON.stringify({ title: "Shared Amp Thread", messages: [] }),
+      share: async () => ({ thread_url: "https://lore.test/threads/thread-2" }),
     });
 
     expect(ctx.appendedMessages).toEqual([]);
     expect(ctx.notifications).toEqual([
-      'Shared Amp thread to Lore: https://lore.test/threads/thread-2. Amp did not expose an active thread to write into. Copied Lore URL to clipboard.',
+      "Shared Amp thread to Lore: https://lore.test/threads/thread-2. Amp did not expose an active thread to write into. Copied Lore URL to clipboard.",
     ]);
     expect(ctx.inputs).toEqual([
       {
-        title: 'Shared Amp thread to Lore',
-        helpText: 'Copy the Lore URL below.',
-        initialValue: 'https://lore.test/threads/thread-2',
-        submitButtonText: 'Done',
+        title: "Shared Amp thread to Lore",
+        helpText: "Copy the Lore URL below.",
+        initialValue: "https://lore.test/threads/thread-2",
+        submitButtonText: "Done",
       },
     ]);
     expect(ctx.openedUrls).toEqual([]);
   });
 
-  test('keeps sharing successful when appending the URL to Amp fails', async () => {
+  test("keeps sharing successful when appending the URL to Amp fails", async () => {
     const ctx = makeContext();
     ctx.thread = {
-      id: 'T-amp-thread',
+      id: "T-amp-thread",
       append: async () => {
-        throw new Error('append unavailable');
+        throw new Error("append unavailable");
       },
     };
 
     await shareActiveThread(ctx, {
       env: {},
-      runAmpExport: async () => JSON.stringify({ title: 'Shared Amp Thread', messages: [] }),
-      share: async () => ({ thread_url: 'https://lore.test/threads/thread-3' }),
+      runAmpExport: async () => JSON.stringify({ title: "Shared Amp Thread", messages: [] }),
+      share: async () => ({ thread_url: "https://lore.test/threads/thread-3" }),
     });
 
     expect(ctx.appendedMessages).toEqual([]);
     expect(ctx.notifications).toEqual([
-      'Shared Amp thread to Lore: https://lore.test/threads/thread-3. Amp could not write the URL into this thread: append unavailable. Copied Lore URL to clipboard.',
+      "Shared Amp thread to Lore: https://lore.test/threads/thread-3. Amp could not write the URL into this thread: append unavailable. Copied Lore URL to clipboard.",
     ]);
     expect(ctx.inputs).toEqual([
       {
-        title: 'Shared Amp thread to Lore',
-        helpText: 'Copy the Lore URL below.',
-        initialValue: 'https://lore.test/threads/thread-3',
-        submitButtonText: 'Done',
+        title: "Shared Amp thread to Lore",
+        helpText: "Copy the Lore URL below.",
+        initialValue: "https://lore.test/threads/thread-3",
+        submitButtonText: "Done",
       },
     ]);
     expect(ctx.openedUrls).toEqual([]);
   });
 
-  test('keeps the Lore thread URL in the notification when clipboard and input fallbacks fail', async () => {
+  test("keeps the Lore thread URL in the notification when clipboard and input fallbacks fail", async () => {
     const ctx = makeContext();
     ctx.failClipboard = true;
     ctx.failInput = true;
 
     await shareActiveThread(ctx, {
       env: {},
-      runAmpExport: async () => JSON.stringify({ title: 'Shared Amp Thread', messages: [] }),
-      share: async () => ({ thread_url: 'https://lore.test/threads/thread-visible' }),
+      runAmpExport: async () => JSON.stringify({ title: "Shared Amp Thread", messages: [] }),
+      share: async () => ({ thread_url: "https://lore.test/threads/thread-visible" }),
     });
 
     expect(ctx.appendedMessages).toEqual([
       {
-        type: 'user-message',
-        content: 'Shared this Amp thread to Lore: https://lore.test/threads/thread-visible',
+        type: "user-message",
+        content: "Shared this Amp thread to Lore: https://lore.test/threads/thread-visible",
       },
     ]);
     expect(ctx.openedUrls).toEqual([]);
     expect(ctx.inputs).toEqual([]);
     expect(ctx.notifications).toEqual([
-      'Shared Amp thread to Lore: https://lore.test/threads/thread-visible. Could not copy Lore URL to clipboard. Could not show copyable Lore URL dialog: input unavailable.',
+      "Shared Amp thread to Lore: https://lore.test/threads/thread-visible. Could not copy Lore URL to clipboard. Could not show copyable Lore URL dialog: input unavailable.",
     ]);
   });
 });
