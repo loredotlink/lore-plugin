@@ -6,9 +6,9 @@
   "license": "FSL-1.1-ALv2",
   "scripts": {
     "build": "./scripts/build.sh",
-    "lint": "tsc --noEmit",
+    "lint": "tsc --checkers 1 --noEmit",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --checkers 1 --noEmit"
   },
   "devDependencies": {
     "@lore/contracts": "workspace:*",
