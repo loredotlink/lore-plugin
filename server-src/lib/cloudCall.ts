@@ -37,16 +37,13 @@
  *   are cheap and remove that whole class of bug.
  */
 
-import {
-  mcpTextCallToolResultSchema,
-  type McpTextCallToolResult,
-} from '@lore/contracts/mcp';
-import { randomUUID } from 'node:crypto';
-import { z } from 'zod';
-import { AuthRequiredError } from './errors';
-import { getValidAccessToken, forceRefreshAccessToken } from './auth/refresh.js';
-import { deleteTokens } from './auth/store.js';
-import { cloudMcpBaseUrl } from './cloudBaseUrl';
+import { mcpTextCallToolResultSchema, type McpTextCallToolResult } from "@lore/contracts/mcp";
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import { AuthRequiredError } from "./errors";
+import { getValidAccessToken, forceRefreshAccessToken } from "./auth/refresh.js";
+import { deleteTokens } from "./auth/store.js";
+import { cloudMcpBaseUrl } from "./cloudBaseUrl";
 
 interface Options {
   fetchImpl?: typeof fetch;
@@ -61,12 +58,12 @@ const jsonRpcErrorPayloadSchema = z.strictObject({
 
 const jsonRpcResponseSchema = z.union([
   z.strictObject({
-    jsonrpc: z.literal('2.0'),
+    jsonrpc: z.literal("2.0"),
     id: z.string(),
     result: z.json(),
   }),
   z.strictObject({
-    jsonrpc: z.literal('2.0'),
+    jsonrpc: z.literal("2.0"),
     id: z.string(),
     error: jsonRpcErrorPayloadSchema,
   }),
@@ -80,7 +77,7 @@ export class CloudMcpError extends Error {
 
   constructor(toolName: string, error: JsonRpcErrorPayload) {
     super(error.message);
-    this.name = 'CloudMcpError';
+    this.name = "CloudMcpError";
     this.code = error.code;
     this.cause = { toolName, code: error.code, data: error.data };
   }
@@ -119,19 +116,19 @@ export async function callCloudTool(
   // retry after a 401 never reuses the first attempt's id.
   const postWithToken = (bearer: string): Promise<Response> => {
     const envelope = {
-      jsonrpc: '2.0' as const,
+      jsonrpc: "2.0" as const,
       id: randomUUID(),
-      method: 'tools/call',
+      method: "tools/call",
       params: {
         name: toolName,
         arguments: args,
       },
     };
     return fetchFn(url, {
-      method: 'POST',
+      method: "POST",
       headers: {
         authorization: `Bearer ${bearer}`,
-        'content-type': 'application/json',
+        "content-type": "application/json",
       },
       body: JSON.stringify(envelope),
     });
@@ -163,11 +160,11 @@ export async function callCloudTool(
   if (!res.ok) {
     // Pull a short body excerpt to make logs legible without echoing
     // megabytes if the cloud returned an HTML error page.
-    let bodyText = '';
+    let bodyText = "";
     try {
       bodyText = await res.text();
     } catch {
-      bodyText = '';
+      bodyText = "";
     }
     const excerpt =
       bodyText.length > ERROR_BODY_EXCERPT_LIMIT
@@ -175,7 +172,7 @@ export async function callCloudTool(
         : bodyText;
     throw new Error(
       `Cloud MCP call to "${toolName}" failed: HTTP ${res.status}${
-        excerpt ? `; body: ${excerpt}` : ''
+        excerpt ? `; body: ${excerpt}` : ""
       }`,
     );
   }
@@ -184,22 +181,22 @@ export async function callCloudTool(
   try {
     json = await res.json();
   } catch {
-    throw new Error('cloud response was not valid JSON-RPC');
+    throw new Error("cloud response was not valid JSON-RPC");
   }
 
   const parsedRpc = jsonRpcResponseSchema.safeParse(json);
   if (!parsedRpc.success) {
-    throw new Error('cloud response was not valid JSON-RPC');
+    throw new Error("cloud response was not valid JSON-RPC");
   }
 
   const rpc = parsedRpc.data;
-  if ('error' in rpc) {
+  if ("error" in rpc) {
     throw new CloudMcpError(toolName, rpc.error);
   }
 
   const result = mcpTextCallToolResultSchema.safeParse(rpc.result);
   if (!result.success) {
-    throw new Error('cloud response was not a valid MCP tool result');
+    throw new Error("cloud response was not a valid MCP tool result");
   }
 
   return result.data;

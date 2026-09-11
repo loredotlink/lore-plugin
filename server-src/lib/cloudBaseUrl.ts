@@ -32,17 +32,17 @@
  *   env var.
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from "node:fs";
+import path from "node:path";
 
 /**
  * Production origin. Trailing slash deliberately absent so all call
  * sites can write `${cloudBaseUrl()}/oauth/token` without doubling.
  */
-const PROD_DEFAULT = 'https://mcp.lore.link';
+const PROD_DEFAULT = "https://mcp.lore.link";
 
-const ENV_VAR_NAME = 'LORE_MCP_BASE_URL';
-const MCP_PROXY_ENV_VAR_NAME = 'LORE_MCP_PROXY_BASE_URL';
+const ENV_VAR_NAME = "LORE_MCP_BASE_URL";
+const MCP_PROXY_ENV_VAR_NAME = "LORE_MCP_PROXY_BASE_URL";
 
 let cached: string | null = null;
 let cachedMcpProxy: string | null = null;
@@ -69,10 +69,13 @@ function installedPluginMcpBaseUrl(): string | null {
   if (!stateDir) return null;
   try {
     const parsed = JSON.parse(
-      fs.readFileSync(path.join(stateDir, 'harness', 'amp', 'lore-plugin', 'lore-plugin-config.json'), 'utf8'),
+      fs.readFileSync(
+        path.join(stateDir, "harness", "amp", "lore-plugin", "lore-plugin-config.json"),
+        "utf8",
+      ),
     ) as { mcpBaseUrl?: unknown };
-    if (typeof parsed.mcpBaseUrl !== 'string' || !parsed.mcpBaseUrl.trim()) return null;
-    return normalizeUrl(parsed.mcpBaseUrl, 'installed plugin config mcpBaseUrl');
+    if (typeof parsed.mcpBaseUrl !== "string" || !parsed.mcpBaseUrl.trim()) return null;
+    return normalizeUrl(parsed.mcpBaseUrl, "installed plugin config mcpBaseUrl");
   } catch {
     return null;
   }
@@ -85,15 +88,15 @@ function normalizeUrl(raw: string, label: string): string {
   } catch {
     throw new Error(`${label} is not a valid URL: ${JSON.stringify(raw)}.`);
   }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error(`${label} must use http or https; got ${JSON.stringify(raw)}.`);
   }
-  return raw.replace(/\/+$/, '');
+  return raw.replace(/\/+$/, "");
 }
 
 function resolveEnvUrl(envVarName: string, fallback: string): string {
   const raw = process.env[envVarName];
-  if (raw === undefined || raw === '') return fallback;
+  if (raw === undefined || raw === "") return fallback;
   // Validate before stripping slashes, so a bare "/" or similar nonsense
   // still trips the validator instead of normalizing to an empty string.
   // Strip every trailing slash. `URL`'s own serialization normalizes a

@@ -1,5 +1,5 @@
-import { type ChildProcess, spawn } from 'node:child_process';
-import os from 'node:os';
+import { type ChildProcess, spawn } from "node:child_process";
+import os from "node:os";
 
 type ClipboardCmd = {
   name: string;
@@ -23,16 +23,16 @@ export async function copyToClipboard(
 
 function clipboardCandidates(): ClipboardCmd[] {
   switch (os.platform()) {
-    case 'darwin':
-      return [{ name: 'pbcopy', args: [] }];
-    case 'linux':
+    case "darwin":
+      return [{ name: "pbcopy", args: [] }];
+    case "linux":
       return [
-        { name: 'wl-copy', args: [] },
-        { name: 'xclip', args: ['-selection', 'clipboard'] },
-        { name: 'xsel', args: ['--clipboard', '--input'] },
+        { name: "wl-copy", args: [] },
+        { name: "xclip", args: ["-selection", "clipboard"] },
+        { name: "xsel", args: ["--clipboard", "--input"] },
       ];
-    case 'win32':
-      return [{ name: 'clip.exe', args: [] }];
+    case "win32":
+      return [{ name: "clip.exe", args: [] }];
     default:
       return [];
   }
@@ -46,7 +46,7 @@ async function runClipboardCandidate(
   return new Promise((resolve) => {
     let child: ChildProcess;
     try {
-      child = spawn(candidate.name, candidate.args, { stdio: ['pipe', 'ignore', 'ignore'] });
+      child = spawn(candidate.name, candidate.args, { stdio: ["pipe", "ignore", "ignore"] });
     } catch {
       resolve(false);
       return;
@@ -60,21 +60,21 @@ async function runClipboardCandidate(
     };
 
     const timer = setTimeout(() => {
-      child.kill('SIGKILL');
+      child.kill("SIGKILL");
       settle(false);
     }, timeoutMs);
 
-    child.on('error', () => {
+    child.on("error", () => {
       clearTimeout(timer);
       settle(false);
     });
 
-    child.on('close', (code) => {
+    child.on("close", (code) => {
       clearTimeout(timer);
       settle(code === 0);
     });
 
-    child.stdin?.on('error', () => {
+    child.stdin?.on("error", () => {
       // ignore — close handler reports the outcome
     });
     child.stdin?.end(text);

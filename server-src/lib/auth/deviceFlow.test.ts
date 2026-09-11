@@ -36,24 +36,27 @@
  *   ✓ pollDeviceToken: unknown error code throws with status and code, not description
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { initiateDeviceCode, pollDeviceToken } from './deviceFlow';
-import { readTokens } from './store';
-import { discoverEndpoints, __resetInFlightForTests as __resetDiscoveryInFlightForTests } from './discovery';
-import { __resetCloudBaseUrlForTests } from '../cloudBaseUrl';
-import { PLUGIN_AUTHKIT_CLIENT_ID, AUTHKIT_SCOPES } from './constants';
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { initiateDeviceCode, pollDeviceToken } from "./deviceFlow";
+import { readTokens } from "./store";
+import {
+  discoverEndpoints,
+  __resetInFlightForTests as __resetDiscoveryInFlightForTests,
+} from "./discovery";
+import { __resetCloudBaseUrlForTests } from "../cloudBaseUrl";
+import { PLUGIN_AUTHKIT_CLIENT_ID, AUTHKIT_SCOPES } from "./constants";
 
 // ---------------------------------------------------------------------------
 // Fixture constants
 // ---------------------------------------------------------------------------
 
-const TEST_BASE = 'https://mcp.lore.tanagram.ai';
-const TEST_AS = 'https://signin.lore.tanagram.ai';
-const TEST_RESOURCE = 'https://api.lore.tanagram.ai';
-const TEST_ISSUER = 'https://signin.lore.tanagram.ai';
+const TEST_BASE = "https://mcp.lore.tanagram.ai";
+const TEST_AS = "https://signin.lore.tanagram.ai";
+const TEST_RESOURCE = "https://api.lore.tanagram.ai";
+const TEST_ISSUER = "https://signin.lore.tanagram.ai";
 const TEST_TOKEN_ENDPOINT = `${TEST_ISSUER}/oauth2/token`;
 const TEST_DEVICE_ENDPOINT = `${TEST_ISSUER}/oauth2/device_authorization`;
 
@@ -62,7 +65,7 @@ const TEST_DEVICE_ENDPOINT = `${TEST_ISSUER}/oauth2/device_authorization`;
 // ---------------------------------------------------------------------------
 
 function makeTmpHome(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'lore-deviceflow-test-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "lore-deviceflow-test-"));
 }
 
 function rmrf(dir: string): void {
@@ -72,7 +75,7 @@ function rmrf(dir: string): void {
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json' },
+    headers: { "content-type": "application/json" },
   });
 }
 
@@ -92,10 +95,10 @@ function makeAsBody() {
 
 function makeDeviceCodeBody(overrides: Record<string, unknown> = {}) {
   return {
-    device_code: 'dev-CODE-ABCDEF',
-    user_code: 'WXYZ-1234',
-    verification_uri: 'https://auth.example.com/device',
-    verification_uri_complete: 'https://auth.example.com/device?user_code=WXYZ-1234',
+    device_code: "dev-CODE-ABCDEF",
+    user_code: "WXYZ-1234",
+    verification_uri: "https://auth.example.com/device",
+    verification_uri_complete: "https://auth.example.com/device?user_code=WXYZ-1234",
     expires_in: 600,
     interval: 5,
     ...overrides,
@@ -104,10 +107,10 @@ function makeDeviceCodeBody(overrides: Record<string, unknown> = {}) {
 
 function makeTokenBody(overrides: Record<string, unknown> = {}) {
   return {
-    access_token: 'access-NEW',
-    refresh_token: 'refresh-NEW',
+    access_token: "access-NEW",
+    refresh_token: "refresh-NEW",
     expires_in: 3600,
-    token_type: 'Bearer',
+    token_type: "Bearer",
     scope: AUTHKIT_SCOPES,
     ...overrides,
   };
@@ -127,12 +130,12 @@ function makeRoutingFetch(opts: {
 }): typeof fetch {
   return (async (url: string | URL | Request, init?: RequestInit) => {
     const urlStr =
-      typeof url === 'string' ? url : url instanceof URL ? url.toString() : (url as Request).url;
+      typeof url === "string" ? url : url instanceof URL ? url.toString() : (url as Request).url;
     opts.onCall?.(urlStr, init);
-    if (urlStr.includes('oauth-protected-resource')) {
+    if (urlStr.includes("oauth-protected-resource")) {
       return opts.prmResponse?.() ?? jsonResponse(makePrmBody());
     }
-    if (urlStr.includes('oauth-authorization-server')) {
+    if (urlStr.includes("oauth-authorization-server")) {
       return opts.asResponse?.() ?? jsonResponse(makeAsBody());
     }
     if (urlStr === TEST_DEVICE_ENDPOINT) {
@@ -160,15 +163,15 @@ function makeSequencedTokenFetch(seq: Array<Response | (() => Response)>): {
   const calls: Array<{ url: string; body: string | undefined }> = [];
   const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
     const urlStr =
-      typeof url === 'string' ? url : url instanceof URL ? url.toString() : (url as Request).url;
+      typeof url === "string" ? url : url instanceof URL ? url.toString() : (url as Request).url;
     calls.push({ url: urlStr, body: init?.body as string | undefined });
-    if (urlStr.includes('oauth-protected-resource')) return jsonResponse(makePrmBody());
-    if (urlStr.includes('oauth-authorization-server')) return jsonResponse(makeAsBody());
+    if (urlStr.includes("oauth-protected-resource")) return jsonResponse(makePrmBody());
+    if (urlStr.includes("oauth-authorization-server")) return jsonResponse(makeAsBody());
     if (urlStr === TEST_DEVICE_ENDPOINT) return jsonResponse(makeDeviceCodeBody());
     if (urlStr === TEST_TOKEN_ENDPOINT) {
       const next = queue.shift();
-      if (next === undefined) throw new Error('token endpoint queue is empty');
-      return typeof next === 'function' ? next() : next;
+      if (next === undefined) throw new Error("token endpoint queue is empty");
+      return typeof next === "function" ? next() : next;
     }
     throw new Error(`Unexpected URL in test fetchImpl: ${urlStr}`);
   }) as unknown as typeof fetch;
@@ -225,23 +228,23 @@ afterEach(() => {
 // initiateDeviceCode
 // ---------------------------------------------------------------------------
 
-describe('initiateDeviceCode', () => {
-  test('returns the parsed device-code response', async () => {
+describe("initiateDeviceCode", () => {
+  test("returns the parsed device-code response", async () => {
     const fetchImpl = makeRoutingFetch({
       deviceResponse: () => jsonResponse(makeDeviceCodeBody()),
     });
     const result = await initiateDeviceCode({ fetchImpl, home });
-    expect(result.device_code).toBe('dev-CODE-ABCDEF');
-    expect(result.user_code).toBe('WXYZ-1234');
-    expect(result.verification_uri).toBe('https://auth.example.com/device');
+    expect(result.device_code).toBe("dev-CODE-ABCDEF");
+    expect(result.user_code).toBe("WXYZ-1234");
+    expect(result.verification_uri).toBe("https://auth.example.com/device");
     expect(result.verification_uri_complete).toBe(
-      'https://auth.example.com/device?user_code=WXYZ-1234',
+      "https://auth.example.com/device?user_code=WXYZ-1234",
     );
     expect(result.expires_in).toBe(600);
     expect(result.interval).toBe(5);
   });
 
-  test('POST body includes client_id = registered WorkOS public plugin client', async () => {
+  test("POST body includes client_id = registered WorkOS public plugin client", async () => {
     let capturedBody: string | undefined;
     const fetchImpl = makeRoutingFetch({
       deviceResponse: () => jsonResponse(makeDeviceCodeBody()),
@@ -251,17 +254,17 @@ describe('initiateDeviceCode', () => {
     });
     await initiateDeviceCode({ fetchImpl, home });
     const params = new URLSearchParams(capturedBody);
-    expect(params.get('client_id')).toBe('client_01KRSDB9SR20N7MB0D9MPS05Q6');
-    expect(params.get('client_id')).toBe(PLUGIN_AUTHKIT_CLIENT_ID);
+    expect(params.get("client_id")).toBe("client_01KRSDB9SR20N7MB0D9MPS05Q6");
+    expect(params.get("client_id")).toBe(PLUGIN_AUTHKIT_CLIENT_ID);
     // WorkOS device authorization is configured for this public client id;
     // it is intentionally public and safe to commit per RFC 8252 §8.4.
     // See constants.ts for why we're not using the CIMD URL form here.
-    expect(params.get('client_id')).toMatch(/^client_/);
+    expect(params.get("client_id")).toMatch(/^client_/);
     // Must NOT be the legacy pre-AuthKit client id.
-    expect(params.get('client_id')).not.toBe('lore-cowork-plugin');
+    expect(params.get("client_id")).not.toBe("lore-cowork-plugin");
   });
 
-  test('POST body includes scope = AUTHKIT_SCOPES (openid email profile offline_access)', async () => {
+  test("POST body includes scope = AUTHKIT_SCOPES (openid email profile offline_access)", async () => {
     let capturedBody: string | undefined;
     const fetchImpl = makeRoutingFetch({
       deviceResponse: () => jsonResponse(makeDeviceCodeBody()),
@@ -271,13 +274,13 @@ describe('initiateDeviceCode', () => {
     });
     await initiateDeviceCode({ fetchImpl, home });
     const params = new URLSearchParams(capturedBody);
-    expect(params.get('scope')).toBe(AUTHKIT_SCOPES);
-    expect(params.get('scope')).toBe('openid email profile offline_access');
+    expect(params.get("scope")).toBe(AUTHKIT_SCOPES);
+    expect(params.get("scope")).toBe("openid email profile offline_access");
     // Must NOT be the legacy scope.
-    expect(params.get('scope')).not.toBe('mcp.read mcp.write');
+    expect(params.get("scope")).not.toBe("mcp.read mcp.write");
   });
 
-  test('POST body includes resource from discovery (PRM resource field)', async () => {
+  test("POST body includes resource from discovery (PRM resource field)", async () => {
     let capturedBody: string | undefined;
     const fetchImpl = makeRoutingFetch({
       deviceResponse: () => jsonResponse(makeDeviceCodeBody()),
@@ -289,11 +292,11 @@ describe('initiateDeviceCode', () => {
     const params = new URLSearchParams(capturedBody);
     // WorkOS AuthKit uses RFC 8707's `resource` parameter. The value comes
     // from PRM `resource` field = TEST_RESOURCE.
-    expect(params.get('resource')).toBe(TEST_RESOURCE);
-    expect(params.has('audience')).toBe(false);
+    expect(params.get("resource")).toBe(TEST_RESOURCE);
+    expect(params.has("audience")).toBe(false);
   });
 
-  test('POSTs to the discovered device authorization endpoint, not a hardcoded URL', async () => {
+  test("POSTs to the discovered device authorization endpoint, not a hardcoded URL", async () => {
     const calledUrls: string[] = [];
     const fetchImpl = makeRoutingFetch({
       deviceResponse: () => jsonResponse(makeDeviceCodeBody()),
@@ -303,7 +306,7 @@ describe('initiateDeviceCode', () => {
     expect(calledUrls).toContain(TEST_DEVICE_ENDPOINT);
   });
 
-  test('POST uses content-type: application/x-www-form-urlencoded', async () => {
+  test("POST uses content-type: application/x-www-form-urlencoded", async () => {
     let capturedInit: RequestInit | undefined;
     const fetchImpl = makeRoutingFetch({
       deviceResponse: () => jsonResponse(makeDeviceCodeBody()),
@@ -312,54 +315,53 @@ describe('initiateDeviceCode', () => {
       },
     });
     await initiateDeviceCode({ fetchImpl, home });
-    expect(capturedInit?.method).toBe('POST');
+    expect(capturedInit?.method).toBe("POST");
     const headers = new Headers(capturedInit?.headers as HeadersInit);
-    expect(headers.get('content-type')).toBe('application/x-www-form-urlencoded');
+    expect(headers.get("content-type")).toBe("application/x-www-form-urlencoded");
   });
 
-  test('throws on HTTP error from device authorization endpoint', async () => {
+  test("throws on HTTP error from device authorization endpoint", async () => {
     const fetchImpl = makeRoutingFetch({
-      deviceResponse: () => new Response('server error', { status: 500 }),
+      deviceResponse: () => new Response("server error", { status: 500 }),
     });
     await expect(initiateDeviceCode({ fetchImpl, home })).rejects.toThrow(
-      'device-code request failed',
+      "device-code request failed",
     );
   });
 
-  test('throws on schema-invalid response (missing required field)', async () => {
+  test("throws on schema-invalid response (missing required field)", async () => {
     // Missing user_code — should fail Zod validation.
     const fetchImpl = makeRoutingFetch({
       deviceResponse: () =>
         jsonResponse({
-          device_code: 'dev-CODE',
+          device_code: "dev-CODE",
           // user_code: intentionally missing
-          verification_uri: 'https://auth.example.com/device',
-          verification_uri_complete: 'https://auth.example.com/device?user_code=WXYZ',
+          verification_uri: "https://auth.example.com/device",
+          verification_uri_complete: "https://auth.example.com/device?user_code=WXYZ",
           expires_in: 600,
           interval: 5,
         }),
     });
     await expect(initiateDeviceCode({ fetchImpl, home })).rejects.toThrow(
-      'device-code response failed schema validation',
+      "device-code response failed schema validation",
     );
   });
 
-  test('throws on non-positive-integer expires_in', async () => {
+  test("throws on non-positive-integer expires_in", async () => {
     const fetchImpl = makeRoutingFetch({
-      deviceResponse: () =>
-        jsonResponse(makeDeviceCodeBody({ expires_in: 600.5 })),
+      deviceResponse: () => jsonResponse(makeDeviceCodeBody({ expires_in: 600.5 })),
     });
     await expect(initiateDeviceCode({ fetchImpl, home })).rejects.toThrow(
-      'device-code response failed schema validation',
+      "device-code response failed schema validation",
     );
   });
 
-  test('throws on non-JSON body (HTTP 200)', async () => {
+  test("throws on non-JSON body (HTTP 200)", async () => {
     const fetchImpl = makeRoutingFetch({
-      deviceResponse: () => new Response('not json', { status: 200 }),
+      deviceResponse: () => new Response("not json", { status: 200 }),
     });
     await expect(initiateDeviceCode({ fetchImpl, home })).rejects.toThrow(
-      'device-code response was not valid JSON',
+      "device-code response was not valid JSON",
     );
   });
 });
@@ -368,16 +370,16 @@ describe('initiateDeviceCode', () => {
 // pollDeviceToken
 // ---------------------------------------------------------------------------
 
-describe('pollDeviceToken', () => {
-  test('happy path: authorization_pending then success → writes tokens and returns { ok: true }', async () => {
+describe("pollDeviceToken", () => {
+  test("happy path: authorization_pending then success → writes tokens and returns { ok: true }", async () => {
     const { fetchImpl, calls } = makeSequencedTokenFetch([
-      jsonResponse({ error: 'authorization_pending' }, 400),
+      jsonResponse({ error: "authorization_pending" }, 400),
       jsonResponse(makeTokenBody({ expires_in: 3600 })),
     ]);
     const { sleep, awaited } = makeSleep();
 
     const result = await pollDeviceToken({
-      device_code: 'dev-CODE-ABCDEF',
+      device_code: "dev-CODE-ABCDEF",
       expires_in_seconds: 600,
       interval_seconds: 5,
       fetchImpl,
@@ -392,8 +394,8 @@ describe('pollDeviceToken', () => {
     // Tokens should be persisted.
     const stored = await readTokens(home);
     expect(stored).not.toBeNull();
-    expect(stored?.access_token).toBe('access-NEW');
-    expect(stored?.refresh_token).toBe('refresh-NEW');
+    expect(stored?.access_token).toBe("access-NEW");
+    expect(stored?.refresh_token).toBe("refresh-NEW");
     // expires_at = now() + 3600 * 1000.
     expect(stored?.expires_at).toBe(FIXED_NOW + 3_600_000);
     // scope must be AUTHKIT_SCOPES, not the server-echoed scope.
@@ -403,13 +405,13 @@ describe('pollDeviceToken', () => {
     expect(tokenCalls.length).toBe(2);
   });
 
-  test('success: { ok: true } return value contains no credentials', async () => {
+  test("success: { ok: true } return value contains no credentials", async () => {
     const fetchImpl = makeRoutingFetch({
       tokenResponse: () => jsonResponse(makeTokenBody()),
     });
     const { sleep } = makeSleep();
     const result = await pollDeviceToken({
-      device_code: 'dev-CODE-ABCDEF',
+      device_code: "dev-CODE-ABCDEF",
       expires_in_seconds: 600,
       interval_seconds: 5,
       fetchImpl,
@@ -418,12 +420,12 @@ describe('pollDeviceToken', () => {
       sleep,
     });
     const serialized = JSON.stringify(result);
-    expect(serialized).not.toContain('dev-CODE-ABCDEF');
-    expect(serialized).not.toContain('access-NEW');
-    expect(serialized).not.toContain('refresh-NEW');
+    expect(serialized).not.toContain("dev-CODE-ABCDEF");
+    expect(serialized).not.toContain("access-NEW");
+    expect(serialized).not.toContain("refresh-NEW");
   });
 
-  test('poll POST body: grant_type, device_code, client_id are correct', async () => {
+  test("poll POST body: grant_type, device_code, client_id are correct", async () => {
     let capturedBody: string | undefined;
     const fetchImpl = makeRoutingFetch({
       tokenResponse: () => {
@@ -435,7 +437,7 @@ describe('pollDeviceToken', () => {
     });
     const { sleep } = makeSleep();
     await pollDeviceToken({
-      device_code: 'dev-CODE-ABCDEF',
+      device_code: "dev-CODE-ABCDEF",
       expires_in_seconds: 600,
       interval_seconds: 5,
       fetchImpl,
@@ -444,19 +446,18 @@ describe('pollDeviceToken', () => {
       sleep,
     });
     const params = new URLSearchParams(capturedBody);
-    expect(params.get('grant_type')).toBe('urn:ietf:params:oauth:grant-type:device_code');
-    expect(params.get('device_code')).toBe('dev-CODE-ABCDEF');
-    expect(params.get('client_id')).toBe(PLUGIN_AUTHKIT_CLIENT_ID);
+    expect(params.get("grant_type")).toBe("urn:ietf:params:oauth:grant-type:device_code");
+    expect(params.get("device_code")).toBe("dev-CODE-ABCDEF");
+    expect(params.get("client_id")).toBe(PLUGIN_AUTHKIT_CLIENT_ID);
   });
 
-  test('token scope stored as AUTHKIT_SCOPES even if server echoes different scope', async () => {
+  test("token scope stored as AUTHKIT_SCOPES even if server echoes different scope", async () => {
     const fetchImpl = makeRoutingFetch({
-      tokenResponse: () =>
-        jsonResponse(makeTokenBody({ scope: 'some-other-scope' })),
+      tokenResponse: () => jsonResponse(makeTokenBody({ scope: "some-other-scope" })),
     });
     const { sleep } = makeSleep();
     await pollDeviceToken({
-      device_code: 'dev-CODE-ABCDEF',
+      device_code: "dev-CODE-ABCDEF",
       expires_in_seconds: 600,
       interval_seconds: 5,
       fetchImpl,
@@ -467,10 +468,10 @@ describe('pollDeviceToken', () => {
     const stored = await readTokens(home);
     // Must be AUTHKIT_SCOPES regardless of what the server returned.
     expect(stored?.scope).toBe(AUTHKIT_SCOPES);
-    expect(stored?.scope).not.toBe('some-other-scope');
+    expect(stored?.scope).not.toBe("some-other-scope");
   });
 
-  test('token response may omit scope; stored scope is still AUTHKIT_SCOPES', async () => {
+  test("token response may omit scope; stored scope is still AUTHKIT_SCOPES", async () => {
     const { scope: _scope, ...tokenBodyWithoutScope } = makeTokenBody();
     const fetchImpl = makeRoutingFetch({
       tokenResponse: () => jsonResponse(tokenBodyWithoutScope),
@@ -478,7 +479,7 @@ describe('pollDeviceToken', () => {
     const { sleep } = makeSleep();
 
     await pollDeviceToken({
-      device_code: 'dev-CODE-ABCDEF',
+      device_code: "dev-CODE-ABCDEF",
       expires_in_seconds: 600,
       interval_seconds: 5,
       fetchImpl,
@@ -491,7 +492,7 @@ describe('pollDeviceToken', () => {
     expect(stored?.scope).toBe(AUTHKIT_SCOPES);
   });
 
-  test('expires_at is computed as now() + expires_in * 1000 (client-anchored, not server clock)', async () => {
+  test("expires_at is computed as now() + expires_in * 1000 (client-anchored, not server clock)", async () => {
     // Use a fixed now so we can compute the expected expires_at deterministically.
     const now = () => 2_000_000_000_000;
     const fetchImpl = makeRoutingFetch({
@@ -499,7 +500,7 @@ describe('pollDeviceToken', () => {
     });
     const { sleep } = makeSleep();
     await pollDeviceToken({
-      device_code: 'dev-CODE-ABCDEF',
+      device_code: "dev-CODE-ABCDEF",
       expires_in_seconds: 600,
       interval_seconds: 5,
       fetchImpl,
@@ -511,16 +512,16 @@ describe('pollDeviceToken', () => {
     expect(stored?.expires_at).toBe(2_000_000_000_000 + 1800 * 1000);
   });
 
-  test('authorization_pending: retries at the specified interval and eventually succeeds', async () => {
+  test("authorization_pending: retries at the specified interval and eventually succeeds", async () => {
     const { fetchImpl } = makeSequencedTokenFetch([
-      jsonResponse({ error: 'authorization_pending' }, 400),
-      jsonResponse({ error: 'authorization_pending' }, 400),
+      jsonResponse({ error: "authorization_pending" }, 400),
+      jsonResponse({ error: "authorization_pending" }, 400),
       jsonResponse(makeTokenBody()),
     ]);
     const { sleep, awaited } = makeSleep();
 
     const result = await pollDeviceToken({
-      device_code: 'dev-CODE-ABCDEF',
+      device_code: "dev-CODE-ABCDEF",
       expires_in_seconds: 600,
       interval_seconds: 7,
       fetchImpl,
@@ -534,17 +535,17 @@ describe('pollDeviceToken', () => {
     expect(awaited).toEqual([7000, 7000, 7000]);
   });
 
-  test('slow_down: adds 5s to the interval permanently on each slow_down response', async () => {
+  test("slow_down: adds 5s to the interval permanently on each slow_down response", async () => {
     const { fetchImpl } = makeSequencedTokenFetch([
-      jsonResponse({ error: 'authorization_pending' }, 400),
-      jsonResponse({ error: 'slow_down' }, 400),
-      jsonResponse({ error: 'slow_down' }, 400),
+      jsonResponse({ error: "authorization_pending" }, 400),
+      jsonResponse({ error: "slow_down" }, 400),
+      jsonResponse({ error: "slow_down" }, 400),
       jsonResponse(makeTokenBody()),
     ]);
     const { sleep, awaited } = makeSleep();
 
     const result = await pollDeviceToken({
-      device_code: 'dev-CODE-ABCDEF',
+      device_code: "dev-CODE-ABCDEF",
       expires_in_seconds: 600,
       interval_seconds: 5,
       fetchImpl,
@@ -562,17 +563,17 @@ describe('pollDeviceToken', () => {
     expect(awaited).toEqual([5000, 5000, 10000, 15000]);
   });
 
-  test('slow_down increase is permanent: subsequent pending iterations also use the widened interval', async () => {
+  test("slow_down increase is permanent: subsequent pending iterations also use the widened interval", async () => {
     const { fetchImpl } = makeSequencedTokenFetch([
-      jsonResponse({ error: 'slow_down' }, 400),
-      jsonResponse({ error: 'authorization_pending' }, 400),
-      jsonResponse({ error: 'authorization_pending' }, 400),
+      jsonResponse({ error: "slow_down" }, 400),
+      jsonResponse({ error: "authorization_pending" }, 400),
+      jsonResponse({ error: "authorization_pending" }, 400),
       jsonResponse(makeTokenBody()),
     ]);
     const { sleep, awaited } = makeSleep();
 
     await pollDeviceToken({
-      device_code: 'dev-CODE-ABCDEF',
+      device_code: "dev-CODE-ABCDEF",
       expires_in_seconds: 600,
       interval_seconds: 5,
       fetchImpl,
@@ -588,12 +589,12 @@ describe('pollDeviceToken', () => {
 
   test('server expired_token: returns { ok: false, reason: "expired_token" }, no tokens written', async () => {
     const fetchImpl = makeRoutingFetch({
-      tokenResponse: () => jsonResponse({ error: 'expired_token' }, 400),
+      tokenResponse: () => jsonResponse({ error: "expired_token" }, 400),
     });
     const { sleep } = makeSleep();
 
     const result = await pollDeviceToken({
-      device_code: 'dev-CODE-ABCDEF',
+      device_code: "dev-CODE-ABCDEF",
       expires_in_seconds: 600,
       interval_seconds: 5,
       fetchImpl,
@@ -604,13 +605,13 @@ describe('pollDeviceToken', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.reason).toBe('expired_token');
+      expect(result.reason).toBe("expired_token");
       expect(result.message).toBeTruthy();
     }
     expect(await readTokens(home)).toBeNull();
   });
 
-  test('hard cap: stops when elapsed >= expires_in_seconds * 1000, returns expired_token', async () => {
+  test("hard cap: stops when elapsed >= expires_in_seconds * 1000, returns expired_token", async () => {
     // Clock advances 300s per call. With expires_in=600, after 3 iterations
     // elapsed = 600000 >= 600 * 1000 → hard cap triggers.
     let callCount = 0;
@@ -627,15 +628,15 @@ describe('pollDeviceToken', () => {
     };
     const { fetchImpl } = makeSequencedTokenFetch([
       // Provide enough pending responses so the hard cap, not the server, terminates the loop.
-      jsonResponse({ error: 'authorization_pending' }, 400),
-      jsonResponse({ error: 'authorization_pending' }, 400),
-      jsonResponse({ error: 'authorization_pending' }, 400),
-      jsonResponse({ error: 'authorization_pending' }, 400),
+      jsonResponse({ error: "authorization_pending" }, 400),
+      jsonResponse({ error: "authorization_pending" }, 400),
+      jsonResponse({ error: "authorization_pending" }, 400),
+      jsonResponse({ error: "authorization_pending" }, 400),
     ]);
     const { sleep } = makeSleep();
 
     const result = await pollDeviceToken({
-      device_code: 'dev-CODE-ABCDEF',
+      device_code: "dev-CODE-ABCDEF",
       expires_in_seconds: 600,
       interval_seconds: 1,
       fetchImpl,
@@ -646,12 +647,12 @@ describe('pollDeviceToken', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.reason).toBe('expired_token');
+      expect(result.reason).toBe("expired_token");
     }
     expect(await readTokens(home)).toBeNull();
   });
 
-  test('hard cap at boundary: elapsed == expires_in_seconds * 1000 is treated as expired', async () => {
+  test("hard cap at boundary: elapsed == expires_in_seconds * 1000 is treated as expired", async () => {
     // Verify the >= semantics: equality triggers expiry.
     let callCount = 0;
     const FIXED_START = 1_700_000_000_000;
@@ -663,13 +664,13 @@ describe('pollDeviceToken', () => {
       return t;
     };
     const { fetchImpl } = makeSequencedTokenFetch([
-      jsonResponse({ error: 'authorization_pending' }, 400),
-      jsonResponse({ error: 'authorization_pending' }, 400),
+      jsonResponse({ error: "authorization_pending" }, 400),
+      jsonResponse({ error: "authorization_pending" }, 400),
     ]);
     const { sleep } = makeSleep();
 
     const result = await pollDeviceToken({
-      device_code: 'dev-CODE-ABCDEF',
+      device_code: "dev-CODE-ABCDEF",
       expires_in_seconds: 10,
       interval_seconds: 1,
       fetchImpl,
@@ -680,17 +681,17 @@ describe('pollDeviceToken', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.reason).toBe('expired_token');
+      expect(result.reason).toBe("expired_token");
     }
   });
 
-  test('unknown error code: throws with status and code, not error_description', async () => {
+  test("unknown error code: throws with status and code, not error_description", async () => {
     const fetchImpl = makeRoutingFetch({
       tokenResponse: () =>
         jsonResponse(
           {
-            error: 'invalid_client',
-            error_description: 'this should not appear in the error message',
+            error: "invalid_client",
+            error_description: "this should not appear in the error message",
           },
           400,
         ),
@@ -700,7 +701,7 @@ describe('pollDeviceToken', () => {
     let caught: Error | null = null;
     try {
       await pollDeviceToken({
-        device_code: 'dev-CODE-ABCDEF',
+        device_code: "dev-CODE-ABCDEF",
         expires_in_seconds: 600,
         interval_seconds: 5,
         fetchImpl,
@@ -713,23 +714,23 @@ describe('pollDeviceToken', () => {
     }
 
     expect(caught).not.toBeNull();
-    expect(caught!.message).toContain('invalid_client');
+    expect(caught!.message).toContain("invalid_client");
     // Must NOT include error_description content.
-    expect(caught!.message).not.toContain('this should not appear');
-    expect(caught!.message).not.toContain('error_description');
+    expect(caught!.message).not.toContain("this should not appear");
+    expect(caught!.message).not.toContain("error_description");
     expect(await readTokens(home)).toBeNull();
   });
 
-  test('credential leak: device_code does not appear in thrown error when error_description echoes it', async () => {
+  test("credential leak: device_code does not appear in thrown error when error_description echoes it", async () => {
     // Some servers echo the device_code in error_description.
     // Our code must never surface error_description, so the device_code must
     // not appear in any thrown Error message.
-    const SECRET_DEVICE_CODE = 'dev-SUPER-SECRET-BEARER-12345';
+    const SECRET_DEVICE_CODE = "dev-SUPER-SECRET-BEARER-12345";
     const fetchImpl = makeRoutingFetch({
       tokenResponse: () =>
         jsonResponse(
           {
-            error: 'invalid_client',
+            error: "invalid_client",
             error_description: `device_code ${SECRET_DEVICE_CODE} is invalid`,
           },
           400,
@@ -755,19 +756,19 @@ describe('pollDeviceToken', () => {
     expect(caught).not.toBeNull();
     // The device_code value must NEVER appear in the thrown error.
     expect(caught!.message).not.toContain(SECRET_DEVICE_CODE);
-    expect(caught!.message).toContain('invalid_client');
+    expect(caught!.message).toContain("invalid_client");
   });
 
-  test('token validation: throws on schema-invalid 200 response (missing field)', async () => {
+  test("token validation: throws on schema-invalid 200 response (missing field)", async () => {
     // access_token present but missing refresh_token, expires_in, token_type.
     const fetchImpl = makeRoutingFetch({
-      tokenResponse: () => jsonResponse({ access_token: 'access-ONLY' }),
+      tokenResponse: () => jsonResponse({ access_token: "access-ONLY" }),
     });
     const { sleep } = makeSleep();
 
     await expect(
       pollDeviceToken({
-        device_code: 'dev-CODE-ABCDEF',
+        device_code: "dev-CODE-ABCDEF",
         expires_in_seconds: 600,
         interval_seconds: 5,
         fetchImpl,
@@ -775,12 +776,12 @@ describe('pollDeviceToken', () => {
         now: fixedNow,
         sleep,
       }),
-    ).rejects.toThrow('device-flow token response failed schema validation');
+    ).rejects.toThrow("device-flow token response failed schema validation");
     // Tokens must NOT be written on schema failure.
     expect(await readTokens(home)).toBeNull();
   });
 
-  test('token validation: throws on non-integer expires_in in token response', async () => {
+  test("token validation: throws on non-integer expires_in in token response", async () => {
     const fetchImpl = makeRoutingFetch({
       tokenResponse: () => jsonResponse(makeTokenBody({ expires_in: 3600.5 })),
     });
@@ -788,7 +789,7 @@ describe('pollDeviceToken', () => {
 
     await expect(
       pollDeviceToken({
-        device_code: 'dev-CODE-ABCDEF',
+        device_code: "dev-CODE-ABCDEF",
         expires_in_seconds: 600,
         interval_seconds: 5,
         fetchImpl,
@@ -796,19 +797,19 @@ describe('pollDeviceToken', () => {
         now: fixedNow,
         sleep,
       }),
-    ).rejects.toThrow('device-flow token response failed schema validation');
+    ).rejects.toThrow("device-flow token response failed schema validation");
     expect(await readTokens(home)).toBeNull();
   });
 
-  test('token validation: throws on non-JSON 200 body, no tokens written', async () => {
+  test("token validation: throws on non-JSON 200 body, no tokens written", async () => {
     const fetchImpl = makeRoutingFetch({
-      tokenResponse: () => new Response('not json', { status: 200 }),
+      tokenResponse: () => new Response("not json", { status: 200 }),
     });
     const { sleep } = makeSleep();
 
     await expect(
       pollDeviceToken({
-        device_code: 'dev-CODE-ABCDEF',
+        device_code: "dev-CODE-ABCDEF",
         expires_in_seconds: 600,
         interval_seconds: 5,
         fetchImpl,
@@ -816,20 +817,20 @@ describe('pollDeviceToken', () => {
         now: fixedNow,
         sleep,
       }),
-    ).rejects.toThrow('device-flow token response was not valid JSON');
+    ).rejects.toThrow("device-flow token response was not valid JSON");
     expect(await readTokens(home)).toBeNull();
   });
 
   test('non-JSON error body: throws with fallback code "(no body)", not a body excerpt', async () => {
     const fetchImpl = makeRoutingFetch({
-      tokenResponse: () => new Response('internal server error text', { status: 500 }),
+      tokenResponse: () => new Response("internal server error text", { status: 500 }),
     });
     const { sleep } = makeSleep();
 
     let caught: Error | null = null;
     try {
       await pollDeviceToken({
-        device_code: 'dev-CODE-ABCDEF',
+        device_code: "dev-CODE-ABCDEF",
         expires_in_seconds: 600,
         interval_seconds: 5,
         fetchImpl,
@@ -841,12 +842,12 @@ describe('pollDeviceToken', () => {
       caught = e as Error;
     }
     expect(caught).not.toBeNull();
-    expect(caught!.message).toContain('(no body)');
+    expect(caught!.message).toContain("(no body)");
     // Must not echo the raw text body.
-    expect(caught!.message).not.toContain('internal server error text');
+    expect(caught!.message).not.toContain("internal server error text");
   });
 
-  test('polls the discovered token endpoint, not a hardcoded URL', async () => {
+  test("polls the discovered token endpoint, not a hardcoded URL", async () => {
     const calledUrls: string[] = [];
     const fetchImpl = makeRoutingFetch({
       tokenResponse: () => jsonResponse(makeTokenBody()),
@@ -854,7 +855,7 @@ describe('pollDeviceToken', () => {
     });
     const { sleep } = makeSleep();
     await pollDeviceToken({
-      device_code: 'dev-CODE-ABCDEF',
+      device_code: "dev-CODE-ABCDEF",
       expires_in_seconds: 600,
       interval_seconds: 5,
       fetchImpl,
@@ -865,7 +866,7 @@ describe('pollDeviceToken', () => {
     expect(calledUrls).toContain(TEST_TOKEN_ENDPOINT);
     // Must not hit any legacy hardcoded path like /oauth/token.
     const legacyHits = calledUrls.filter(
-      (u) => u.endsWith('/oauth/token') && !u.includes('oauth2'),
+      (u) => u.endsWith("/oauth/token") && !u.includes("oauth2"),
     );
     expect(legacyHits).toHaveLength(0);
   });

@@ -10,7 +10,7 @@
  *     developer's real `~/.lore`, so a future regression fails loudly instead
  *     of silently overwriting real credentials.
  */
-import { armRealLoreWriteGuard } from './testSandbox';
+import { armRealLoreWriteGuard } from "./testSandbox";
 
-process.env.LORE_PLUGIN_TEST_SANDBOX = '1';
+process.env.LORE_PLUGIN_TEST_SANDBOX = "1";
 armRealLoreWriteGuard();

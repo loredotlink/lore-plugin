@@ -1,8 +1,12 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
-import { toAmpToolResult, type AmpPluginTextContent, type AmpPluginToolDefinition } from './ampToolAdapter.js';
-import { runShareSession } from '../tools/share_session.js';
+import {
+  toAmpToolResult,
+  type AmpPluginTextContent,
+  type AmpPluginToolDefinition,
+} from "./ampToolAdapter.js";
+import { runShareSession } from "../tools/share_session.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -13,7 +17,7 @@ export type ShareAmpThreadArgs = {
   highlight?: string;
 };
 
-export type AmpShareVisibility = 'private' | 'workspace' | 'public';
+export type AmpShareVisibility = "private" | "workspace" | "public";
 
 export type ShareCurrentAmpThreadToolInput = {
   thread_id?: string;
@@ -23,10 +27,7 @@ export type ShareCurrentAmpThreadToolInput = {
 
 export type ShareAmpThreadDeps = {
   runAmpExport: (threadId: string) => Promise<string>;
-  share: (
-    args: Record<string, unknown>,
-    opts: { harness: 'amp' },
-  ) => Promise<unknown>;
+  share: (args: Record<string, unknown>, opts: { harness: "amp" }) => Promise<unknown>;
   ampBaseUrl?: URL;
   env?: NodeJS.ProcessEnv;
 };
@@ -43,7 +44,7 @@ export type AmpShellFunction = (
 ) => Promise<AmpShellResult>;
 
 export async function runAmpThreadExport(threadId: string): Promise<string> {
-  const { stdout } = await execFileAsync('amp', ['threads', 'export', threadId], {
+  const { stdout } = await execFileAsync("amp", ["threads", "export", threadId], {
     maxBuffer: 50 * 1024 * 1024,
   });
   return stdout;
@@ -63,25 +64,25 @@ export async function runAmpThreadExportWithShell(
 
 export async function runShareAmpSession(
   args: Record<string, unknown>,
-  opts: { harness: 'amp' },
+  opts: { harness: "amp" },
 ): Promise<unknown> {
   return runShareSession(args, { harness: opts.harness });
 }
 
 export function createShareCurrentAmpThreadTool(deps: ShareAmpThreadDeps): AmpPluginToolDefinition {
   return {
-    name: 'share_current_amp_thread',
+    name: "share_current_amp_thread",
     description:
-      'Share an Amp thread to Lore. Pass thread_id explicitly when possible; otherwise AMP_CURRENT_THREAD_ID must be set.',
+      "Share an Amp thread to Lore. Pass thread_id explicitly when possible; otherwise AMP_CURRENT_THREAD_ID must be set.",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        thread_id: { type: 'string' },
-        visibility: { type: 'string', enum: ['private', 'workspace', 'public'] },
+        thread_id: { type: "string" },
+        visibility: { type: "string", enum: ["private", "workspace", "public"] },
         highlight: {
-          type: 'string',
+          type: "string",
           description:
-            'Natural-language description of the block or block range to highlight in the returned Lore URL.',
+            "Natural-language description of the block or block range to highlight in the returned Lore URL.",
         },
       },
       additionalProperties: false,
@@ -101,7 +102,7 @@ export function createShareCurrentAmpThreadTool(deps: ShareAmpThreadDeps): AmpPl
       } catch (error) {
         return [
           {
-            type: 'text',
+            type: "text",
             text: `Could not share the Amp thread to Lore. Pass thread_id explicitly, set AMP_CURRENT_THREAD_ID, or run the Lore share command from an active Amp thread. ${
               (error as Error).message
             }`,
@@ -116,10 +117,14 @@ export async function shareAmpThread(
   args: ShareAmpThreadArgs,
   deps: ShareAmpThreadDeps,
 ): Promise<unknown> {
-  const threadId = firstNonEmpty(args.threadId, args.activeThreadId, deps.env?.AMP_CURRENT_THREAD_ID);
+  const threadId = firstNonEmpty(
+    args.threadId,
+    args.activeThreadId,
+    deps.env?.AMP_CURRENT_THREAD_ID,
+  );
   if (!threadId) {
     throw new Error(
-      'No active Amp thread could be resolved. Run this command from an active Amp thread (ctx.thread.id), set AMP_CURRENT_THREAD_ID, or pass thread_id explicitly.',
+      "No active Amp thread could be resolved. Run this command from an active Amp thread (ctx.thread.id), set AMP_CURRENT_THREAD_ID, or pass thread_id explicitly.",
     );
   }
 
@@ -147,34 +152,34 @@ export async function shareAmpThread(
     shareArgs.highlight = highlight;
   }
 
-  return deps.share(shareArgs, { harness: 'amp' });
+  return deps.share(shareArgs, { harness: "amp" });
 }
 
 function optionalString(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
+  return typeof value === "string" ? value : undefined;
 }
 
 function optionalVisibility(value: unknown): AmpShareVisibility | undefined {
-  return value === 'private' || value === 'workspace' || value === 'public' ? value : undefined;
+  return value === "private" || value === "workspace" || value === "public" ? value : undefined;
 }
 
 function firstNonEmpty(...values: Array<string | undefined>): string | undefined {
-  return values.find((value) => typeof value === 'string' && value.trim() !== '')?.trim();
+  return values.find((value) => typeof value === "string" && value.trim() !== "")?.trim();
 }
 
 function resolveToolContextThreadId(ctx: unknown): string | undefined {
-  if (ctx === null || typeof ctx !== 'object') return undefined;
+  if (ctx === null || typeof ctx !== "object") return undefined;
   const thread = (ctx as { thread?: unknown }).thread;
-  if (thread === null || typeof thread !== 'object') return undefined;
+  if (thread === null || typeof thread !== "object") return undefined;
   return optionalString((thread as { id?: unknown }).id);
 }
 
 function extractTitle(exportedJson: string): string | undefined {
   try {
     const parsed = JSON.parse(exportedJson) as { title?: unknown };
-    if (typeof parsed.title !== 'string') return undefined;
+    if (typeof parsed.title !== "string") return undefined;
     const title = parsed.title.trim();
-    return title === '' ? undefined : title;
+    return title === "" ? undefined : title;
   } catch {
     return undefined;
   }

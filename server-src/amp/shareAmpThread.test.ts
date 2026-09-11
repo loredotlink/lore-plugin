@@ -1,96 +1,103 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from "bun:test";
 import {
   createShareCurrentAmpThreadTool,
   runAmpThreadExportWithShell,
   shareAmpThread,
-} from './shareAmpThread';
+} from "./shareAmpThread";
 
 function ampExportJson(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
-    id: 'amp-thread-1',
-    title: 'Amp Thread Title',
+    id: "amp-thread-1",
+    title: "Amp Thread Title",
     messages: [],
     ...overrides,
   });
 }
 
-describe('shareAmpThread', () => {
-  test('runAmpThreadExportWithShell uses the Amp command context shell for thread export', async () => {
+describe("shareAmpThread", () => {
+  test("runAmpThreadExportWithShell uses the Amp command context shell for thread export", async () => {
     const shellCalls: Array<{ strings: string[]; values: unknown[] }> = [];
 
-    const exported = await runAmpThreadExportWithShell('T-amp-thread', async (strings, ...values) => {
-      shellCalls.push({ strings: [...strings], values });
-      return { exitCode: 0, stdout: ampExportJson(), stderr: '' };
-    });
+    const exported = await runAmpThreadExportWithShell(
+      "T-amp-thread",
+      async (strings, ...values) => {
+        shellCalls.push({ strings: [...strings], values });
+        return { exitCode: 0, stdout: ampExportJson(), stderr: "" };
+      },
+    );
 
     expect(exported).toBe(ampExportJson());
     expect(shellCalls).toEqual([
       {
-        strings: ['amp threads export ', ''],
-        values: ['T-amp-thread'],
+        strings: ["amp threads export ", ""],
+        values: ["T-amp-thread"],
       },
     ]);
   });
 
-  test('explicit threadId wins over AMP_CURRENT_THREAD_ID and forwards raw export as amp transcript', async () => {
+  test("explicit threadId wins over AMP_CURRENT_THREAD_ID and forwards raw export as amp transcript", async () => {
     const exportJson = ampExportJson();
     const exportedThreadIds: string[] = [];
     const shareCalls: Array<{
       args: Record<string, unknown>;
-      opts: { harness: 'amp' };
+      opts: { harness: "amp" };
     }> = [];
 
     const result = await shareAmpThread(
-      { threadId: 'explicit-thread', visibility: 'workspace', highlight: ' where the parser changed ' },
       {
-        env: { AMP_CURRENT_THREAD_ID: 'env-thread' },
-        ampBaseUrl: new URL('https://ampcode.com/threads/'),
+        threadId: "explicit-thread",
+        visibility: "workspace",
+        highlight: " where the parser changed ",
+      },
+      {
+        env: { AMP_CURRENT_THREAD_ID: "env-thread" },
+        ampBaseUrl: new URL("https://ampcode.com/threads/"),
         runAmpExport: async (threadId) => {
           exportedThreadIds.push(threadId);
           return exportJson;
         },
         share: async (args, opts) => {
           shareCalls.push({ args, opts });
-          return { thread_id: 'lore-1', thread_url: 'https://lore.test/lore-1' };
+          return { thread_id: "lore-1", thread_url: "https://lore.test/lore-1" };
         },
       },
     );
 
     expect(result).toEqual({
-      thread_id: 'lore-1',
-      thread_url: 'https://lore.test/lore-1',
+      thread_id: "lore-1",
+      thread_url: "https://lore.test/lore-1",
     });
-    expect(exportedThreadIds).toEqual(['explicit-thread']);
+    expect(exportedThreadIds).toEqual(["explicit-thread"]);
     expect(shareCalls).toHaveLength(1);
-    expect(shareCalls[0]!.opts).toEqual({ harness: 'amp' });
+    expect(shareCalls[0]!.opts).toEqual({ harness: "amp" });
     expect(shareCalls[0]!.args).toMatchObject({
       transcript: exportJson,
-      title: 'Amp Thread Title',
-      source_url: 'https://ampcode.com/threads/explicit-thread',
-      visibility: 'workspace',
-      highlight: 'where the parser changed',
+      title: "Amp Thread Title",
+      source_url: "https://ampcode.com/threads/explicit-thread",
+      visibility: "workspace",
+      highlight: "where the parser changed",
     });
   });
 
-  test('uses AMP_CURRENT_THREAD_ID when no explicit threadId is supplied', async () => {
+  test("uses AMP_CURRENT_THREAD_ID when no explicit threadId is supplied", async () => {
     const exportedThreadIds: string[] = [];
 
     await shareAmpThread(
       {},
       {
-        env: { AMP_CURRENT_THREAD_ID: 'env-thread' },
+        env: { AMP_CURRENT_THREAD_ID: "env-thread" },
         runAmpExport: async (threadId) => {
           exportedThreadIds.push(threadId);
-          return ampExportJson({ title: 'From Env' });
+          return ampExportJson({ title: "From Env" });
         },
-        share: async () => ({ thread_id: 'lore-2', thread_url: 'https://lore.test/lore-2' }),
+        share: async () => ({ thread_id: "lore-2", thread_url: "https://lore.test/lore-2" }),
       },
     );
 
-    expect(exportedThreadIds).toEqual(['env-thread']);
+    expect(exportedThreadIds).toEqual(["env-thread"]);
   });
 
-  test('missing thread id throws an actionable error and does not export or upload', async () => {
+  test("missing thread id throws an actionable error and does not export or upload", async () => {
     let exportCalls = 0;
     let shareCalls = 0;
 
@@ -115,18 +122,18 @@ describe('shareAmpThread', () => {
     expect(shareCalls).toBe(0);
   });
 
-  test('omits optional metadata and visibility when not supplied or not straightforward', async () => {
+  test("omits optional metadata and visibility when not supplied or not straightforward", async () => {
     const exportJson = '{"messages":[]}';
     let shareArgs: Record<string, unknown> | undefined;
 
     await shareAmpThread(
-      { threadId: 'amp-thread-3' },
+      { threadId: "amp-thread-3" },
       {
         env: {},
         runAmpExport: async () => exportJson,
         share: async (args) => {
           shareArgs = args;
-          return { thread_id: 'lore-3', thread_url: 'https://lore.test/lore-3' };
+          return { thread_id: "lore-3", thread_url: "https://lore.test/lore-3" };
         },
       },
     );
@@ -134,14 +141,14 @@ describe('shareAmpThread', () => {
     expect(shareArgs).toEqual({ transcript: exportJson });
   });
 
-  test('preserves MCP/auth-required result shapes from share core', async () => {
+  test("preserves MCP/auth-required result shapes from share core", async () => {
     const authRequired = {
       isError: true,
-      content: [{ type: 'text', text: 'Please run lore_login first.' }],
+      content: [{ type: "text", text: "Please run lore_login first." }],
     };
 
     const result = await shareAmpThread(
-      { threadId: 'amp-thread-4' },
+      { threadId: "amp-thread-4" },
       {
         env: {},
         runAmpExport: async () => ampExportJson(),
@@ -152,78 +159,88 @@ describe('shareAmpThread', () => {
     expect(result).toBe(authRequired);
   });
 
-  test('share_current_amp_thread Amp tool shares an explicitly supplied thread_id', async () => {
-    const exportJson = ampExportJson({ title: 'Tool Share' });
+  test("share_current_amp_thread Amp tool shares an explicitly supplied thread_id", async () => {
+    const exportJson = ampExportJson({ title: "Tool Share" });
     const exportedThreadIds: string[] = [];
-    const shareCalls: Array<{ args: Record<string, unknown>; opts: { harness: 'amp' } }> = [];
+    const shareCalls: Array<{ args: Record<string, unknown>; opts: { harness: "amp" } }> = [];
     const tool = createShareCurrentAmpThreadTool({
-      env: { AMP_CURRENT_THREAD_ID: 'env-thread' },
+      env: { AMP_CURRENT_THREAD_ID: "env-thread" },
       runAmpExport: async (threadId) => {
         exportedThreadIds.push(threadId);
         return exportJson;
       },
       share: async (args, opts) => {
         shareCalls.push({ args, opts });
-        return { thread_id: 'lore-tool', thread_url: 'https://lore.test/lore-tool' };
+        return { thread_id: "lore-tool", thread_url: "https://lore.test/lore-tool" };
       },
     });
 
     const result = await tool.execute(
       {
-        thread_id: 'explicit-tool-thread',
-        visibility: 'public',
-        highlight: 'show the API fix',
+        thread_id: "explicit-tool-thread",
+        visibility: "public",
+        highlight: "show the API fix",
       },
       {},
     );
 
-    expect(tool.name).toBe('share_current_amp_thread');
+    expect(tool.name).toBe("share_current_amp_thread");
     expect(tool.inputSchema).toEqual({
-      type: 'object',
+      type: "object",
       properties: {
-        thread_id: { type: 'string' },
-        visibility: { type: 'string', enum: ['private', 'workspace', 'public'] },
+        thread_id: { type: "string" },
+        visibility: { type: "string", enum: ["private", "workspace", "public"] },
         highlight: {
-          type: 'string',
+          type: "string",
           description:
-            'Natural-language description of the block or block range to highlight in the returned Lore URL.',
+            "Natural-language description of the block or block range to highlight in the returned Lore URL.",
         },
       },
       additionalProperties: false,
     });
-    expect(result).toBe(JSON.stringify({ thread_id: 'lore-tool', thread_url: 'https://lore.test/lore-tool' }));
-    expect(exportedThreadIds).toEqual(['explicit-tool-thread']);
+    expect(result).toBe(
+      JSON.stringify({ thread_id: "lore-tool", thread_url: "https://lore.test/lore-tool" }),
+    );
+    expect(exportedThreadIds).toEqual(["explicit-tool-thread"]);
     expect(shareCalls).toEqual([
       {
         args: {
           transcript: exportJson,
-          title: 'Tool Share',
-          visibility: 'public',
-          highlight: 'show the API fix',
+          title: "Tool Share",
+          visibility: "public",
+          highlight: "show the API fix",
         },
-        opts: { harness: 'amp' },
+        opts: { harness: "amp" },
       },
     ]);
   });
 
-  test('share_current_amp_thread Amp tool uses the active tool context thread when no thread_id is supplied', async () => {
+  test("share_current_amp_thread Amp tool uses the active tool context thread when no thread_id is supplied", async () => {
     const exportedThreadIds: string[] = [];
     const tool = createShareCurrentAmpThreadTool({
-      env: { AMP_CURRENT_THREAD_ID: 'env-thread' },
+      env: { AMP_CURRENT_THREAD_ID: "env-thread" },
       runAmpExport: async (threadId) => {
         exportedThreadIds.push(threadId);
-        return ampExportJson({ title: 'Context Tool Share' });
+        return ampExportJson({ title: "Context Tool Share" });
       },
-      share: async () => ({ thread_id: 'lore-context-tool', thread_url: 'https://lore.test/lore-context-tool' }),
+      share: async () => ({
+        thread_id: "lore-context-tool",
+        thread_url: "https://lore.test/lore-context-tool",
+      }),
     });
 
-    const result = await tool.execute({}, { thread: { id: 'context-thread' } });
+    const result = await tool.execute({}, { thread: { id: "context-thread" } });
 
-    expect(result).toBe(JSON.stringify({ thread_id: 'lore-context-tool', thread_url: 'https://lore.test/lore-context-tool' }));
-    expect(exportedThreadIds).toEqual(['context-thread']);
+    expect(result).toBe(
+      JSON.stringify({
+        thread_id: "lore-context-tool",
+        thread_url: "https://lore.test/lore-context-tool",
+      }),
+    );
+    expect(exportedThreadIds).toEqual(["context-thread"]);
   });
 
-  test('share_current_amp_thread Amp tool returns an actionable text error when no thread is resolvable', async () => {
+  test("share_current_amp_thread Amp tool returns an actionable text error when no thread is resolvable", async () => {
     let exportCalls = 0;
     let shareCalls = 0;
     const tool = createShareCurrentAmpThreadTool({
@@ -242,7 +259,7 @@ describe('shareAmpThread', () => {
 
     expect(result).toEqual([
       {
-        type: 'text',
+        type: "text",
         text: expect.stringMatching(/Pass thread_id.*AMP_CURRENT_THREAD_ID/i),
       },
     ]);

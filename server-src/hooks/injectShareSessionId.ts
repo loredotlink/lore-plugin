@@ -12,13 +12,13 @@
  * to ordinary Claude Code project transcripts; Cowork and other hosts retain
  * their own session resolution contracts.
  */
-import path from 'node:path';
-import { z } from 'zod/v4';
+import path from "node:path";
+import { z } from "zod/v4";
 
 const jsonValueSchema = z.json();
 
 const preToolUseInputSchema = z.object({
-  hook_event_name: z.literal('PreToolUse'),
+  hook_event_name: z.literal("PreToolUse"),
   session_id: z.string().min(1),
   transcript_path: z.string().min(1),
   tool_input: z.record(z.string(), jsonValueSchema),
@@ -26,7 +26,7 @@ const preToolUseInputSchema = z.object({
 
 export type InjectShareSessionIdHookOutput = {
   hookSpecificOutput: {
-    hookEventName: 'PreToolUse';
+    hookEventName: "PreToolUse";
     updatedInput: Record<string, z.infer<typeof jsonValueSchema>>;
   };
 };
@@ -37,7 +37,7 @@ export function injectShareSessionId(
 ): InjectShareSessionIdHookOutput | null {
   const parsed = preToolUseInputSchema.parse(input);
   const explicitSessionId = parsed.tool_input.session_id;
-  if (typeof explicitSessionId === 'string' && explicitSessionId.trim() !== '') {
+  if (typeof explicitSessionId === "string" && explicitSessionId.trim() !== "") {
     return null;
   }
 
@@ -47,7 +47,7 @@ export function injectShareSessionId(
 
   return {
     hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
+      hookEventName: "PreToolUse",
       updatedInput: {
         ...parsed.tool_input,
         session_id: parsed.session_id,

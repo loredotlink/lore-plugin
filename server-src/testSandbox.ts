@@ -15,10 +15,10 @@
  * real state. It has NO top-level side effects, so tests can import the pure
  * `isInsideRealLore` / `realLoreStateDir` helpers without arming anything.
  */
-import fs from 'node:fs';
-import fsp from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 /**
  * The real, per-user Lore state dir the test suite must never write into.
@@ -26,7 +26,7 @@ import path from 'node:path';
  * reads the OS passwd and ignores `HOME` — matching how production resolves it.
  */
 export function realLoreStateDir(): string {
-  return path.join(os.homedir(), '.lore');
+  return path.join(os.homedir(), ".lore");
 }
 
 /** True when `target` resolves to the real `~/.lore` dir or anything inside it. */
@@ -92,18 +92,18 @@ export function armRealLoreWriteGuard(): void {
 
   // Async (plugin) path. `rename(from, to)` puts the destination at index 1;
   // the atomic-write temp file also lives inside the target dir, so guard both.
-  patchAsync(fsp, 'mkdir');
-  patchAsync(fsp, 'writeFile');
-  patchAsync(fsp, 'rm');
-  patchAsync(fsp, 'unlink');
-  patchAsync(fsp, 'open');
-  patchAsync(fsp, 'rename', [0, 1]);
+  patchAsync(fsp, "mkdir");
+  patchAsync(fsp, "writeFile");
+  patchAsync(fsp, "rm");
+  patchAsync(fsp, "unlink");
+  patchAsync(fsp, "open");
+  patchAsync(fsp, "rename", [0, 1]);
 
   // Synchronous path.
-  patchSync(fs, 'mkdirSync');
-  patchSync(fs, 'writeFileSync');
-  patchSync(fs, 'rmSync');
-  patchSync(fs, 'unlinkSync');
-  patchSync(fs, 'openSync');
-  patchSync(fs, 'renameSync', [0, 1]);
+  patchSync(fs, "mkdirSync");
+  patchSync(fs, "writeFileSync");
+  patchSync(fs, "rmSync");
+  patchSync(fs, "unlinkSync");
+  patchSync(fs, "openSync");
+  patchSync(fs, "renameSync", [0, 1]);
 }

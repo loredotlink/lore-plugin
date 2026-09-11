@@ -37,13 +37,10 @@
  *   object instead of mutating `process.env`. The production handler
  *   creates a `SessionSource` via `detectSource()` lazily.
  */
-import {
-  ErrorCode,
-  McpError,
-} from '@modelcontextprotocol/sdk/types.js';
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 
-import type { ToolDefinition } from '../lib/tool.js';
-import { detectSource, type SessionSource, type SessionSummary } from '../lib/session/index.js';
+import type { ToolDefinition } from "../lib/tool.js";
+import { detectSource, type SessionSource, type SessionSummary } from "../lib/session/index.js";
 
 export type ReadLocalSessionArgs = {
   session_id?: string;
@@ -64,9 +61,9 @@ export type ReadLocalSessionResult = {
  * lookups and error messages don't see surrounding whitespace.
  */
 function nonBlank(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
+  if (typeof value !== "string") return null;
   const trimmed = value.trim();
-  return trimmed === '' ? null : trimmed;
+  return trimmed === "" ? null : trimmed;
 }
 
 /**
@@ -93,10 +90,7 @@ function resolveSession(
   try {
     return source.resolveActive(env);
   } catch (err) {
-    throw new McpError(
-      ErrorCode.InvalidParams,
-      (err as Error).message,
-    );
+    throw new McpError(ErrorCode.InvalidParams, (err as Error).message);
   }
 }
 
@@ -127,22 +121,19 @@ export function runReadLocalSession(opts: {
     // carry one (e.g. 'ENOENT', 'EACCES'); the lib's `new Error(...)`
     // does not.
     const e = err as Error & { code?: string };
-    if (typeof e?.code === 'string' && e.code !== '') {
+    if (typeof e?.code === "string" && e.code !== "") {
       throw new McpError(
         ErrorCode.InternalError,
         `failed to read session: ${e.message ?? String(e)}`,
       );
     }
-    throw new McpError(
-      ErrorCode.InvalidParams,
-      e?.message ?? String(err),
-    );
+    throw new McpError(ErrorCode.InvalidParams, e?.message ?? String(err));
   }
 
   return {
     session_id: payload.sessionId,
-    account_id: payload.accountId ?? '',
-    org_id: payload.orgId ?? '',
+    account_id: payload.accountId ?? "",
+    org_id: payload.orgId ?? "",
     transcript: payload.transcript,
     uploads: payload.uploads,
     outputs: payload.outputs,
@@ -150,19 +141,19 @@ export function runReadLocalSession(opts: {
 }
 
 export const readLocalSessionTool: ToolDefinition = {
-  name: 'read_local_session',
+  name: "read_local_session",
   description:
-    'Read a local session and return its transcript bytes plus ' +
-    'the basenames of any uploaded inputs and generated outputs. ' +
-    'Auto-detects Claude Code, Cowork, or Codex. With no arguments, ' +
-    'resolves to the active session using the runtime env vars ' +
-    '(CLAUDE_CODE_SESSION_ID, COWORK_SESSION_ID, CODEX_THREAD_ID) or ' +
-    'newest-by-mtime fallback. Pass `session_id` explicitly to pick ' +
-    'a specific session — typically one surfaced by `list_local_sessions`.',
+    "Read a local session and return its transcript bytes plus " +
+    "the basenames of any uploaded inputs and generated outputs. " +
+    "Auto-detects Claude Code, Cowork, or Codex. With no arguments, " +
+    "resolves to the active session using the runtime env vars " +
+    "(CLAUDE_CODE_SESSION_ID, COWORK_SESSION_ID, CODEX_THREAD_ID) or " +
+    "newest-by-mtime fallback. Pass `session_id` explicitly to pick " +
+    "a specific session — typically one surfaced by `list_local_sessions`.",
   inputSchema: {
-    type: 'object',
+    type: "object",
     properties: {
-      session_id: { type: 'string' },
+      session_id: { type: "string" },
     },
     additionalProperties: false,
   },

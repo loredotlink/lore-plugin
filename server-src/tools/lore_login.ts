@@ -51,11 +51,11 @@
  *   can visually compare against the consent screen.
  */
 
-import { spawnSync } from 'node:child_process';
-import os from 'node:os';
-import { initiateDeviceCode, pollDeviceToken } from '../lib/auth/deviceFlow.js';
-import { tryProvisionSharedApiKey } from '../lib/auth/provision.js';
-import type { ToolDefinition, ToolDispatchOpts } from '../lib/tool.js';
+import { spawnSync } from "node:child_process";
+import os from "node:os";
+import { initiateDeviceCode, pollDeviceToken } from "../lib/auth/deviceFlow.js";
+import { tryProvisionSharedApiKey } from "../lib/auth/provision.js";
+import type { ToolDefinition, ToolDispatchOpts } from "../lib/tool.js";
 
 /**
  * Outcomes of `runLoreLogin`. Modeled as a discriminated union so the
@@ -66,7 +66,7 @@ export type LoreLoginResult =
   | { ok: true }
   | {
       ok: false;
-      reason: 'browser_open_failed';
+      reason: "browser_open_failed";
       device_code: string;
       user_code: string;
       verification_uri: string;
@@ -74,7 +74,7 @@ export type LoreLoginResult =
     }
   | {
       ok: false;
-      reason: 'expired_token';
+      reason: "expired_token";
       message: string;
     };
 
@@ -113,11 +113,11 @@ export async function runLoreLogin(opts: {
 
   // Step 2: open the browser. spawnImpl is sync-shaped to mirror
   // `spawnSync`; we only care about the exit status.
-  const spawnResult = spawnImpl('open', [device.verification_uri_complete]);
+  const spawnResult = spawnImpl("open", [device.verification_uri_complete]);
   if (spawnResult.status !== 0) {
     return {
       ok: false,
-      reason: 'browser_open_failed',
+      reason: "browser_open_failed",
       device_code: device.device_code,
       user_code: device.user_code,
       verification_uri: device.verification_uri,
@@ -160,16 +160,16 @@ function defaultSleep(ms: number): Promise<void> {
 }
 
 export const loreLoginTool: ToolDefinition = {
-  name: 'lore_login',
+  name: "lore_login",
   description:
-    'Authenticate to Lore via device flow. Call this tool when other Lore tools return an auth-required error. ' +
-    'A browser tab will open at the Lore consent screen with the device code pre-filled; the tool blocks ' +
-    'until the user approves or the device code expires. If the browser cannot be opened automatically ' +
-    '(e.g. SSH or headless environments), the tool returns a `browser_open_failed` result containing the ' +
-    'verification URL and device code — in that case, instruct the user to visit the URL on any device and ' +
-    'then call `lore_login_resume` with the returned `device_code` to finish authentication.',
+    "Authenticate to Lore via device flow. Call this tool when other Lore tools return an auth-required error. " +
+    "A browser tab will open at the Lore consent screen with the device code pre-filled; the tool blocks " +
+    "until the user approves or the device code expires. If the browser cannot be opened automatically " +
+    "(e.g. SSH or headless environments), the tool returns a `browser_open_failed` result containing the " +
+    "verification URL and device code — in that case, instruct the user to visit the URL on any device and " +
+    "then call `lore_login_resume` with the returned `device_code` to finish authentication.",
   inputSchema: {
-    type: 'object',
+    type: "object",
     properties: {},
     additionalProperties: false,
   },
@@ -179,9 +179,9 @@ export const loreLoginTool: ToolDefinition = {
     return runLoreLogin({
       fetchImpl: globalThis.fetch,
       spawnImpl: openBrowserOverride
-        ? (_cmd, args) => openBrowserOverride(args[0] ?? '')
+        ? (_cmd, args) => openBrowserOverride(args[0] ?? "")
         : (cmd, args) => {
-            const r = spawnSync(cmd, args, { stdio: 'ignore' });
+            const r = spawnSync(cmd, args, { stdio: "ignore" });
             return { status: r.status };
           },
       now: Date.now,

@@ -1,7 +1,7 @@
 import {
   PLUGIN_AUTHKIT_CLIENT_ID as SHARED_AUTHKIT_CLIENT_ID,
   AUTHKIT_SCOPES as SHARED_AUTHKIT_SCOPES,
-} from '@lore/identity-store';
+} from "@lore/identity-store";
 
 /**
  * Shared OAuth client constants for the AuthKit migration.

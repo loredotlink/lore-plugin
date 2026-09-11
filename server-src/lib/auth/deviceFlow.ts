@@ -54,10 +54,10 @@
  *   persisted the local `SCOPE` constant.
  */
 
-import { z } from 'zod';
-import { PLUGIN_AUTHKIT_CLIENT_ID, AUTHKIT_SCOPES } from './constants';
-import { discoverEndpoints } from './discovery';
-import { writeTokens } from './store';
+import { z } from "zod";
+import { PLUGIN_AUTHKIT_CLIENT_ID, AUTHKIT_SCOPES } from "./constants";
+import { discoverEndpoints } from "./discovery";
+import { writeTokens } from "./store";
 
 // ---------------------------------------------------------------------------
 // Tunables
@@ -183,8 +183,8 @@ export async function initiateDeviceCode(opts?: {
   }).toString();
 
   const res = await fetchFn(deviceAuthorizationEndpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
     body,
   });
 
@@ -192,11 +192,9 @@ export async function initiateDeviceCode(opts?: {
     // Truncate the response body to a safe excerpt. The server may echo
     // request fields (client_id, scope) that we don't want surfaced
     // verbatim in error logs. 200 chars is enough for diagnosis.
-    const text = await res.text().catch(() => '');
+    const text = await res.text().catch(() => "");
     const excerpt = text.length > 200 ? `${text.slice(0, 200)}...` : text;
-    throw new Error(
-      `device-code request failed: HTTP ${res.status} ${excerpt}`,
-    );
+    throw new Error(`device-code request failed: HTTP ${res.status} ${excerpt}`);
   }
 
   let json: unknown;
@@ -205,17 +203,13 @@ export async function initiateDeviceCode(opts?: {
   } catch {
     // Don't include the parser error or the body — the success-path body
     // contains the device_code we don't want in logs.
-    throw new Error(
-      `device-code response was not valid JSON (HTTP ${res.status}).`,
-    );
+    throw new Error(`device-code response was not valid JSON (HTTP ${res.status}).`);
   }
 
   const parsed = DeviceCodeResponseSchema.safeParse(json);
   if (!parsed.success) {
     // Zod issues reference field paths and expected types, not values.
-    throw new Error(
-      `device-code response failed schema validation: ${parsed.error.message}`,
-    );
+    throw new Error(`device-code response failed schema validation: ${parsed.error.message}`);
   }
 
   return parsed.data;
@@ -265,15 +259,8 @@ export async function pollDeviceToken(opts: {
   home?: string;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
-}): Promise<
-  | { ok: true }
-  | { ok: false; reason: 'expired_token'; message: string }
-> {
-  const {
-    device_code,
-    expires_in_seconds,
-    interval_seconds,
-  } = opts;
+}): Promise<{ ok: true } | { ok: false; reason: "expired_token"; message: string }> {
+  const { device_code, expires_in_seconds, interval_seconds } = opts;
   const fetchFn = opts.fetchImpl ?? fetch;
   const home = opts.home;
   const nowFn = opts.now ?? Date.now;
@@ -298,10 +285,10 @@ export async function pollDeviceToken(opts: {
     if (nowFn() - start >= expires_in_seconds * 1000) {
       return {
         ok: false,
-        reason: 'expired_token',
+        reason: "expired_token",
         message:
-          'The device-code expired before the user approved the request. ' +
-          'Call `lore_login` again to start a fresh flow.',
+          "The device-code expired before the user approved the request. " +
+          "Call `lore_login` again to start a fresh flow.",
       };
     }
 
@@ -309,14 +296,14 @@ export async function pollDeviceToken(opts: {
 
     // POST to the token endpoint with the device-code grant.
     const body = new URLSearchParams({
-      grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
       device_code,
       client_id: PLUGIN_AUTHKIT_CLIENT_ID,
     }).toString();
 
     const pollRes = await fetchFn(tokenEndpoint, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
       body,
     });
 
@@ -327,9 +314,7 @@ export async function pollDeviceToken(opts: {
         json = await pollRes.json();
       } catch {
         // Don't include body — it contains the access token on the success path.
-        throw new Error(
-          `device-flow token response was not valid JSON (HTTP ${pollRes.status}).`,
-        );
+        throw new Error(`device-flow token response was not valid JSON (HTTP ${pollRes.status}).`);
       }
 
       const parsed = TokenResponseSchema.safeParse(json);
@@ -366,38 +351,36 @@ export async function pollDeviceToken(opts: {
     let errorCode: string | undefined;
     try {
       const errBody = (await pollRes.json()) as { error?: unknown };
-      if (typeof errBody.error === 'string') {
+      if (typeof errBody.error === "string") {
         errorCode = errBody.error;
       }
     } catch {
       // Body is not JSON — errorCode stays undefined, handled below.
     }
 
-    if (errorCode === 'authorization_pending') {
+    if (errorCode === "authorization_pending") {
       // User hasn't clicked Allow yet. Keep polling at the current cadence.
       continue;
     }
-    if (errorCode === 'slow_down') {
+    if (errorCode === "slow_down") {
       // RFC 8628 §3.5: permanently widen the polling interval.
       intervalSeconds += SLOW_DOWN_INCREMENT_SECONDS;
       continue;
     }
-    if (errorCode === 'expired_token') {
+    if (errorCode === "expired_token") {
       return {
         ok: false,
-        reason: 'expired_token',
+        reason: "expired_token",
         message:
-          'The device-code expired before the user approved the request. ' +
-          'Call `lore_login` again to start a fresh flow.',
+          "The device-code expired before the user approved the request. " +
+          "Call `lore_login` again to start a fresh flow.",
       };
     }
 
     // Any other error — `invalid_client`, `access_denied`, network-level 5xx
     // with no JSON body — is fatal and propagated. We surface ONLY the
     // well-known `error` code (never `error_description`, never the raw body).
-    const safeCode = errorCode ?? '(no body)';
-    throw new Error(
-      `device-flow poll failed: HTTP ${pollRes.status} ${safeCode}`,
-    );
+    const safeCode = errorCode ?? "(no body)";
+    throw new Error(`device-flow poll failed: HTTP ${pollRes.status} ${safeCode}`);
   }
 }

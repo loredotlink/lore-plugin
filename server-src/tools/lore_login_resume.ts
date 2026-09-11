@@ -31,10 +31,10 @@
  *   which is the only piece reused here.
  */
 
-import os from 'node:os';
-import { pollDeviceToken } from '../lib/auth/deviceFlow.js';
-import { tryProvisionSharedApiKey } from '../lib/auth/provision.js';
-import type { ToolDefinition, ToolDispatchOpts } from '../lib/tool.js';
+import os from "node:os";
+import { pollDeviceToken } from "../lib/auth/deviceFlow.js";
+import { tryProvisionSharedApiKey } from "../lib/auth/provision.js";
+import type { ToolDefinition, ToolDispatchOpts } from "../lib/tool.js";
 
 /**
  * Default polling window when the agent doesn't carry the original
@@ -69,10 +69,7 @@ export async function runLoreLoginResume(opts: {
    * real (non-fatal) implementation. Defaults to a no-op.
    */
   provisionApiKey?: () => Promise<void>;
-}): Promise<
-  | { ok: true }
-  | { ok: false; reason: 'expired_token'; message: string }
-> {
+}): Promise<{ ok: true } | { ok: false; reason: "expired_token"; message: string }> {
   const result = await pollDeviceToken({
     device_code: opts.device_code,
     expires_in_seconds: opts.expires_in_seconds ?? DEFAULT_EXPIRES_IN_SECONDS,
@@ -97,17 +94,17 @@ function defaultSleep(ms: number): Promise<void> {
 }
 
 export const loreLoginResumeTool: ToolDefinition = {
-  name: 'lore_login_resume',
+  name: "lore_login_resume",
   description:
-    'Resume a previously-started Lore login when browser auto-open failed. ' +
-    'Pass the device_code returned by lore_login. Polls until you approve in ' +
-    'your browser or the code expires.',
+    "Resume a previously-started Lore login when browser auto-open failed. " +
+    "Pass the device_code returned by lore_login. Polls until you approve in " +
+    "your browser or the code expires.",
   inputSchema: {
-    type: 'object',
+    type: "object",
     properties: {
-      device_code: { type: 'string' },
+      device_code: { type: "string" },
     },
-    required: ['device_code'],
+    required: ["device_code"],
     additionalProperties: false,
   },
   handler: async (args: unknown, opts?: ToolDispatchOpts) => {

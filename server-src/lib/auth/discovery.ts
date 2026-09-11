@@ -6,15 +6,15 @@
  * de-duplication used by the MCP tools.
  */
 
-import os from 'node:os';
-import path from 'node:path';
+import os from "node:os";
+import path from "node:path";
 import {
   buildProtectedResourceMetadataUrl,
   discoverOAuthEndpoints,
   discoveryCacheFilePath as sharedDiscoveryCacheFilePath,
   type OAuthDiscoveredEndpoints,
-} from '@lore/identity-store';
-import { cloudBaseUrl } from '../cloudBaseUrl';
+} from "@lore/identity-store";
+import { cloudBaseUrl } from "../cloudBaseUrl";
 
 export type DiscoveredEndpoints = OAuthDiscoveredEndpoints;
 
@@ -27,7 +27,7 @@ function stateDir(home: string = os.homedir()): string {
   if (pluginStateDir) return path.resolve(expandHome(pluginStateDir, home));
   const devStateDir = process.env.LORE_DEV_STATE_DIR?.trim();
   if (devStateDir) return path.resolve(expandHome(devStateDir, home));
-  return path.join(home, '.lore');
+  return path.join(home, ".lore");
 }
 
 function resourceUrl(base: string): string {

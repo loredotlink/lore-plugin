@@ -13,8 +13,8 @@
  * here on first read after upgrade.
  */
 
-import os from 'node:os';
-import path from 'node:path';
+import os from "node:os";
+import path from "node:path";
 import {
   type Tokens,
   TokensSchema,
@@ -25,12 +25,12 @@ import {
   readClientTokens,
   tokensFilePath as canonicalTokensFilePath,
   writeClientTokens,
-} from '@lore/identity-store';
+} from "@lore/identity-store";
 
 export { TokensSchema, type Tokens };
 
 /** This binary owns the `plugin` slot of the shared `~/.lore/tokens.json`. */
-const CLIENT_KEY = 'plugin' as const;
+const CLIENT_KEY = "plugin" as const;
 
 function expandHome(p: string, home: string): string {
   return p.replace(/^~(?=$|\/)/, home);
@@ -46,7 +46,7 @@ export function stateDir(home: string = os.homedir()): string {
   if (pluginStateDir) return path.resolve(expandHome(pluginStateDir, home));
   const devStateDir = process.env.LORE_DEV_STATE_DIR?.trim();
   if (devStateDir) return path.resolve(expandHome(devStateDir, home));
-  return path.join(home, '.lore');
+  return path.join(home, ".lore");
 }
 
 /** Absolute path to the canonical tokens file (`~/.lore/tokens.json`). */

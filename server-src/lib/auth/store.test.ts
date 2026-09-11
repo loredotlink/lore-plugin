@@ -1,15 +1,15 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { type Tokens, deleteTokens, readTokens, tokensFilePath, writeTokens } from './store';
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { type Tokens, deleteTokens, readTokens, tokensFilePath, writeTokens } from "./store";
 
 // The token format, atomic-write semantics, schema, and 0600/0700 permissions
 // are owned and unit-tested by `@lore/identity-store`. This suite covers the
 // plugin-side adapter: the canonical `~/.lore` path and legacy migration.
 
 function makeTmpHome(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'lore-tokens-test-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "lore-tokens-test-"));
 }
 
 function rmrf(dir: string): void {
@@ -17,14 +17,14 @@ function rmrf(dir: string): void {
 }
 
 function legacyPluginTokensFile(home: string): string {
-  return path.join(home, 'Library', 'Application Support', 'tanagram', 'lore', 'tokens.json');
+  return path.join(home, "Library", "Application Support", "tanagram", "lore", "tokens.json");
 }
 
 const validTokens: Tokens = {
-  access_token: 'access-AAA',
-  refresh_token: 'refresh-BBB',
+  access_token: "access-AAA",
+  refresh_token: "refresh-BBB",
   expires_at: 1_700_000_000_000,
-  scope: 'read:sessions write:sessions',
+  scope: "read:sessions write:sessions",
 };
 
 const originalDevStateDir = process.env.LORE_DEV_STATE_DIR;
@@ -37,28 +37,30 @@ afterEach(() => {
   else process.env.LORE_PLUGIN_STATE_DIR = originalPluginStateDir;
 });
 
-describe('tokensFilePath', () => {
-  test('points at the canonical ~/.lore tokens file', () => {
-    expect(tokensFilePath('/Users/test')).toBe('/Users/test/.lore/tokens.json');
+describe("tokensFilePath", () => {
+  test("points at the canonical ~/.lore tokens file", () => {
+    expect(tokensFilePath("/Users/test")).toBe("/Users/test/.lore/tokens.json");
   });
 
-  test('honors explicit dev state dir override', () => {
-    process.env.LORE_DEV_STATE_DIR = '~/custom-lore-dev-state';
-    expect(tokensFilePath('/Users/test')).toBe('/Users/test/custom-lore-dev-state/tokens.json');
+  test("honors explicit dev state dir override", () => {
+    process.env.LORE_DEV_STATE_DIR = "~/custom-lore-dev-state";
+    expect(tokensFilePath("/Users/test")).toBe("/Users/test/custom-lore-dev-state/tokens.json");
   });
 
-  test('installed plugin state dir takes precedence over dev state dir override', () => {
-    process.env.LORE_DEV_STATE_DIR = '~/custom-lore-dev-state';
-    process.env.LORE_PLUGIN_STATE_DIR = '~/installed-lore-plugin-state';
-    expect(tokensFilePath('/Users/test')).toBe('/Users/test/installed-lore-plugin-state/tokens.json');
+  test("installed plugin state dir takes precedence over dev state dir override", () => {
+    process.env.LORE_DEV_STATE_DIR = "~/custom-lore-dev-state";
+    process.env.LORE_PLUGIN_STATE_DIR = "~/installed-lore-plugin-state";
+    expect(tokensFilePath("/Users/test")).toBe(
+      "/Users/test/installed-lore-plugin-state/tokens.json",
+    );
   });
 
-  test('defaults to os.homedir() when no override is passed', () => {
-    expect(tokensFilePath()).toBe(path.join(os.homedir(), '.lore', 'tokens.json'));
+  test("defaults to os.homedir() when no override is passed", () => {
+    expect(tokensFilePath()).toBe(path.join(os.homedir(), ".lore", "tokens.json"));
   });
 });
 
-describe('read/write/delete (adapter over the canonical store)', () => {
+describe("read/write/delete (adapter over the canonical store)", () => {
   let home: string;
   beforeEach(() => {
     home = makeTmpHome();
@@ -67,16 +69,16 @@ describe('read/write/delete (adapter over the canonical store)', () => {
     rmrf(home);
   });
 
-  test('returns null when the tokens file is absent', async () => {
+  test("returns null when the tokens file is absent", async () => {
     expect(await readTokens(home)).toBeNull();
   });
 
-  test('round-trips a token record', async () => {
+  test("round-trips a token record", async () => {
     await writeTokens(validTokens, home);
     expect(await readTokens(home)).toEqual(validTokens);
   });
 
-  test('deleteTokens removes the file and is idempotent', async () => {
+  test("deleteTokens removes the file and is idempotent", async () => {
     await writeTokens(validTokens, home);
     expect(fs.existsSync(tokensFilePath(home))).toBe(true);
     await deleteTokens(home);
@@ -84,28 +86,27 @@ describe('read/write/delete (adapter over the canonical store)', () => {
     await expect(deleteTokens(home)).resolves.toBeUndefined();
   });
 
-  test('degrades to null (does not throw) when the canonical file is corrupt', async () => {
+  test("degrades to null (does not throw) when the canonical file is corrupt", async () => {
     const file = tokensFilePath(home);
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, 'not json at all {', 'utf8');
+    fs.writeFileSync(file, "not json at all {", "utf8");
     expect(await readTokens(home)).toBeNull();
   });
 
-  test('recovers legacy plugin credentials when the canonical file is corrupt', async () => {
+  test("recovers legacy plugin credentials when the canonical file is corrupt", async () => {
     const file = tokensFilePath(home);
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, 'not json at all {', 'utf8');
+    fs.writeFileSync(file, "not json at all {", "utf8");
     const legacy = legacyPluginTokensFile(home);
     fs.mkdirSync(path.dirname(legacy), { recursive: true });
-    fs.writeFileSync(legacy, JSON.stringify(validTokens), 'utf8');
+    fs.writeFileSync(legacy, JSON.stringify(validTokens), "utf8");
 
     expect(await readTokens(home)).toEqual(validTokens);
     expect(fs.existsSync(legacy)).toBe(false);
   });
-
 });
 
-describe('legacy Application Support migration', () => {
+describe("legacy Application Support migration", () => {
   let home: string;
   beforeEach(() => {
     home = makeTmpHome();
@@ -114,10 +115,10 @@ describe('legacy Application Support migration', () => {
     rmrf(home);
   });
 
-  test('migrates the legacy tokens file into ~/.lore on first read, then removes it', async () => {
+  test("migrates the legacy tokens file into ~/.lore on first read, then removes it", async () => {
     const legacy = legacyPluginTokensFile(home);
     fs.mkdirSync(path.dirname(legacy), { recursive: true });
-    fs.writeFileSync(legacy, JSON.stringify(validTokens), 'utf8');
+    fs.writeFileSync(legacy, JSON.stringify(validTokens), "utf8");
 
     // No canonical file yet — the read should migrate from the legacy location.
     expect(fs.existsSync(tokensFilePath(home))).toBe(false);
@@ -128,14 +129,14 @@ describe('legacy Application Support migration', () => {
     expect(fs.existsSync(legacy)).toBe(false);
   });
 
-  test('prefers an existing canonical file over the legacy one', async () => {
-    const canonical: Tokens = { ...validTokens, access_token: 'CANONICAL' };
+  test("prefers an existing canonical file over the legacy one", async () => {
+    const canonical: Tokens = { ...validTokens, access_token: "CANONICAL" };
     await writeTokens(canonical, home);
 
     const legacy = legacyPluginTokensFile(home);
     fs.mkdirSync(path.dirname(legacy), { recursive: true });
-    fs.writeFileSync(legacy, JSON.stringify({ ...validTokens, access_token: 'LEGACY' }), 'utf8');
+    fs.writeFileSync(legacy, JSON.stringify({ ...validTokens, access_token: "LEGACY" }), "utf8");
 
-    expect((await readTokens(home))?.access_token).toBe('CANONICAL');
+    expect((await readTokens(home))?.access_token).toBe("CANONICAL");
   });
 });

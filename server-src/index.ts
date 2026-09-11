@@ -28,27 +28,27 @@
  * user's own Claude process — anyone who can speak to the transport
  * is already the user. Auth is structural, not enforced in-band.
  */
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
   ErrorCode,
   ListToolsRequestSchema,
   McpError,
   type CallToolResult,
-} from '@modelcontextprotocol/sdk/types.js';
+} from "@modelcontextprotocol/sdk/types.js";
 
-import type { ToolDispatchOpts, ToolInputSchema } from './lib/tool.js';
-import { toolExecutionError } from './lib/errors.js';
-import { runInjectShareSessionIdHook } from './hooks/injectShareSessionId.js';
-import { tools } from './tools/index.js';
+import type { ToolDispatchOpts, ToolInputSchema } from "./lib/tool.js";
+import { toolExecutionError } from "./lib/errors.js";
+import { runInjectShareSessionIdHook } from "./hooks/injectShareSessionId.js";
+import { tools } from "./tools/index.js";
 
 /** Module-level name→tool lookup. Constructed once; shared by `dispatchToolCall` and `main`. */
 const byName = new Map(tools.map((t) => [t.name, t]));
 
 const SERVER_INFO = {
-  name: 'lore-mcp',
-  version: '1.0.0',
+  name: "lore-mcp",
+  version: "1.0.0",
 } as const;
 
 /**
@@ -77,12 +77,9 @@ const SERVER_INFO = {
  * to a tool whose schema declares `session_id`, and the handler would
  * silently see `undefined` — a real UX failure mode for the agent.
  */
-export function validateAgainstSchema(
-  schema: ToolInputSchema,
-  args: unknown,
-): string | null {
-  if (args === null || typeof args !== 'object' || Array.isArray(args)) {
-    return `expected an object, got ${args === null ? 'null' : Array.isArray(args) ? 'array' : typeof args}`;
+export function validateAgainstSchema(schema: ToolInputSchema, args: unknown): string | null {
+  if (args === null || typeof args !== "object" || Array.isArray(args)) {
+    return `expected an object, got ${args === null ? "null" : Array.isArray(args) ? "array" : typeof args}`;
   }
   const obj = args as Record<string, unknown>;
   const properties = schema.properties ?? {};
@@ -105,23 +102,23 @@ export function validateAgainstSchema(
   for (const [name, propSchemaRaw] of Object.entries(properties)) {
     if (!Object.prototype.hasOwnProperty.call(obj, name)) continue;
     const propSchema = propSchemaRaw as { type?: string; enum?: unknown[] };
-    if (typeof propSchema?.type !== 'string') continue;
+    if (typeof propSchema?.type !== "string") continue;
     const value = obj[name];
     const actual = typeof value;
     const expected = propSchema.type;
     let ok: boolean;
     switch (expected) {
-      case 'string':
-        ok = actual === 'string';
+      case "string":
+        ok = actual === "string";
         break;
-      case 'boolean':
-        ok = actual === 'boolean';
+      case "boolean":
+        ok = actual === "boolean";
         break;
-      case 'number':
-        ok = actual === 'number' && Number.isFinite(value as number);
+      case "number":
+        ok = actual === "number" && Number.isFinite(value as number);
         break;
-      case 'integer':
-        ok = actual === 'number' && Number.isInteger(value as number);
+      case "integer":
+        ok = actual === "number" && Number.isInteger(value as number);
         break;
       default:
         // Unknown type keyword — be permissive rather than rejecting,
@@ -135,7 +132,7 @@ export function validateAgainstSchema(
       Array.isArray(propSchema.enum) &&
       !propSchema.enum.some((candidate) => Object.is(candidate, value))
     ) {
-      return `field '${name}' expected one of ${propSchema.enum.map((candidate) => JSON.stringify(candidate)).join(', ')}`;
+      return `field '${name}' expected one of ${propSchema.enum.map((candidate) => JSON.stringify(candidate)).join(", ")}`;
     }
   }
 
@@ -153,21 +150,21 @@ export function validateAgainstSchema(
 export function toCallToolResult(value: unknown): CallToolResult {
   if (
     value !== null &&
-    typeof value === 'object' &&
-    ('content' in value || 'structuredContent' in value)
+    typeof value === "object" &&
+    ("content" in value || "structuredContent" in value)
   ) {
     return value as CallToolResult;
   }
   let text: string;
   try {
-    text = typeof value === 'string' ? value : JSON.stringify(value);
+    text = typeof value === "string" ? value : JSON.stringify(value);
   } catch (error) {
     return toolExecutionError(
       `Tool returned a value that could not be serialized: ${(error as Error).message}`,
     );
   }
   return {
-    content: [{ type: 'text', text }],
+    content: [{ type: "text", text }],
   };
 }
 
@@ -198,10 +195,7 @@ export async function dispatchToolCall(
   const argsObj = args ?? {};
   const error = validateAgainstSchema(tool.inputSchema, argsObj);
   if (error) {
-    throw new McpError(
-      ErrorCode.InvalidParams,
-      `Invalid arguments for tool '${name}': ${error}`,
-    );
+    throw new McpError(ErrorCode.InvalidParams, `Invalid arguments for tool '${name}': ${error}`);
   }
   try {
     const value = await tool.handler(argsObj, opts);
@@ -209,7 +203,7 @@ export async function dispatchToolCall(
   } catch (handlerError) {
     const message =
       handlerError instanceof Error
-        ? handlerError.message.replace(/^MCP error -?\d+:\s*/, '')
+        ? handlerError.message.replace(/^MCP error -?\d+:\s*/, "")
         : String(handlerError);
     return toolExecutionError(message);
   }
@@ -242,12 +236,12 @@ export function createLoreMcpServer(opts?: ToolDispatchOpts): Server {
 }
 
 export async function main(args: string[] = process.argv.slice(2)): Promise<void> {
-  if (args[0] === 'inject-share-session-id' && args.length === 1) {
+  if (args[0] === "inject-share-session-id" && args.length === 1) {
     await runInjectShareSessionIdHook();
     return;
   }
   if (args.length > 0) {
-    throw new Error(`Unknown lore-mcp command: ${args.join(' ')}`);
+    throw new Error(`Unknown lore-mcp command: ${args.join(" ")}`);
   }
 
   const server = createLoreMcpServer();

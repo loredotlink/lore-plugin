@@ -7,7 +7,7 @@ Capture setup belongs outside the plugin: the desktop app owns its capture proce
 ## Language
 
 **Front door**:
-The *discovery/distribution* entry point — how most users first meet Lore, installed cross-host via a host's plugin manager. "Front door" means the primary discovery path, **not** the only door: the desktop app is also a first-class entrance.
+The _discovery/distribution_ entry point — how most users first meet Lore, installed cross-host via a host's plugin manager. "Front door" means the primary discovery path, **not** the only door: the desktop app is also a first-class entrance.
 _Avoid_: "only door", "sole install path".
 
 **Manual share**:

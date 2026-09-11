@@ -1,1 +1,1 @@
-export { default } from '../../amp/lore';
+export { default } from "../../amp/lore";

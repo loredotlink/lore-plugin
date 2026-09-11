@@ -54,7 +54,7 @@
  *     `invalid_grant` triggers deletion.
  */
 
-import fs from 'node:fs';
+import fs from "node:fs";
 import {
   OAuthInvalidGrantError,
   OAuthNoAuthorizationServerError,
@@ -63,11 +63,11 @@ import {
   refreshOAuthTokens,
   tokenEndpointFromAccessTokenIssuer,
   withTokenRefreshLock,
-} from '@lore/identity-store';
-import { AuthRequiredError } from '../errors';
-import { readTokens, writeTokens, deleteTokens, stateDir, type Tokens } from './store';
-import { discoverEndpoints } from './discovery';
-import { PLUGIN_AUTHKIT_CLIENT_ID } from './constants';
+} from "@lore/identity-store";
+import { AuthRequiredError } from "../errors";
+import { readTokens, writeTokens, deleteTokens, stateDir, type Tokens } from "./store";
+import { discoverEndpoints } from "./discovery";
+import { PLUGIN_AUTHKIT_CLIENT_ID } from "./constants";
 
 /**
  * Refresh window: refresh if the access token expires within 30s.
@@ -75,8 +75,8 @@ import { PLUGIN_AUTHKIT_CLIENT_ID } from './constants';
  * should never have a reason to tune it.
  */
 const REFRESH_SKEW_MS = 30_000;
-const TRUTHY_TOKEN_ENV = new Set(['1', 'true', 'yes', 'on']);
-const DESKTOP_MANAGED_CLIENT_KEY = 'desktop' as const;
+const TRUTHY_TOKEN_ENV = new Set(["1", "true", "yes", "on"]);
+const DESKTOP_MANAGED_CLIENT_KEY = "desktop" as const;
 
 /**
  * The module-scope mutex. Exactly one concurrent refresh per process.
@@ -93,7 +93,7 @@ interface Options {
 
 function isExternallyManagedTokenMode(): boolean {
   const value = process.env.LORE_EXTERNAL_TOKEN_MANAGER;
-  return typeof value === 'string' && TRUTHY_TOKEN_ENV.has(value.trim().toLowerCase());
+  return typeof value === "string" && TRUTHY_TOKEN_ENV.has(value.trim().toLowerCase());
 }
 
 /**

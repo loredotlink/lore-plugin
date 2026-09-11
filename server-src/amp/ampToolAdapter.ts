@@ -1,6 +1,6 @@
-import type { ToolDefinition, ToolInputSchema } from '../lib/tool.js';
+import type { ToolDefinition, ToolInputSchema } from "../lib/tool.js";
 
-export type AmpPluginTextContent = { type: 'text'; text: string };
+export type AmpPluginTextContent = { type: "text"; text: string };
 export type AmpPluginToolResult = string | AmpPluginTextContent[];
 export type AmpPluginToolContext = unknown;
 export type AmpPluginToolDefinition = {
@@ -32,7 +32,7 @@ export function toAmpToolResult(value: unknown): AmpPluginToolResult {
     return value.content.map(contentBlockToText);
   }
 
-  if (typeof value === 'string') {
+  if (typeof value === "string") {
     return value;
   }
 
@@ -41,28 +41,26 @@ export function toAmpToolResult(value: unknown): AmpPluginToolResult {
 
 function isMcpLikeResult(value: unknown): value is McpLikeResult & { content: unknown[] } {
   return (
-    value !== null &&
-    typeof value === 'object' &&
-    Array.isArray((value as McpLikeResult).content)
+    value !== null && typeof value === "object" && Array.isArray((value as McpLikeResult).content)
   );
 }
 
 function contentBlockToText(block: unknown): AmpPluginTextContent {
   if (
     block !== null &&
-    typeof block === 'object' &&
-    (block as { type?: unknown }).type === 'text' &&
-    typeof (block as { text?: unknown }).text === 'string'
+    typeof block === "object" &&
+    (block as { type?: unknown }).type === "text" &&
+    typeof (block as { text?: unknown }).text === "string"
   ) {
-    return { type: 'text', text: (block as { text: string }).text };
+    return { type: "text", text: (block as { text: string }).text };
   }
 
-  return { type: 'text', text: stringifyForToolResult(block) };
+  return { type: "text", text: stringifyForToolResult(block) };
 }
 
 function stringifyForToolResult(value: unknown): string {
   try {
-    return typeof value === 'string' ? value : JSON.stringify(value);
+    return typeof value === "string" ? value : JSON.stringify(value);
   } catch (error) {
     return `Tool returned a value that could not be serialized: ${(error as Error).message}`;
   }

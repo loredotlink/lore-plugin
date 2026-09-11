@@ -1,14 +1,14 @@
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { nonBlank, type SessionPayload, type SessionSource, type SessionSummary } from './index.js';
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { nonBlank, type SessionPayload, type SessionSource, type SessionSummary } from "./index.js";
 
 /**
  * Default Codex sessions root on macOS/Linux. Accepts a `home`
  * override for tests.
  */
 export function defaultCodexSessionsRoot(home: string = os.homedir()): string {
-  return path.join(home, '.codex', 'sessions');
+  return path.join(home, ".codex", "sessions");
 }
 
 export type CodexSourceOptions = {
@@ -19,7 +19,7 @@ export type CodexSourceOptions = {
 };
 
 export class CodexSource implements SessionSource {
-  readonly runtime = 'codex' as const;
+  readonly runtime = "codex" as const;
   private readonly sessionsRoot: string;
 
   constructor(opts: CodexSourceOptions = {}) {
@@ -27,14 +27,13 @@ export class CodexSource implements SessionSource {
   }
 
   resolveActive(env: NodeJS.ProcessEnv): SessionSummary {
-    const envId =
-      nonBlank(env.CODEX_THREAD_ID) ?? nonBlank(env.CODEX_SESSION_ID);
+    const envId = nonBlank(env.CODEX_THREAD_ID) ?? nonBlank(env.CODEX_SESSION_ID);
     if (envId !== null) return this.findById(envId);
 
     const all = this.listSessions();
     const latest = all[0];
     if (!latest) {
-      throw new Error('no Codex session found');
+      throw new Error("no Codex session found");
     }
     return latest;
   }
@@ -68,16 +67,14 @@ export class CodexSource implements SessionSource {
   readSession(session: SessionSummary): SessionPayload {
     const transcriptPath = session.transcriptPath;
     if (!transcriptPath) {
-      throw new Error(
-        `Codex session ${session.sessionId} has no transcript path recorded`,
-      );
+      throw new Error(`Codex session ${session.sessionId} has no transcript path recorded`);
     }
 
     let transcript: string;
     try {
       const stat = fs.statSync(transcriptPath);
-      if (!stat.isFile()) throw new Error('not a file');
-      transcript = fs.readFileSync(transcriptPath, 'utf8');
+      if (!stat.isFile()) throw new Error("not a file");
+      transcript = fs.readFileSync(transcriptPath, "utf8");
     } catch {
       throw new Error(
         `Codex session ${session.sessionId} has no transcript file at ${transcriptPath}`,
@@ -106,7 +103,7 @@ function walkJsonlFiles(root: string): string[] {
         stack.push(fullPath);
         continue;
       }
-      if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+      if (entry.isFile() && entry.name.endsWith(".jsonl")) {
         files.push(fullPath);
       }
     }
@@ -133,25 +130,24 @@ function readCodexSessionId(transcriptPath: string): string {
 }
 
 function readFirstLine(filePath: string, maxBytes = 16 * 1024): string | null {
-  const fd = fs.openSync(filePath, 'r');
+  const fd = fs.openSync(filePath, "r");
   try {
     const buffer = Buffer.alloc(maxBytes);
     const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
     if (bytesRead <= 0) return null;
-    const chunk = buffer.toString('utf8', 0, bytesRead);
-    const newlineIndex = chunk.indexOf('\n');
+    const chunk = buffer.toString("utf8", 0, bytesRead);
+    const newlineIndex = chunk.indexOf("\n");
     const firstLine = newlineIndex === -1 ? chunk : chunk.slice(0, newlineIndex);
     const trimmed = firstLine.trim();
-    return trimmed === '' ? null : trimmed;
+    return trimmed === "" ? null : trimmed;
   } finally {
     fs.closeSync(fd);
   }
 }
 
 function inferSessionIdFromFilename(transcriptPath: string): string {
-  const base = path.basename(transcriptPath, '.jsonl');
-  const uuidSuffix =
-    /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+  const base = path.basename(transcriptPath, ".jsonl");
+  const uuidSuffix = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
   const match = base.match(uuidSuffix);
   return match?.[1] ?? base;
 }

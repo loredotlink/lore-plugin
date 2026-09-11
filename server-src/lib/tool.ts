@@ -39,7 +39,7 @@
  * a paired update to the validator.
  */
 export type ToolInputSchema = {
-  type: 'object';
+  type: "object";
   /** Per-property JSON Schema fragments. Values are typed as `unknown`
    * because the manual validator only understands a small subset of
    * Schema-7 features — keeping the inner shape opaque prevents

@@ -23,163 +23,159 @@
  * dispatch options so all state is hermetic and no real network calls are
  * made.
  */
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import fsp from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-import { mcpTextCallToolResultSchema } from '@lore/contracts/mcp';
-import { encodeCwdToDir } from '@lore/transcript-locate';
-import type { ToolInputSchema } from './lib/tool';
-import { listLocalSessionsTool } from './tools/listLocalSessions';
-import { shareSessionTool } from './tools/share_session';
-import { validateAgainstSchema, dispatchToolCall, createLoreMcpServer } from './index';
-import { readTokens, writeTokens } from './lib/auth/store';
-import { __resetCloudBaseUrlForTests } from './lib/cloudBaseUrl';
-import { __resetInFlightForTests as __resetDiscoveryInFlightForTests } from './lib/auth/discovery';
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import fsp from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
+import { mcpTextCallToolResultSchema } from "@lore/contracts/mcp";
+import { encodeCwdToDir } from "@lore/transcript-locate";
+import type { ToolInputSchema } from "./lib/tool";
+import { listLocalSessionsTool } from "./tools/listLocalSessions";
+import { shareSessionTool } from "./tools/share_session";
+import { validateAgainstSchema, dispatchToolCall, createLoreMcpServer } from "./index";
+import { readTokens, writeTokens } from "./lib/auth/store";
+import { __resetCloudBaseUrlForTests } from "./lib/cloudBaseUrl";
+import { __resetInFlightForTests as __resetDiscoveryInFlightForTests } from "./lib/auth/discovery";
 
-describe('validateAgainstSchema — additionalProperties: false', () => {
+describe("validateAgainstSchema — additionalProperties: false", () => {
   const schema: ToolInputSchema = {
-    type: 'object',
+    type: "object",
     properties: {},
     additionalProperties: false,
   };
 
-  test('accepts an empty object', () => {
+  test("accepts an empty object", () => {
     expect(validateAgainstSchema(schema, {})).toBeNull();
   });
 
-  test('rejects an object with any unknown field', () => {
-    const err = validateAgainstSchema(schema, { sessionId: 'abc' });
+  test("rejects an object with any unknown field", () => {
+    const err = validateAgainstSchema(schema, { sessionId: "abc" });
     expect(err).not.toBeNull();
     expect(err).toContain("'sessionId'");
-    expect(err).toContain('additionalProperties');
+    expect(err).toContain("additionalProperties");
   });
 
-  test('rejects an array (must be an object)', () => {
+  test("rejects an array (must be an object)", () => {
     expect(validateAgainstSchema(schema, [])).not.toBeNull();
   });
 
-  test('rejects null (must be an object)', () => {
+  test("rejects null (must be an object)", () => {
     expect(validateAgainstSchema(schema, null)).not.toBeNull();
   });
 
-  test('rejects a string (must be an object)', () => {
-    expect(validateAgainstSchema(schema, 'oops')).not.toBeNull();
+  test("rejects a string (must be an object)", () => {
+    expect(validateAgainstSchema(schema, "oops")).not.toBeNull();
   });
 });
 
-describe('validateAgainstSchema — required + property types', () => {
+describe("validateAgainstSchema — required + property types", () => {
   const schema: ToolInputSchema = {
-    type: 'object',
+    type: "object",
     properties: {
-      session_id: { type: 'string' },
-      verbose: { type: 'boolean' },
-      limit: { type: 'integer' },
+      session_id: { type: "string" },
+      verbose: { type: "boolean" },
+      limit: { type: "integer" },
     },
-    required: ['session_id'],
+    required: ["session_id"],
     additionalProperties: false,
   };
 
-  test('accepts a fully-specified valid arg set', () => {
+  test("accepts a fully-specified valid arg set", () => {
     expect(
       validateAgainstSchema(schema, {
-        session_id: 'sess',
+        session_id: "sess",
         verbose: true,
         limit: 5,
       }),
     ).toBeNull();
   });
 
-  test('accepts only the required field', () => {
-    expect(validateAgainstSchema(schema, { session_id: 'sess' })).toBeNull();
+  test("accepts only the required field", () => {
+    expect(validateAgainstSchema(schema, { session_id: "sess" })).toBeNull();
   });
 
-  test('rejects missing required field', () => {
+  test("rejects missing required field", () => {
     const err = validateAgainstSchema(schema, { verbose: true });
     expect(err).toContain("'session_id'");
-    expect(err).toContain('required');
+    expect(err).toContain("required");
   });
 
-  test('rejects wrong type on string field', () => {
+  test("rejects wrong type on string field", () => {
     const err = validateAgainstSchema(schema, { session_id: 42 });
     expect(err).toContain("'session_id'");
-    expect(err).toContain('string');
+    expect(err).toContain("string");
   });
 
-  test('rejects wrong type on boolean field', () => {
+  test("rejects wrong type on boolean field", () => {
     const err = validateAgainstSchema(schema, {
-      session_id: 'sess',
-      verbose: 'yes',
+      session_id: "sess",
+      verbose: "yes",
     });
     expect(err).toContain("'verbose'");
-    expect(err).toContain('boolean');
+    expect(err).toContain("boolean");
   });
 
-  test('rejects non-integer number on integer field', () => {
+  test("rejects non-integer number on integer field", () => {
     const err = validateAgainstSchema(schema, {
-      session_id: 'sess',
+      session_id: "sess",
       limit: 1.5,
     });
     expect(err).toContain("'limit'");
-    expect(err).toContain('integer');
+    expect(err).toContain("integer");
   });
 
-  test('rejects unknown extra field (camelCase typo)', () => {
+  test("rejects unknown extra field (camelCase typo)", () => {
     const err = validateAgainstSchema(schema, {
-      session_id: 'sess',
-      sessionID: 'oops',
+      session_id: "sess",
+      sessionID: "oops",
     });
     expect(err).toContain("'sessionID'");
-    expect(err).toContain('additionalProperties');
+    expect(err).toContain("additionalProperties");
   });
 });
 
-describe('validateAgainstSchema — listLocalSessionsTool integration', () => {
-  test('accepts {} against the real list_local_sessions schema', () => {
-    expect(
-      validateAgainstSchema(listLocalSessionsTool.inputSchema, {}),
-    ).toBeNull();
+describe("validateAgainstSchema — listLocalSessionsTool integration", () => {
+  test("accepts {} against the real list_local_sessions schema", () => {
+    expect(validateAgainstSchema(listLocalSessionsTool.inputSchema, {})).toBeNull();
   });
 
-  test('rejects any extra arg against list_local_sessions (the camelCase typo case)', () => {
+  test("rejects any extra arg against list_local_sessions (the camelCase typo case)", () => {
     const err = validateAgainstSchema(listLocalSessionsTool.inputSchema, {
-      sessionId: 'whatever',
+      sessionId: "whatever",
     });
     expect(err).not.toBeNull();
     expect(err).toContain("'sessionId'");
   });
 });
 
-describe('validateAgainstSchema — shareSessionTool visibility', () => {
-  test('accepts every declared visibility', () => {
-    for (const visibility of ['private', 'workspace', 'public']) {
-      expect(
-        validateAgainstSchema(shareSessionTool.inputSchema, { visibility }),
-      ).toBeNull();
+describe("validateAgainstSchema — shareSessionTool visibility", () => {
+  test("accepts every declared visibility", () => {
+    for (const visibility of ["private", "workspace", "public"]) {
+      expect(validateAgainstSchema(shareSessionTool.inputSchema, { visibility })).toBeNull();
     }
   });
 
-  test('rejects a visibility outside the declared enum', () => {
+  test("rejects a visibility outside the declared enum", () => {
     const err = validateAgainstSchema(shareSessionTool.inputSchema, {
-      visibility: 'organization',
+      visibility: "organization",
     });
     expect(err).toContain("'visibility'");
-    expect(err).toContain('private');
-    expect(err).toContain('workspace');
-    expect(err).toContain('public');
+    expect(err).toContain("private");
+    expect(err).toContain("workspace");
+    expect(err).toContain("public");
   });
 });
 
 // ── dispatchToolCall integration tests ────────────────────────────────────────
 
-describe('dispatchToolCall — end-to-end dispatch wiring', () => {
+describe("dispatchToolCall — end-to-end dispatch wiring", () => {
   let tmpHome: string;
 
   beforeEach(async () => {
-    tmpHome = await fsp.mkdtemp(path.join(os.tmpdir(), 'lore-dispatch-test-'));
+    tmpHome = await fsp.mkdtemp(path.join(os.tmpdir(), "lore-dispatch-test-"));
   });
 
   afterEach(async () => {
@@ -189,44 +185,44 @@ describe('dispatchToolCall — end-to-end dispatch wiring', () => {
     __resetDiscoveryInFlightForTests();
   });
 
-  test('validates share_session arguments before invoking the handler', async () => {
+  test("validates share_session arguments before invoking the handler", async () => {
     await expect(
       dispatchToolCall(
-        { name: 'share_session', arguments: { __not_a_real_field: true } },
+        { name: "share_session", arguments: { __not_a_real_field: true } },
         { home: tmpHome },
       ),
     ).rejects.toMatchObject({ code: ErrorCode.InvalidParams });
   });
 
-  test('unknown tool name → throws McpError with MethodNotFound', async () => {
+  test("unknown tool name → throws McpError with MethodNotFound", async () => {
     await expect(
-      dispatchToolCall({ name: 'totally_unknown_tool' }, { home: tmpHome }),
+      dispatchToolCall({ name: "totally_unknown_tool" }, { home: tmpHome }),
     ).rejects.toMatchObject({
       code: ErrorCode.MethodNotFound,
     });
   });
 
-  test('unknown tool name → McpError message mentions the tool name', async () => {
+  test("unknown tool name → McpError message mentions the tool name", async () => {
     let thrown: unknown;
     try {
-      await dispatchToolCall({ name: 'no_such_tool' }, { home: tmpHome });
+      await dispatchToolCall({ name: "no_such_tool" }, { home: tmpHome });
     } catch (err) {
       thrown = err;
     }
     expect(thrown).toBeInstanceOf(McpError);
-    expect((thrown as McpError).message).toContain('no_such_tool');
+    expect((thrown as McpError).message).toContain("no_such_tool");
   });
 
   // The headless device-flow path. `lore_login_resume` never spawns a browser
   // (`open`), so it exercises the same opts.home → writeTokens routing as
   // `lore_login` but stays deterministic on Linux CI. This is the primary
   // regression guard for the dispatcher-home fix on both login tools.
-  test('lore_login_resume writes tokens under the dispatcher home, not process HOME', async () => {
-    const processHome = await fsp.mkdtemp(path.join(os.tmpdir(), 'lore-dispatch-process-home-'));
+  test("lore_login_resume writes tokens under the dispatcher home, not process HOME", async () => {
+    const processHome = await fsp.mkdtemp(path.join(os.tmpdir(), "lore-dispatch-process-home-"));
     const originalHome = process.env.HOME;
     const originalFetch = globalThis.fetch;
-    const testBase = 'https://mcp.example.test';
-    const authBase = 'https://signin.example.test';
+    const testBase = "https://mcp.example.test";
+    const authBase = "https://signin.example.test";
     const tokenEndpoint = `${authBase}/oauth2/token`;
 
     process.env.HOME = processHome;
@@ -236,14 +232,10 @@ describe('dispatchToolCall — end-to-end dispatch wiring', () => {
 
     globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
       const urlString =
-        typeof url === 'string'
-          ? url
-          : url instanceof URL
-            ? url.toString()
-            : url.url;
+        typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
       if (urlString === `${testBase}/.well-known/oauth-protected-resource/mcp`) {
         return Response.json({
-          resource: 'https://api.example.test',
+          resource: "https://api.example.test",
           authorization_servers: [authBase],
         });
       }
@@ -254,12 +246,12 @@ describe('dispatchToolCall — end-to-end dispatch wiring', () => {
         });
       }
       if (urlString === tokenEndpoint) {
-        expect(init?.body?.toString()).toContain('device_code=device-code');
+        expect(init?.body?.toString()).toContain("device_code=device-code");
         return Response.json({
-          access_token: 'access-from-resume',
-          refresh_token: 'refresh-from-resume',
+          access_token: "access-from-resume",
+          refresh_token: "refresh-from-resume",
           expires_in: 3600,
-          token_type: 'Bearer',
+          token_type: "Bearer",
         });
       }
       throw new Error(`unexpected fetch URL: ${urlString}`);
@@ -267,16 +259,16 @@ describe('dispatchToolCall — end-to-end dispatch wiring', () => {
 
     try {
       const result = await dispatchToolCall(
-        { name: 'lore_login_resume', arguments: { device_code: 'device-code' } },
+        { name: "lore_login_resume", arguments: { device_code: "device-code" } },
         { home: tmpHome },
       );
 
       const text = result.content
-        .filter((b) => b.type === 'text')
+        .filter((b) => b.type === "text")
         .map((b) => (b as { type: string; text: string }).text)
-        .join('');
+        .join("");
       expect(JSON.parse(text)).toEqual({ ok: true });
-      expect((await readTokens(tmpHome))?.access_token).toBe('access-from-resume');
+      expect((await readTokens(tmpHome))?.access_token).toBe("access-from-resume");
       expect(await readTokens(processHome)).toBeNull();
     } finally {
       globalThis.fetch = originalFetch;
@@ -288,12 +280,12 @@ describe('dispatchToolCall — end-to-end dispatch wiring', () => {
     // first token request, so allow comfortably more than bun's 5s default.
   }, 15000);
 
-  test('lore_login writes tokens under the dispatcher home, not process HOME', async () => {
-    const processHome = await fsp.mkdtemp(path.join(os.tmpdir(), 'lore-dispatch-process-home-'));
+  test("lore_login writes tokens under the dispatcher home, not process HOME", async () => {
+    const processHome = await fsp.mkdtemp(path.join(os.tmpdir(), "lore-dispatch-process-home-"));
     const originalHome = process.env.HOME;
     const originalFetch = globalThis.fetch;
-    const testBase = 'https://mcp.example.test';
-    const authBase = 'https://signin.example.test';
+    const testBase = "https://mcp.example.test";
+    const authBase = "https://signin.example.test";
     const deviceEndpoint = `${authBase}/oauth2/device_authorization`;
     const tokenEndpoint = `${authBase}/oauth2/token`;
     const openedUrls: string[] = [];
@@ -305,14 +297,10 @@ describe('dispatchToolCall — end-to-end dispatch wiring', () => {
 
     globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
       const urlString =
-        typeof url === 'string'
-          ? url
-          : url instanceof URL
-            ? url.toString()
-            : url.url;
+        typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
       if (urlString === `${testBase}/.well-known/oauth-protected-resource/mcp`) {
         return Response.json({
-          resource: 'https://api.example.test',
+          resource: "https://api.example.test",
           authorization_servers: [authBase],
         });
       }
@@ -324,21 +312,21 @@ describe('dispatchToolCall — end-to-end dispatch wiring', () => {
       }
       if (urlString === deviceEndpoint) {
         return Response.json({
-          device_code: 'device-code',
-          user_code: 'USER-CODE',
-          verification_uri: 'https://signin.example.test/device',
-          verification_uri_complete: 'https://signin.example.test/device?user_code=USER-CODE',
+          device_code: "device-code",
+          user_code: "USER-CODE",
+          verification_uri: "https://signin.example.test/device",
+          verification_uri_complete: "https://signin.example.test/device?user_code=USER-CODE",
           expires_in: 600,
           interval: 1,
         });
       }
       if (urlString === tokenEndpoint) {
-        expect(init?.body?.toString()).toContain('device_code=device-code');
+        expect(init?.body?.toString()).toContain("device_code=device-code");
         return Response.json({
-          access_token: 'access-from-login',
-          refresh_token: 'refresh-from-login',
+          access_token: "access-from-login",
+          refresh_token: "refresh-from-login",
           expires_in: 3600,
-          token_type: 'Bearer',
+          token_type: "Bearer",
         });
       }
       throw new Error(`unexpected fetch URL: ${urlString}`);
@@ -346,7 +334,7 @@ describe('dispatchToolCall — end-to-end dispatch wiring', () => {
 
     try {
       const result = await dispatchToolCall(
-        { name: 'lore_login', arguments: {} },
+        { name: "lore_login", arguments: {} },
         {
           home: tmpHome,
           openBrowser: (url) => {
@@ -357,12 +345,12 @@ describe('dispatchToolCall — end-to-end dispatch wiring', () => {
       );
 
       const text = result.content
-        .filter((b) => b.type === 'text')
+        .filter((b) => b.type === "text")
         .map((b) => (b as { type: string; text: string }).text)
-        .join('');
+        .join("");
       expect(JSON.parse(text)).toEqual({ ok: true });
-      expect(openedUrls).toEqual(['https://signin.example.test/device?user_code=USER-CODE']);
-      expect((await readTokens(tmpHome))?.access_token).toBe('access-from-login');
+      expect(openedUrls).toEqual(["https://signin.example.test/device?user_code=USER-CODE"]);
+      expect((await readTokens(tmpHome))?.access_token).toBe("access-from-login");
       expect(await readTokens(processHome)).toBeNull();
     } finally {
       globalThis.fetch = originalFetch;
@@ -373,25 +361,25 @@ describe('dispatchToolCall — end-to-end dispatch wiring', () => {
   });
 });
 
-describe('MCP tool response envelopes', () => {
+describe("MCP tool response envelopes", () => {
   let tmpHome: string;
   const sessionEnvNames = [
-    'CLAUDE_CODE_SESSION_ID',
-    'CLAUDE_SESSION_ID',
-    'COWORK_SESSION_ID',
-    'CODEX_THREAD_ID',
-    'CODEX_SESSION_ID',
-    'CLAUDE_PROJECT_DIR',
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_SESSION_ID",
+    "COWORK_SESSION_ID",
+    "CODEX_THREAD_ID",
+    "CODEX_SESSION_ID",
+    "CLAUDE_PROJECT_DIR",
   ] as const;
   const savedSessionEnv = new Map<string, string | undefined>();
 
   beforeEach(async () => {
-    tmpHome = await fsp.mkdtemp(path.join(os.tmpdir(), 'lore-envelope-test-'));
+    tmpHome = await fsp.mkdtemp(path.join(os.tmpdir(), "lore-envelope-test-"));
     for (const name of sessionEnvNames) {
       savedSessionEnv.set(name, process.env[name]);
       delete process.env[name];
     }
-    process.env.LORE_MCP_BASE_URL = 'https://mcp.example.test';
+    process.env.LORE_MCP_BASE_URL = "https://mcp.example.test";
     __resetCloudBaseUrlForTests();
   });
 
@@ -408,20 +396,14 @@ describe('MCP tool response envelopes', () => {
     await fsp.rm(tmpHome, { recursive: true, force: true });
   });
 
-  async function callTool(
-    name: string,
-    args: Record<string, string>,
-    fetchImpl?: typeof fetch,
-  ) {
+  async function callTool(name: string, args: Record<string, string>, fetchImpl?: typeof fetch) {
     const server = createLoreMcpServer({ home: tmpHome, fetchImpl });
-    const client = new Client({ name: 'lore-envelope-test', version: '1.0.0' });
+    const client = new Client({ name: "lore-envelope-test", version: "1.0.0" });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
     await client.connect(clientTransport);
     try {
-      return mcpTextCallToolResultSchema.parse(
-        await client.callTool({ name, arguments: args }),
-      );
+      return mcpTextCallToolResultSchema.parse(await client.callTool({ name, arguments: args }));
     } finally {
       await client.close();
       await server.close();
@@ -431,8 +413,8 @@ describe('MCP tool response envelopes', () => {
   function claudeSessionPath(sessionId: string): string {
     return path.join(
       tmpHome,
-      '.claude',
-      'projects',
+      ".claude",
+      "projects",
       encodeCwdToDir(process.cwd()),
       `${sessionId}.jsonl`,
     );
@@ -441,23 +423,26 @@ describe('MCP tool response envelopes', () => {
   async function writeClaudeSession(sessionId: string, transcript: string): Promise<void> {
     const sessionPath = claudeSessionPath(sessionId);
     await fsp.mkdir(path.dirname(sessionPath), { recursive: true });
-    await fsp.writeFile(sessionPath, transcript, 'utf8');
+    await fsp.writeFile(sessionPath, transcript, "utf8");
   }
 
   async function authenticate(): Promise<void> {
-    await writeTokens({
-      access_token: 'test-access',
-      refresh_token: 'test-refresh',
-      expires_at: Date.now() + 60_000,
-      scope: 'mcp.read',
-    }, tmpHome);
+    await writeTokens(
+      {
+        access_token: "test-access",
+        refresh_token: "test-refresh",
+        expires_at: Date.now() + 60_000,
+        scope: "mcp.read",
+      },
+      tmpHome,
+    );
   }
 
   function cloudRpcError(message: string, code = ErrorCode.InvalidParams): typeof fetch {
     return testFetch(async (_url, init) => {
       const request = JSON.parse(String(init?.body)) as { id: string };
       return Response.json({
-        jsonrpc: '2.0',
+        jsonrpc: "2.0",
         id: request.id,
         error: { code, message },
       });
@@ -465,109 +450,124 @@ describe('MCP tool response envelopes', () => {
   }
 
   function testFetch(
-    implementation: (
-      input: string | URL | Request,
-      init?: RequestInit,
-    ) => Promise<Response>,
+    implementation: (input: string | URL | Request, init?: RequestInit) => Promise<Response>,
   ): typeof fetch {
     return Object.assign(implementation, {
       preconnect: (_url: string | URL): void => {},
     });
   }
 
-  test('nonexistent local session is an actionable tool error', async () => {
-    const result = await callTool('read_local_session', { session_id: 'missing-session' });
+  test("nonexistent local session is an actionable tool error", async () => {
+    const result = await callTool("read_local_session", { session_id: "missing-session" });
 
     expect(result).toEqual({
       isError: true,
-      content: [{
-        type: 'text',
-        text: 'session not found: missing-session. Call list_local_sessions to choose an available session, then retry.',
-      }],
+      content: [
+        {
+          type: "text",
+          text: "session not found: missing-session. Call list_local_sessions to choose an available session, then retry.",
+        },
+      ],
     });
   });
 
   test.each([
-    ['empty', ''],
-    ['nonempty', '{"type":"user"}\n'],
-  ])('valid %s local session remains successful', async (_label, transcript) => {
-    await writeClaudeSession('valid-session', transcript);
+    ["empty", ""],
+    ["nonempty", '{"type":"user"}\n'],
+  ])("valid %s local session remains successful", async (_label, transcript) => {
+    await writeClaudeSession("valid-session", transcript);
 
-    const result = await callTool('read_local_session', { session_id: 'valid-session' });
+    const result = await callTool("read_local_session", { session_id: "valid-session" });
     expect(result.isError).toBeUndefined();
-    expect(JSON.parse((result.content[0] as { type: 'text'; text: string }).text)).toMatchObject({
-      session_id: 'valid-session',
+    expect(JSON.parse((result.content[0] as { type: "text"; text: string }).text)).toMatchObject({
+      session_id: "valid-session",
       transcript,
     });
   });
 
-  test.each(['nonexistent', 'invisible'])(
-    '%s cloud thread gets the same non-disclosing tool error',
+  test.each(["nonexistent", "invisible"])(
+    "%s cloud thread gets the same non-disclosing tool error",
     async () => {
       await authenticate();
       const result = await callTool(
-        'get_thread',
-        { thread_id: 'th_unavailable' },
-        cloudRpcError('thread not found or not visible'),
+        "get_thread",
+        { thread_id: "th_unavailable" },
+        cloudRpcError("thread not found or not visible"),
       );
 
       expect(result).toEqual({
         isError: true,
-        content: [{
-          type: 'text',
-          text: 'thread not found or not visible. Check the thread ID and your access, then retry.',
-        }],
+        content: [
+          {
+            type: "text",
+            text: "thread not found or not visible. Check the thread ID and your access, then retry.",
+          },
+        ],
       });
     },
   );
 
-  test('valid cloud thread remains successful', async () => {
+  test("valid cloud thread remains successful", async () => {
     await authenticate();
     const fetchImpl = testFetch(async (_url, init) => {
       const request = JSON.parse(String(init?.body)) as { id: string };
       return Response.json({
-        jsonrpc: '2.0',
+        jsonrpc: "2.0",
         id: request.id,
         result: {
-          content: [{ type: 'text', text: JSON.stringify({ id: 'th_visible', blocks: [] }) }],
+          content: [{ type: "text", text: JSON.stringify({ id: "th_visible", blocks: [] }) }],
         },
       });
     });
 
-    const result = await callTool('get_thread', { thread_id: 'th_visible' }, fetchImpl);
+    const result = await callTool("get_thread", { thread_id: "th_visible" }, fetchImpl);
     expect(result.isError).toBeUndefined();
-    expect(JSON.parse(result.content[0].text)).toEqual({ id: 'th_visible', blocks: [] });
+    expect(JSON.parse(result.content[0].text)).toEqual({ id: "th_visible", blocks: [] });
   });
 
-  test('authentication failure remains actionable and distinct', async () => {
-    const result = await callTool('get_thread', { thread_id: 'th_any' });
+  test("authentication failure remains actionable and distinct", async () => {
+    const result = await callTool("get_thread", { thread_id: "th_any" });
     expect(result.isError).toBe(true);
-    expect((result.content[0] as { type: 'text'; text: string }).text).toContain('lore_login');
+    expect((result.content[0] as { type: "text"; text: string }).text).toContain("lore_login");
   });
 
   test.each([
-    ['timeout', testFetch(async () => { throw new DOMException('request timed out', 'TimeoutError'); }), 'request timed out'],
-    ['rate limit', testFetch(async () => new Response('retry later', { status: 429 })), 'HTTP 429'],
-    ['upstream server', testFetch(async () => new Response('temporarily unavailable', { status: 503 })), 'HTTP 503'],
-    ['malformed response', testFetch(async () => new Response('not-json', { status: 200 })), 'not valid JSON-RPC'],
-  ])('%s failure remains a distinct tool error', async (_label, fetchImpl, expected) => {
+    [
+      "timeout",
+      testFetch(async () => {
+        throw new DOMException("request timed out", "TimeoutError");
+      }),
+      "request timed out",
+    ],
+    ["rate limit", testFetch(async () => new Response("retry later", { status: 429 })), "HTTP 429"],
+    [
+      "upstream server",
+      testFetch(async () => new Response("temporarily unavailable", { status: 503 })),
+      "HTTP 503",
+    ],
+    [
+      "malformed response",
+      testFetch(async () => new Response("not-json", { status: 200 })),
+      "not valid JSON-RPC",
+    ],
+  ])("%s failure remains a distinct tool error", async (_label, fetchImpl, expected) => {
     await authenticate();
-    const result = await callTool('get_thread', { thread_id: 'th_any' }, fetchImpl);
+    const result = await callTool("get_thread", { thread_id: "th_any" }, fetchImpl);
 
     expect(result.isError).toBe(true);
-    expect((result.content[0] as { type: 'text'; text: string }).text).toContain(expected);
-    expect((result.content[0] as { type: 'text'; text: string }).text).not.toContain('not found');
+    expect((result.content[0] as { type: "text"; text: string }).text).toContain(expected);
+    expect((result.content[0] as { type: "text"; text: string }).text).not.toContain("not found");
   });
 
-  test('packaged tool list does not expose the retired lore_setup control plane', async () => {
+  test("packaged tool list does not expose the retired lore_setup control plane", async () => {
     const server = createLoreMcpServer({ home: tmpHome });
-    const client = new Client({ name: 'lore-list-test', version: '1.0.0' });
+    const client = new Client({ name: "lore-list-test", version: "1.0.0" });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
     await client.connect(clientTransport);
     try {
       const listed = await client.listTools();
-      expect(listed.tools.map((tool) => tool.name)).not.toContain('lore_setup');
+      expect(listed.tools.map((tool) => tool.name)).not.toContain("lore_setup");
     } finally {
       await client.close();
       await server.close();

@@ -1,7 +1,7 @@
-declare module '@ampcode/plugin' {
+declare module "@ampcode/plugin" {
   export type PluginToolResultContentBlock =
-    | { type: 'text'; text: string }
-    | { type: 'image'; mimeType: string; data: string };
+    | { type: "text"; text: string }
+    | { type: "image"; mimeType: string; data: string };
 
   export type PluginToolResult = string | PluginToolResultContentBlock[];
 
@@ -15,7 +15,7 @@ declare module '@ampcode/plugin' {
     name: string;
     description: string;
     inputSchema: {
-      type: 'object';
+      type: "object";
       properties?: Record<string, unknown>;
       required?: string[];
       [key: string]: unknown;
@@ -38,7 +38,7 @@ declare module '@ampcode/plugin' {
   }
 
   export interface UserMessage {
-    type: 'user-message';
+    type: "user-message";
     content: string;
   }
 

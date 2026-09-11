@@ -16,15 +16,15 @@
  *   stored slot), and any failure is swallowed to a stderr warning — OAuth
  *   remains a working fallback, so a provisioning blip must never fail login.
  */
-import os from 'node:os';
-import { createUploadApiKeyResponseSchema } from '@lore/contracts';
-import { readApiKey, writeApiKey } from '@lore/identity-store';
-import { AuthRequiredError } from '../errors.js';
-import { cloudMcpBaseUrl } from '../cloudBaseUrl.js';
-import { forceRefreshAccessToken, getValidAccessToken } from './refresh.js';
-import { deleteTokens, stateDir } from './store.js';
+import os from "node:os";
+import { createUploadApiKeyResponseSchema } from "@lore/contracts";
+import { readApiKey, writeApiKey } from "@lore/identity-store";
+import { AuthRequiredError } from "../errors.js";
+import { cloudMcpBaseUrl } from "../cloudBaseUrl.js";
+import { forceRefreshAccessToken, getValidAccessToken } from "./refresh.js";
+import { deleteTokens, stateDir } from "./store.js";
 
-const LORE_API_KEY_ENV = 'LORE_API_KEY';
+const LORE_API_KEY_ENV = "LORE_API_KEY";
 
 function envApiKey(): string | null {
   const value = process.env[LORE_API_KEY_ENV]?.trim();
@@ -50,18 +50,15 @@ type CreateUploadApiKeyImpl = (
  * retry-before-delete rule as cloud MCP calls. Error messages never include
  * response bodies because an upstream echo could contain a credential.
  */
-export const createUploadApiKey: CreateUploadApiKeyImpl = async (
-  name,
-  opts,
-) => {
+export const createUploadApiKey: CreateUploadApiKeyImpl = async (name, opts) => {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const accessToken = await getValidAccessToken(opts);
   const post = (bearer: string) =>
     fetchImpl(`${cloudMcpBaseUrl()}/api/upload_api_keys`, {
-      method: 'POST',
+      method: "POST",
       headers: {
         authorization: `Bearer ${bearer}`,
-        'content-type': 'application/json',
+        "content-type": "application/json",
       },
       body: JSON.stringify({ name }),
     });
@@ -111,10 +108,10 @@ export async function provisionSharedApiKey(
   if (envApiKey() !== null) return { provisioned: false };
   if ((await readApiKey(stateDir(opts.home))) !== null) return { provisioned: false };
 
-  const rawKey = await createKey(
-    pluginApiKeyName(hostname),
-    { home: opts.home, fetchImpl: opts.fetchImpl },
-  );
+  const rawKey = await createKey(pluginApiKeyName(hostname), {
+    home: opts.home,
+    fetchImpl: opts.fetchImpl,
+  });
   if (!rawKey) return { provisioned: false };
 
   await writeApiKey(stateDir(opts.home), { value: rawKey, created_at: now() });
@@ -126,16 +123,18 @@ export async function provisionSharedApiKey(
  * case. Login already succeeded (tokens are persisted) by the time this runs;
  * OAuth keeps working even if the key is not provisioned.
  */
-export async function tryProvisionSharedApiKey(opts: {
-  home?: string;
-  fetchImpl?: typeof fetch;
-  now?: () => number;
-} = {}): Promise<void> {
+export async function tryProvisionSharedApiKey(
+  opts: {
+    home?: string;
+    fetchImpl?: typeof fetch;
+    now?: () => number;
+  } = {},
+): Promise<void> {
   try {
     await provisionSharedApiKey(opts);
   } catch (err) {
     console.error(
-      '[lore-plugin] warning: API key provisioning failed:',
+      "[lore-plugin] warning: API key provisioning failed:",
       err instanceof Error ? err.message : String(err),
     );
   }

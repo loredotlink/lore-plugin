@@ -30,11 +30,11 @@
  *      conversation).
  */
 
-import path from 'node:path';
-import { COWORK_SESSIONS_DIR_NAME } from '@lore/transcript-locate';
-import { ClaudeCodeSource } from './claudeCode.js';
-import { CodexSource } from './codex.js';
-import { CoworkSource } from './cowork.js';
+import path from "node:path";
+import { COWORK_SESSIONS_DIR_NAME } from "@lore/transcript-locate";
+import { ClaudeCodeSource } from "./claudeCode.js";
+import { CodexSource } from "./codex.js";
+import { CoworkSource } from "./cowork.js";
 
 /** Summary returned by `listSessions` — one entry per session on disk. */
 export type SessionSummary = {
@@ -69,7 +69,7 @@ export type SessionPayload = {
 
 export interface SessionSource {
   /** Human label used in error messages. */
-  readonly runtime: 'claude-code' | 'cowork' | 'codex';
+  readonly runtime: "claude-code" | "cowork" | "codex";
 
   /**
    * Resolve the active session per the runtime's rules:
@@ -101,9 +101,9 @@ export interface SessionSource {
  * Shared by every `SessionSource` and by `detectSource` for env-var checks.
  */
 export function nonBlank(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
+  if (typeof value !== "string") return null;
   const trimmed = value.trim();
-  return trimmed === '' ? null : trimmed;
+  return trimmed === "" ? null : trimmed;
 }
 
 /**
@@ -213,22 +213,22 @@ function safeCwd(): string | null {
 function isDetectSourceOptions(
   value: NodeJS.ProcessEnv | DetectSourceOptions,
 ): value is DetectSourceOptions {
-  if (typeof value !== 'object' || value === null) return false;
+  if (typeof value !== "object" || value === null) return false;
   // ProcessEnv has only string values; DetectSourceOptions has
   // structured object values for `env`/`claudeCodeSource`/
   // `coworkSource`. Any of those three keys present with a non-string
   // value is an unambiguous signal it's the options bag.
   const v = value as Record<string, unknown>;
-  if (v.claudeCodeSource !== undefined && typeof v.claudeCodeSource !== 'string') {
+  if (v.claudeCodeSource !== undefined && typeof v.claudeCodeSource !== "string") {
     return true;
   }
-  if (v.coworkSource !== undefined && typeof v.coworkSource !== 'string') {
+  if (v.coworkSource !== undefined && typeof v.coworkSource !== "string") {
     return true;
   }
-  if (v.codexSource !== undefined && typeof v.codexSource !== 'string') {
+  if (v.codexSource !== undefined && typeof v.codexSource !== "string") {
     return true;
   }
-  if (v.env !== undefined && typeof v.env !== 'string') return true;
+  if (v.env !== undefined && typeof v.env !== "string") return true;
   if (v.home !== undefined) return true;
   return false;
 }

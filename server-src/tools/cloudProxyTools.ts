@@ -10,16 +10,12 @@ import {
   mcpSearchThreadsToolSpec,
   type McpGeneratedToolSpec,
   type McpTextCallToolResult,
-} from '@lore/contracts/mcp';
-import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
+} from "@lore/contracts/mcp";
+import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
-import { callCloudTool, CloudMcpError } from '../lib/cloudCall.js';
-import {
-  AuthRequiredError,
-  authRequiredToMcpError,
-  toolExecutionError,
-} from '../lib/errors.js';
-import type { ToolDefinition, ToolInputSchema } from '../lib/tool.js';
+import { callCloudTool, CloudMcpError } from "../lib/cloudCall.js";
+import { AuthRequiredError, authRequiredToMcpError, toolExecutionError } from "../lib/errors.js";
+import type { ToolDefinition, ToolInputSchema } from "../lib/tool.js";
 
 export async function runCloudProxyTool(
   toolName: string,

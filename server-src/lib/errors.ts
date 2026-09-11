@@ -38,7 +38,7 @@
  * needing a separate system prompt.
  */
 export const AUTH_REQUIRED_MESSAGE =
-  'Not authenticated to Lore. Call lore_login first to authenticate, then retry this tool call.';
+  "Not authenticated to Lore. Call lore_login first to authenticate, then retry this tool call.";
 
 /**
  * Thrown by token-acquiring code paths (token load, refresh, cloud
@@ -54,7 +54,7 @@ export const AUTH_REQUIRED_MESSAGE =
 export class AuthRequiredError extends Error {
   constructor(message: string = AUTH_REQUIRED_MESSAGE) {
     super(message);
-    this.name = 'AuthRequiredError';
+    this.name = "AuthRequiredError";
   }
 }
 
@@ -67,7 +67,7 @@ export class AuthRequiredError extends Error {
  */
 export function authRequiredToMcpError(): {
   isError: true;
-  content: [{ type: 'text'; text: string }];
+  content: [{ type: "text"; text: string }];
 } {
   return toolExecutionError(AUTH_REQUIRED_MESSAGE);
 }
@@ -80,10 +80,10 @@ export function authRequiredToMcpError(): {
  */
 export function toolExecutionError(message: string): {
   isError: true;
-  content: [{ type: 'text'; text: string }];
+  content: [{ type: "text"; text: string }];
 } {
   return {
     isError: true,
-    content: [{ type: 'text', text: message }],
+    content: [{ type: "text", text: message }],
   };
 }

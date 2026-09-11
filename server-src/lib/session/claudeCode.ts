@@ -1,7 +1,7 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { claudeProjectsRoot, encodeCwdToDir } from '@lore/transcript-locate';
-import { nonBlank, type SessionPayload, type SessionSource, type SessionSummary } from './index.js';
+import fs from "node:fs";
+import path from "node:path";
+import { claudeProjectsRoot, encodeCwdToDir } from "@lore/transcript-locate";
+import { nonBlank, type SessionPayload, type SessionSource, type SessionSummary } from "./index.js";
 
 export type ClaudeCodeSourceOptions = {
   /** Override the projects root. Defaults to `claudeProjectsRoot()`. */
@@ -13,7 +13,7 @@ export type ClaudeCodeSourceOptions = {
 };
 
 export class ClaudeCodeSource implements SessionSource {
-  readonly runtime = 'claude-code' as const;
+  readonly runtime = "claude-code" as const;
   private readonly projectDir: string;
 
   constructor(opts: ClaudeCodeSourceOptions = {}) {
@@ -28,8 +28,7 @@ export class ClaudeCodeSource implements SessionSource {
     //   3. `process.cwd()` — last resort, used when the plugin is run
     //      outside Claude Code (e.g. a developer invoking the binary
     //      directly during testing).
-    const cwd =
-      opts.cwd ?? nonBlank(process.env.CLAUDE_PROJECT_DIR) ?? process.cwd();
+    const cwd = opts.cwd ?? nonBlank(process.env.CLAUDE_PROJECT_DIR) ?? process.cwd();
     this.projectDir = path.join(root, encodeCwdToDir(cwd));
   }
 
@@ -49,8 +48,7 @@ export class ClaudeCodeSource implements SessionSource {
     // id is strongly preferred. Claude Code's own var name is
     // `CLAUDE_CODE_SESSION_ID`, but older docs and sibling runtimes
     // sometimes reference `CLAUDE_SESSION_ID`; honor both.
-    const envId =
-      nonBlank(env.CLAUDE_CODE_SESSION_ID) ?? nonBlank(env.CLAUDE_SESSION_ID);
+    const envId = nonBlank(env.CLAUDE_CODE_SESSION_ID) ?? nonBlank(env.CLAUDE_SESSION_ID);
     if (envId !== null) return this.findById(envId);
 
     // Last-resort fallback: newest-by-mtime jsonl. Mirrors
@@ -62,7 +60,7 @@ export class ClaudeCodeSource implements SessionSource {
     if (!latest) {
       throw new Error(
         `no Claude Code session found in ${this.projectDir} — ` +
-          'has Claude Code logged any session for this project yet?',
+          "has Claude Code logged any session for this project yet?",
       );
     }
     return latest;
@@ -72,8 +70,8 @@ export class ClaudeCodeSource implements SessionSource {
     if (!fs.existsSync(this.projectDir)) return [];
     const sessions: SessionSummary[] = [];
     for (const entry of fs.readdirSync(this.projectDir, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
-      const sessionId = entry.name.slice(0, -'.jsonl'.length);
+      if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+      const sessionId = entry.name.slice(0, -".jsonl".length);
       const filePath = path.join(this.projectDir, entry.name);
       const stat = fs.statSync(filePath);
       sessions.push({
@@ -108,13 +106,12 @@ export class ClaudeCodeSource implements SessionSource {
 
   readSession(session: SessionSummary): SessionPayload {
     const transcriptPath =
-      session.transcriptPath ??
-      path.join(session.sessionDir, `${session.sessionId}.jsonl`);
+      session.transcriptPath ?? path.join(session.sessionDir, `${session.sessionId}.jsonl`);
     let transcript: string;
     try {
       const stat = fs.statSync(transcriptPath);
-      if (!stat.isFile()) throw new Error('not a file');
-      transcript = fs.readFileSync(transcriptPath, 'utf8');
+      if (!stat.isFile()) throw new Error("not a file");
+      transcript = fs.readFileSync(transcriptPath, "utf8");
     } catch {
       throw new Error(
         `Claude Code session ${session.sessionId} has no transcript file at ${transcriptPath}`,

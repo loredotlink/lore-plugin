@@ -1,4 +1,4 @@
-import fs from 'node:fs';
+import fs from "node:fs";
 import {
   TRANSCRIPT_FILENAME_CANDIDATES,
   coworkSessionsRoot,
@@ -6,8 +6,8 @@ import {
   findCoworkTranscriptFile,
   listCoworkArtifactFiles,
   listCoworkSessions,
-} from '@lore/transcript-locate';
-import { nonBlank, type SessionPayload, type SessionSource, type SessionSummary } from './index.js';
+} from "@lore/transcript-locate";
+import { nonBlank, type SessionPayload, type SessionSource, type SessionSummary } from "./index.js";
 
 export type CoworkSourceOptions = {
   /** Override the sessions root. Defaults to `coworkSessionsRoot()`. */
@@ -17,7 +17,7 @@ export type CoworkSourceOptions = {
 };
 
 export class CoworkSource implements SessionSource {
-  readonly runtime = 'cowork' as const;
+  readonly runtime = "cowork" as const;
   private readonly sessionsRoot: string;
 
   constructor(opts: CoworkSourceOptions = {}) {
@@ -31,7 +31,7 @@ export class CoworkSource implements SessionSource {
     const all = this.listSessions();
     const latest = all[0];
     if (!latest) {
-      throw new Error('no Cowork session found');
+      throw new Error("no Cowork session found");
     }
     return latest;
   }
@@ -59,7 +59,7 @@ export class CoworkSource implements SessionSource {
     if (!transcriptPath) {
       throw new Error(
         `Session ${session.sessionDir} has no transcript file under ${localDir} ` +
-          `(looked for ${TRANSCRIPT_FILENAME_CANDIDATES.join(', ')})`,
+          `(looked for ${TRANSCRIPT_FILENAME_CANDIDATES.join(", ")})`,
       );
     }
     return {
@@ -67,9 +67,9 @@ export class CoworkSource implements SessionSource {
       accountId: session.accountId,
       orgId: session.orgId,
       transcriptPath,
-      transcript: fs.readFileSync(transcriptPath, 'utf8'),
-      uploads: listCoworkArtifactFiles(localDir, 'uploads'),
-      outputs: listCoworkArtifactFiles(localDir, 'outputs'),
+      transcript: fs.readFileSync(transcriptPath, "utf8"),
+      uploads: listCoworkArtifactFiles(localDir, "uploads"),
+      outputs: listCoworkArtifactFiles(localDir, "outputs"),
     };
   }
 }

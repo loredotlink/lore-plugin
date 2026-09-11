@@ -35,8 +35,8 @@
  *   that calls `detectSource()` — it cannot be redirected, matching the
  *   "no env vars or arguments" constraint.
  */
-import { detectSource, type SessionSource } from '../lib/session/index.js';
-import type { ToolDefinition } from '../lib/tool.js';
+import { detectSource, type SessionSource } from "../lib/session/index.js";
+import type { ToolDefinition } from "../lib/tool.js";
 
 export type ListLocalSessionsResult = {
   sessions: Array<{
@@ -56,22 +56,22 @@ export function runListLocalSessions(source: SessionSource): ListLocalSessionsRe
   return {
     sessions: sessions.map((s) => ({
       session_id: s.sessionId,
-      account_id: s.accountId ?? '',
-      org_id: s.orgId ?? '',
+      account_id: s.accountId ?? "",
+      org_id: s.orgId ?? "",
       mtime_ms: s.mtimeMs,
     })),
   };
 }
 
 export const listLocalSessionsTool: ToolDefinition = {
-  name: 'list_local_sessions',
+  name: "list_local_sessions",
   description:
-    'List local sessions on this machine, newest-first by mtime. ' +
-    'Use this only when the user explicitly asks to browse or pick a ' +
-    'session other than the current one — the default share flow does ' +
-    'not need this tool. Returns an empty list when no sessions exist.',
+    "List local sessions on this machine, newest-first by mtime. " +
+    "Use this only when the user explicitly asks to browse or pick a " +
+    "session other than the current one — the default share flow does " +
+    "not need this tool. Returns an empty list when no sessions exist.",
   inputSchema: {
-    type: 'object',
+    type: "object",
     properties: {},
     additionalProperties: false,
   },

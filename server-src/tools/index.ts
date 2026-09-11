@@ -10,13 +10,13 @@
  * but it does drive the order in `tools/list` responses; clients that
  * display tools verbatim will see them in this order.
  */
-import type { ToolDefinition } from '../lib/tool.js';
-import { cloudProxyTools } from './cloudProxyTools.js';
-import { listLocalSessionsTool } from './listLocalSessions.js';
-import { loreLoginTool } from './lore_login.js';
-import { loreLoginResumeTool } from './lore_login_resume.js';
-import { readLocalSessionTool } from './readLocalSession.js';
-import { shareSessionTool } from './share_session.js';
+import type { ToolDefinition } from "../lib/tool.js";
+import { cloudProxyTools } from "./cloudProxyTools.js";
+import { listLocalSessionsTool } from "./listLocalSessions.js";
+import { loreLoginTool } from "./lore_login.js";
+import { loreLoginResumeTool } from "./lore_login_resume.js";
+import { readLocalSessionTool } from "./readLocalSession.js";
+import { shareSessionTool } from "./share_session.js";
 
 export const tools: ToolDefinition[] = [
   listLocalSessionsTool,
