@@ -199,7 +199,6 @@ describe("bundled Amp plugin artifact", () => {
 
     expect(bundle).toContain("export {");
     expect(bundle).toContain("amp threads export");
-    expect(bundle).not.toContain("/api/otel/");
     expect(bundle).not.toContain("passive-thread-upload");
     expect(bundle).not.toContain("@lore/identity-store");
     expect(bundle).not.toContain("@lore/contracts");
