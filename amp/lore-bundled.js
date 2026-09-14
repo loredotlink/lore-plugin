@@ -22208,12 +22208,6 @@ var threadDetailsSchema = threadSummarySchema.extend({
 var errorSchema10 = exports_external.object({
   message: exports_external.string(),
 });
-var demoNotSeededResponseSchema = exports_external.object({
-  error: exports_external.object({
-    code: exports_external.literal("demo_not_seeded"),
-    message: exports_external.string(),
-  }),
-});
 var handleRegex = /^[a-zA-Z0-9_-]{2,32}$/;
 var handleSchema = exports_external
   .string()
@@ -22372,8 +22366,6 @@ var userProfileResourceSchema = exports_external.object({
   visible_thread_count: exports_external.number().int().nonnegative(),
   follower_count: exports_external.number().int().nonnegative(),
   following_count: exports_external.number().int().nonnegative(),
-  total_input_tokens: exports_external.number().int().nonnegative().optional(),
-  total_output_tokens: exports_external.number().int().nonnegative().optional(),
   is_following: exports_external.boolean(),
   is_self: exports_external.boolean(),
 });
@@ -23266,8 +23258,6 @@ var threadResourceSchema = exports_external.object({
   status: exports_external.enum(["done", "working", "waiting", "failed"]).optional(),
   blocks: threadBlockListResponseSchema,
   user_message_count: exports_external.number().int().nonnegative(),
-  total_input_tokens: exports_external.number().int().nonnegative().optional(),
-  total_output_tokens: exports_external.number().int().nonnegative().optional(),
   files_touched: exports_external.array(exports_external.string()),
   skills_invoked: exports_external.array(exports_external.string()),
   slash_commands_invoked: exports_external.array(exports_external.string()),
@@ -23733,8 +23723,6 @@ var threadListObjectSchema = exports_external.object({
   status: exports_external.enum(["done", "working", "waiting", "failed"]).optional(),
   blocks: threadBlockListResponseSchema,
   user_message_count: exports_external.number().int().nonnegative(),
-  total_input_tokens: exports_external.number().int().nonnegative().optional(),
-  total_output_tokens: exports_external.number().int().nonnegative().optional(),
   files_touched: exports_external.array(exports_external.string()),
   skills_invoked: exports_external.array(exports_external.string()),
   harness: harnessSchema,
@@ -25817,7 +25805,6 @@ var apiContract = c11.router(
         401: errorSchema10,
         500: errorSchema10,
         502: errorSchema10,
-        503: demoNotSeededResponseSchema,
       },
       summary: "Validate a WorkOS Bearer token and return member plus user fields",
     },
