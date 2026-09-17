@@ -6,7 +6,6 @@
   "license": "FSL-1.1-ALv2",
   "scripts": {
     "build": "./scripts/build.sh",
-    "lint": "tsc --checkers 1 --noEmit",
     "test": "bun test",
     "typecheck": "tsc --checkers 1 --noEmit"
   },
