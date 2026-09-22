@@ -22806,7 +22806,7 @@ var askThreadsConversationTurnSchema = exports_external.object({
   question: exports_external.string().max(2000),
   answer: exports_external.string().max(8000),
 });
-var ASK_THREADS_MODELS = ["gpt-5.6-terra", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"];
+var ASK_THREADS_MODELS = ["gpt-6-sol", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"];
 var askThreadsModelSchema = exports_external.enum(ASK_THREADS_MODELS);
 var askThreadsRequestSchema = exports_external.object({
   question: exports_external
@@ -22817,7 +22817,7 @@ var askThreadsRequestSchema = exports_external.object({
     .describe("Question to answer from visible Lore threads"),
   model: askThreadsModelSchema
     .optional()
-    .describe("OpenAI model to use for this question; defaults to Terra"),
+    .describe("OpenAI model to use for this question; defaults to Sol"),
   session_id: exports_external
     .string()
     .min(1)
@@ -23402,11 +23402,11 @@ var createThreadRequestBaseSchema = exports_external.object({
 var wbModeSchema = exports_external.enum(["general", "create", "comment"]);
 var wbCoreModelConfigurationSchema = exports_external.discriminatedUnion("model", [
   exports_external.object({
-    model: exports_external.literal("gpt-5.6-luna"),
+    model: exports_external.literal("gpt-6-luna"),
     reasoning_level: exports_external.enum(["low", "high"]),
   }),
   exports_external.object({
-    model: exports_external.literal("gpt-5.6-terra"),
+    model: exports_external.literal("gpt-6-sol"),
     reasoning_level: exports_external.literal("medium"),
   }),
   exports_external.object({
@@ -23436,7 +23436,7 @@ var wbCoreModelConfigurationSchema = exports_external.discriminatedUnion("model"
 ]);
 var multisubmitModelConfigurationSchema = exports_external.discriminatedUnion("model", [
   exports_external.object({
-    model: exports_external.literal("gpt-5.6-luna"),
+    model: exports_external.literal("gpt-6-luna"),
     reasoning_level: exports_external.enum(["low", "high"]),
   }),
   exports_external.object({
@@ -23453,8 +23453,8 @@ var multisubmitModelConfigurationSchema = exports_external.discriminatedUnion("m
   }),
 ]);
 var WB_CORE_MODEL_CONFIGURATIONS = {
-  "gpt-5.6-luna": { model: "gpt-5.6-luna", reasoning_level: "high" },
-  "gpt-5.6-terra": { model: "gpt-5.6-terra", reasoning_level: "medium" },
+  "gpt-6-luna": { model: "gpt-6-luna", reasoning_level: "high" },
+  "gpt-6-sol": { model: "gpt-6-sol", reasoning_level: "medium" },
   "claude-opus-5": { model: "claude-opus-5", reasoning_level: "medium" },
   "claude-sonnet-5": { model: "claude-sonnet-5", reasoning_level: "medium" },
   "claude-haiku-4-5-20251001": {
@@ -23466,11 +23466,11 @@ var WB_CORE_MODEL_CONFIGURATIONS = {
   "openai/gpt-oss-120b": { model: "openai/gpt-oss-120b", reasoning_level: "low" },
 };
 var wbCoreModelSchema = exports_external.enum(Object.keys(WB_CORE_MODEL_CONFIGURATIONS));
-var DEFAULT_WB_CORE_MODEL_CONFIGURATION = WB_CORE_MODEL_CONFIGURATIONS["gpt-5.6-luna"];
+var DEFAULT_WB_CORE_MODEL_CONFIGURATION = WB_CORE_MODEL_CONFIGURATIONS["gpt-6-luna"];
 var WB_MODE_MODEL_CONFIGURATION = {
   general: DEFAULT_WB_CORE_MODEL_CONFIGURATION,
-  create: WB_CORE_MODEL_CONFIGURATIONS["gpt-5.6-luna"],
-  comment: { model: "gpt-5.6-luna", reasoning_level: "low" },
+  create: WB_CORE_MODEL_CONFIGURATIONS["gpt-6-luna"],
+  comment: { model: "gpt-6-luna", reasoning_level: "low" },
 };
 var createThreadRequestWithoutModelConfigurationSchema = createThreadRequestBaseSchema.extend({
   mode: wbModeSchema.optional(),
@@ -23590,7 +23590,7 @@ var createMultisubmitChildRequestSchema = exports_external.discriminatedUnion("m
   exports_external
     .object({
       mode: wbModeSchema,
-      model: exports_external.literal("gpt-5.6-luna"),
+      model: exports_external.literal("gpt-6-luna"),
       reasoning_level: exports_external.enum(["low", "high"]),
     })
     .strict(),
