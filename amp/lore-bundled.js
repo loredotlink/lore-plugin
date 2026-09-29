@@ -23252,7 +23252,6 @@ var listThreadsQuerySchema = exports_external.object({
   filepath_prefixes: exports_external.string().min(1).optional(),
   harnesses: exports_external.string().min(1).optional().describe("Comma-separated harness values (claudeCode, codex, amp, cowork, \u2026); returns threads produced by any of them."),
   q: exports_external.string().trim().min(1).max(200).optional(),
-  shared_only: exports_external.coerce.string().min(1).optional().describe("When 'true', return only threads the viewer explicitly shared."),
   include_archived: exports_external.coerce.string().min(1).optional().describe("When 'false', exclude archived threads. Archived threads are included by default."),
   binder_id: exports_external.string().min(1).max(64).optional().describe("A binder id, or 'unsorted' for threads filed in no binder."),
   organization_binder_id: exports_external.string().min(1).max(64).optional().describe("Only threads included in this independent personal Tag."),
