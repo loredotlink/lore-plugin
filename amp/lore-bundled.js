@@ -19005,12 +19005,115 @@ var initContract = () => {
   };
 };
 
+// ../contracts/src/experimentCanvas.ts
+var recordId = (prefix) => exports_external.string().regex(new RegExp(`^${prefix}_[0-9A-Za-z]{22}$`));
+var name = exports_external.string().max(200);
+var dimensionValueSchema = exports_external.object({ id: recordId("ecv"), name }).strict();
+var dimensionSchema = exports_external.discriminatedUnion("type", [
+  exports_external.object({
+    id: recordId("ecd"),
+    name,
+    type: exports_external.literal("continuous"),
+    start_value: exports_external.int(),
+    end_value: exports_external.int()
+  }).strict(),
+  exports_external.object({
+    id: recordId("ecd"),
+    name,
+    type: exports_external.literal("discrete"),
+    values: exports_external.array(dimensionValueSchema).max(100)
+  }).strict()
+]);
+var experimentCanvasContentSchema = exports_external.object({
+  schema_version: exports_external.literal(1),
+  name: exports_external.string().trim().min(1).max(200),
+  dimensions: exports_external.array(dimensionSchema).max(50),
+  selected_value_ids: exports_external.array(recordId("ecv")).max(5000).default([]),
+  workflow: exports_external.object({
+    prompt: exports_external.string().max(30000).refine((value) => new TextEncoder().encode(value).byteLength <= 48000, "Workflow text must fit within 48 KB.")
+  }).strict().default({ prompt: "" }),
+  previews_generated: exports_external.boolean().default(false)
+}).strict().superRefine((content, context) => {
+  const ids = new Set;
+  for (const dimension of content.dimensions) {
+    for (const id of [
+      dimension.id,
+      ...dimension.type === "discrete" ? dimension.values.map((value) => value.id) : []
+    ]) {
+      if (ids.has(id))
+        context.addIssue({ code: "custom", message: "Canvas record IDs must be unique." });
+      ids.add(id);
+    }
+  }
+});
+var experimentCanvasSchema = exports_external.object({
+  id: recordId("ec"),
+  project_id: recordId("proj"),
+  version_id: recordId("ecver"),
+  version_number: exports_external.int().positive(),
+  launched_at: exports_external.string().nullable(),
+  content: experimentCanvasContentSchema
+}).strict();
+var experimentCanvasDraftSchema = experimentCanvasSchema.extend({
+  draft_revision: exports_external.int().nonnegative(),
+  has_draft: exports_external.boolean()
+});
+var saveExperimentCanvasDraftSchema = exports_external.object({
+  expected_version_id: recordId("ecver"),
+  content: experimentCanvasContentSchema,
+  expected_draft_revision: exports_external.int().nonnegative(),
+  edit_session_id: recordId("ecedit"),
+  edit_sequence: exports_external.int().positive()
+}).strict();
+var createExperimentCanvasSchema = exports_external.object({ name: exports_external.string().trim().min(1).max(200) }).strict();
+var experimentCanvasListSchema = exports_external.object({
+  objects: exports_external.array(exports_external.object({
+    id: recordId("ec"),
+    name: exports_external.string()
+  }).strict())
+}).strict();
+var experimentWorkflowContentSchema = exports_external.object({
+  prompt: exports_external.string().max(30000).refine((value) => new TextEncoder().encode(value).byteLength <= 48000, "Workflow text must fit within 48 KB.")
+}).strict();
+var experimentPermutationSchema = exports_external.object({
+  values: exports_external.array(exports_external.object({
+    dimension_id: recordId("ecd"),
+    dimension_name: exports_external.string(),
+    value_id: recordId("ecv"),
+    value_name: exports_external.string()
+  }).strict()),
+  prompt: exports_external.string()
+}).strict();
+var experimentCanvasEntrySchema = experimentPermutationSchema.extend({
+  id: recordId("ebe"),
+  thread_id: recordId("th").nullable(),
+  status: exports_external.enum(["working", "waiting", "failed", "done"]),
+  error: exports_external.string().optional()
+});
+var experimentCanvasVersionSchema = experimentCanvasSchema.extend({
+  entries: exports_external.array(experimentCanvasEntrySchema),
+  parent_thread_id: recordId("th").nullable().optional()
+}).strict();
+var experimentCanvasAttachmentSchema = exports_external.object({
+  kind: exports_external.literal("experiment_canvas_version"),
+  project_id: recordId("proj"),
+  canvas_id: recordId("ec"),
+  version_id: recordId("ecver"),
+  version_number: exports_external.int().positive(),
+  name: exports_external.string()
+});
+var experimentCanvasThreadContextSchema = exports_external.object({
+  resource: experimentCanvasAttachmentSchema,
+  content: experimentCanvasContentSchema,
+  entries: exports_external.array(experimentCanvasEntrySchema.omit({ status: true }))
+});
+
 // ../contracts/src/dictation.ts
 var DICTATION_MAX_BYTES = 10 * 1024 * 1024;
 var dictationResponseSchema = exports_external.object({ text: exports_external.string() });
 // ../contracts/src/organizationAuthority.ts
 var id = exports_external.string().min(1).max(64);
-var name = exports_external.string().trim().min(1).max(120);
+var name2 = exports_external.string().trim().min(1).max(120);
 var error51 = exports_external.object({ message: exports_external.string() });
 var headers = exports_external.object({ authorization: exports_external.string().min(1).optional() });
 var pathParams = exports_external.object({ id });
@@ -19020,7 +19123,7 @@ var organizationDecisionVersionsSchema = exports_external.object({
   input_version: exports_external.string().min(1).max(200)
 });
 var labelMembershipSourceSchema = exports_external.enum(["manual_or_cohort", "automatic", "rejected"]);
-var personalLabelSchema = exports_external.object({ id, name, owner_user_id: id });
+var personalLabelSchema = exports_external.object({ id, name: name2, owner_user_id: id });
 var labelDecisionSchema = exports_external.object({
   label_id: id,
   source: labelMembershipSourceSchema,
@@ -19061,7 +19164,7 @@ var tagPolicySchema = exports_external.object({
 });
 var organizationProposalEvidenceSchema = exports_external.object({
   kind: exports_external.enum(["label", "label_and_binder"]),
-  name,
+  name: name2,
   rationale: exports_external.string().min(1).max(4000),
   inclusion_rule: exports_external.string().trim().min(1).max(4000).nullable(),
   cohort: exports_external.array(exports_external.object({ thread_id: id, input_version: exports_external.string().min(1).max(200) })).min(5).max(200),
@@ -19080,8 +19183,8 @@ var organizationProposalSchema = exports_external.object({
   approved_thread_ids: exports_external.array(id).nullable()
 });
 var approveOrganizationProposalBodySchema = exports_external.object({
-  name,
-  binder_name: name.optional(),
+  name: name2,
+  binder_name: name2.optional(),
   inclusion_rule: exports_external.string().trim().min(1).max(4000).optional(),
   thread_ids: exports_external.array(id).min(1).max(200),
   confirmed_example_thread_ids: exports_external.array(id).max(5).default([])
@@ -19098,7 +19201,7 @@ var organizationAuthorityContract = c.router({
     method: "POST",
     path: "/labels",
     headers,
-    body: exports_external.object({ name }),
+    body: exports_external.object({ name: name2 }),
     responses: { 201: personalLabelSchema, 401: error51, 409: error51 }
   },
   getThreadOrganization: {
@@ -20772,11 +20875,11 @@ var PROMPT_ATTACHMENT_BLOCKED_EXTENSIONS = [
   "lnk",
   "desktop"
 ];
-function isPromptAttachmentFileNameBlocked(name2) {
-  const dot = name2.lastIndexOf(".");
-  if (dot < 0 || dot === name2.length - 1)
+function isPromptAttachmentFileNameBlocked(name3) {
+  const dot = name3.lastIndexOf(".");
+  if (dot < 0 || dot === name3.length - 1)
     return false;
-  const extension = name2.slice(dot + 1).toLowerCase();
+  const extension = name3.slice(dot + 1).toLowerCase();
   return PROMPT_ATTACHMENT_BLOCKED_EXTENSIONS.includes(extension);
 }
 var wbCoreInputImageSchema = exports_external.object({
@@ -20990,6 +21093,29 @@ var wbCoreArtifactDraftSchema = exports_external.object({
   html: exports_external.string().min(1),
   done: exports_external.boolean()
 }).strict();
+var wbCorePlayProgressPartSchema = exports_external.enum([
+  "rules",
+  "controls",
+  "motion",
+  "scoring",
+  "layout",
+  "visuals"
+]);
+var wbCorePlayProgressSchema = exports_external.discriminatedUnion("phase", [
+  exports_external.object({
+    turnId: exports_external.string().min(1),
+    phase: exports_external.literal("writing"),
+    part: wbCorePlayProgressPartSchema.nullable()
+  }).strict(),
+  exports_external.object({ turnId: exports_external.string().min(1), phase: exports_external.literal("building") }).strict(),
+  exports_external.object({ turnId: exports_external.string().min(1), phase: exports_external.literal("testing") }).strict(),
+  exports_external.object({
+    turnId: exports_external.string().min(1),
+    phase: exports_external.literal("fixing"),
+    problems: exports_external.number().int().min(1)
+  }).strict(),
+  exports_external.object({ turnId: exports_external.string().min(1), phase: exports_external.literal("explaining") }).strict()
+]);
 var wbCoreWarmWorkspaceResultSchema = exports_external.discriminatedUnion("warmed", [
   exports_external.object({
     warmed: exports_external.literal(true),
@@ -21166,7 +21292,7 @@ var updateProjectRequestSchema = exports_external.object({
   visibility: projectVisibilitySchema.optional(),
   organization_mode: projectOrganizationModeSchema.optional(),
   e2b_template_name: exports_external.string().trim().min(1).max(255).optional()
-}).strict().refine(({ name: name2, description, visibility, organization_mode, e2b_template_name: e2bTemplateName }) => name2 !== undefined || description !== undefined || visibility !== undefined || organization_mode !== undefined || e2bTemplateName !== undefined, { message: "At least one Environment field is required." });
+}).strict().refine(({ name: name3, description, visibility, organization_mode, e2b_template_name: e2bTemplateName }) => name3 !== undefined || description !== undefined || visibility !== undefined || organization_mode !== undefined || e2bTemplateName !== undefined, { message: "At least one Environment field is required." });
 var revealProjectSecretResponseSchema = exports_external.object({
   value: projectSecretValueSchema
 });
@@ -21222,11 +21348,13 @@ var threadEventTypeSchema = exports_external.enum([
   "thread.completed",
   "thread.block.appended",
   "thread.detail.invalidated",
+  "thread.list.changed",
   "thread.sync.invalidated",
   "multisubmitgroup.detail.invalidated",
   "artifact.comment.changed",
   "thread.participant.joined",
   "thread.participant.left",
+  "user.followed",
   "user.joined",
   "notification.created",
   "scheduled_task.run.changed",
@@ -21296,6 +21424,10 @@ var threadEventSchema = exports_external.discriminatedUnion("type", [
     })
   }),
   threadEventBase.extend({
+    type: exports_external.literal("thread.list.changed"),
+    payload: exports_external.object({ thread_id: exports_external.string().min(1).nullable() })
+  }),
+  threadEventBase.extend({
     type: exports_external.literal("thread.sync.invalidated"),
     desktop_sync: exports_external.object({
       resource_type: exports_external.literal("thread"),
@@ -21334,6 +21466,14 @@ var threadEventSchema = exports_external.discriminatedUnion("type", [
     payload: exports_external.object({
       thread_id: exports_external.string().min(1),
       participant_user_id: exports_external.string().min(1)
+    })
+  }),
+  threadEventBase.extend({
+    type: exports_external.literal("user.followed"),
+    payload: exports_external.object({
+      followee_id: exports_external.string().min(1),
+      followee_handle: exports_external.string().nullable(),
+      followee_display_name: exports_external.string().nullable()
     })
   }),
   threadEventBase.extend({
@@ -22169,19 +22309,15 @@ var userProfileResourceSchema = exports_external.object({
   organization_name: exports_external.string().min(1).nullable(),
   created_at: exports_external.string().min(1),
   visible_thread_count: exports_external.number().int().nonnegative(),
+  follower_count: exports_external.number().int().nonnegative(),
+  following_count: exports_external.number().int().nonnegative(),
+  is_following: exports_external.boolean(),
   is_self: exports_external.boolean()
 });
 var organizationMemberListResponseSchema = exports_external.object({
   type: exports_external.literal("list"),
   list_type: exports_external.literal("organization_member"),
   objects: exports_external.array(organizationMemberSchema)
-});
-var createOrganizationInviteRequestSchema = exports_external.object({
-  email_address: exports_external.string().email()
-});
-var createOrganizationInviteResponseSchema = exports_external.object({
-  email_address: exports_external.string().email(),
-  invitation_id: exports_external.string().min(1)
 });
 var ensureWorkOSOrganizationResponseSchema = exports_external.object({
   organization_id: exports_external.string().min(1),
@@ -22866,6 +23002,7 @@ var incognitoThreadPolicySchema = exports_external.object({
 });
 var threadResourceSchema = exports_external.object({
   id: exports_external.string().min(1),
+  attached_resource: experimentCanvasAttachmentSchema.optional(),
   ask_source_scope: askSourceScopeSchema.optional(),
   execution_project_id: exports_external.string().min(1).nullable().optional(),
   desktop_sync_revision: exports_external.string().regex(/^\d+$/).optional(),
@@ -23207,7 +23344,7 @@ var sideChatProjectionChildSchema = exports_external.object({
   position: exports_external.number().int().nonnegative(),
   mode: wbModeSchema
 }).and(wbCoreModelConfigurationSchema);
-var multisubmitGroupKindSchema = exports_external.enum(["comparison", "delegation"]);
+var multisubmitGroupKindSchema = exports_external.enum(["comparison", "delegation", "experiment"]).describe("Experiment groups are canvas execution fan-out with no transcript anchor.");
 var multisubmitGroupResourceSchema = exports_external.object({
   id: exports_external.string().min(1),
   kind: multisubmitGroupKindSchema.default("comparison"),
@@ -23344,6 +23481,17 @@ var threadPreviewResponseSchema = exports_external.discriminatedUnion("redacted"
     cover_url: exports_external.string().nullable()
   })
 ]);
+var sidebarThreadChildSchema = exports_external.object({
+  id: exports_external.string().min(1),
+  parent_thread_id: exports_external.string().min(1),
+  title: exports_external.string(),
+  author: threadListAuthorSchema,
+  harness: harnessSchema,
+  last_activity_at: exports_external.string().datetime(),
+  is_archived: exports_external.boolean(),
+  is_unread: exports_external.boolean(),
+  status: exports_external.enum(["done", "working", "waiting", "failed"])
+});
 var threadListObjectSchema = exports_external.object({
   id: exports_external.string().min(1),
   execution_project_id: exports_external.string().min(1).nullable().optional(),
@@ -23377,7 +23525,8 @@ var threadListObjectSchema = exports_external.object({
   share_count: exports_external.number().int().nonnegative().optional(),
   has_email_share: exports_external.boolean().optional(),
   multisubmit_groups: exports_external.array(multisubmitGroupResourceSchema).optional(),
-  side_chats: exports_external.array(sideChatResourceSchema).optional()
+  side_chats: exports_external.array(sideChatResourceSchema).optional(),
+  sidebar_children: exports_external.array(sidebarThreadChildSchema).optional()
 });
 var threadListResponseSchema = exports_external.object({
   type: exports_external.literal("list"),
@@ -23406,25 +23555,13 @@ var desktopThreadSyncManifestSchema = exports_external.object({
   threads: exports_external.array(desktopThreadSyncObjectSchema),
   tombstones: exports_external.array(desktopThreadSyncTombstoneSchema)
 });
-var uploadSessionSummarySchema = exports_external.object({
-  id: exports_external.string(),
-  status: exports_external.enum(["incomplete", "locked_for_parsing", "complete", "error"]),
-  created_at: exports_external.string(),
-  thread_count: exports_external.number().int().nonnegative(),
-  skill_count: exports_external.number().int().nonnegative().default(0),
-  thread_ids: exports_external.array(exports_external.string()).default([])
-});
-var uploadSessionListResponseSchema = exports_external.object({
-  type: exports_external.literal("list"),
-  list_type: exports_external.literal("upload_session"),
-  objects: exports_external.array(uploadSessionSummarySchema)
-});
 var threadBlockListQuerySchema = exports_external.object({
   before: exports_external.string().min(1).optional(),
   after: exports_external.string().min(1).optional()
 });
 var uploadMetadataQuerySchema = exports_external.union([exports_external.string().min(1), uploadMetadataSchema]);
 var listThreadsQuerySchema = exports_external.object({
+  sidebar: exports_external.coerce.string().pipe(exports_external.enum(["true", "false"])).optional(),
   before: exports_external.string().min(1).optional(),
   after: exports_external.string().min(1).optional(),
   author_ids: exports_external.string().min(1).optional(),
@@ -23589,6 +23726,10 @@ var wbCoreSkillActivationResponseSchema = exports_external.object({
 }).strict();
 var setSkillVisibilityRequestSchema = exports_external.object({
   visibility: skillVisibilitySchema2
+});
+var updateSkillMarkdownRequestSchema = exports_external.object({
+  markdown: exports_external.string().min(1).max(64 * 1024),
+  expected_version_id: exports_external.string().min(1)
 });
 var sharedSkillPreviewSchema = exports_external.object({
   type: exports_external.literal("shared_skill_preview"),
@@ -23787,6 +23928,10 @@ var artifactPackageSummarySchema = exports_external.object({
   runtime_release: exports_external.string().min(1).nullable(),
   vocabulary_release: exports_external.string().min(1).nullable()
 });
+var playCapabilitySchema = exports_external.discriminatedUnion("kind", [
+  exports_external.object({ kind: exports_external.literal("game"), comparison: exports_external.enum(["higher", "lower"]) }),
+  exports_external.object({ kind: exports_external.literal("toy"), comparison: exports_external.literal("none") })
+]);
 var postSummarySchema = exports_external.object({
   id: exports_external.string(),
   artifact_id: exports_external.string(),
@@ -23794,8 +23939,10 @@ var postSummarySchema = exports_external.object({
   version_number: exports_external.number().int().positive(),
   caption: exports_external.string().nullable(),
   created_at: exports_external.string().describe("ISO-8601 publish time."),
+  listed_at: exports_external.string().nullable(),
   author: postAuthorSchema,
   artifact_package: artifactPackageSummarySchema.nullable(),
+  play_capability: playCapabilitySchema.nullable(),
   preview_url: exports_external.string().nullable(),
   cover_url: exports_external.string().nullable(),
   engagement: postEngagementSchema,
@@ -23806,7 +23953,8 @@ var postOpenGraphPreviewSchema = exports_external.object({
   caption: exports_external.string().nullable(),
   author_display_name: exports_external.string(),
   preview_url: exports_external.string().nullable(),
-  cover_url: exports_external.string().nullable()
+  cover_url: exports_external.string().nullable(),
+  play_capability: playCapabilitySchema.nullable()
 });
 var matchSeatSchema = exports_external.enum(["a", "b"]);
 var matchOutcomeSchema = exports_external.enum(["ongoing", "won", "lost", "draw"]);
@@ -23904,7 +24052,7 @@ var listPostsQuerySchema = exports_external.union([
     ...postListPaginationQuerySchema.shape
   }),
   exports_external.object({
-    scope: exports_external.enum(["workspace", "mine", "saved", "global"]).default("workspace"),
+    scope: exports_external.enum(["workspace", "mine", "saved", "global", "following"]).default("workspace"),
     ranking: exports_external.literal("top_likes").optional(),
     new_since: exports_external.iso.datetime().optional(),
     feed_before: exports_external.iso.datetime().optional(),
@@ -23961,7 +24109,7 @@ var recordPostShareRequestSchema = exports_external.object({
   request_id: exports_external.uuid()
 }).strict();
 var recordPostShareResponseSchema = postEngagementSchema;
-var notificationKindSchema = exports_external.enum(["post_like", "post_comment", "post_share"]);
+var notificationKindSchema = exports_external.enum(["follow", "post_like", "post_comment", "post_share"]);
 var notificationActorSchema = postAuthorSchema;
 var socialNotificationSchema = exports_external.object({
   id: exports_external.string(),
@@ -23988,7 +24136,8 @@ var markNotificationsReadRequestSchema = exports_external.object({
 var createPostRequestSchema = exports_external.object({
   artifact_id: exports_external.string().min(1),
   artifact_version_id: exports_external.string().min(1),
-  caption: exports_external.string().nullable().optional()
+  caption: exports_external.string().nullable().optional(),
+  listed: exports_external.boolean().optional()
 }).strict();
 var remixPostRequestSchema = exports_external.object({
   client_id: exports_external.uuid()
@@ -24320,6 +24469,15 @@ var adminUserSchema = exports_external.object({
 });
 var adminListUsersQuerySchema = exports_external.object({
   q: exports_external.string().trim().min(1).max(120).optional()
+});
+var adminForceFollowRequestSchema = exports_external.object({
+  follower_id: exports_external.string().min(1),
+  followee_id: exports_external.string().min(1)
+});
+var adminForceFollowResponseSchema = exports_external.object({
+  follower_id: exports_external.string().min(1),
+  followee_id: exports_external.string().min(1),
+  is_following: exports_external.literal(true)
 });
 var contentCreationProfileSchema = exports_external.object({
   user_id: exports_external.string().min(1),
@@ -24807,6 +24965,18 @@ var blockUserResponseSchema = exports_external.object({
   blocked_id: exports_external.string().min(1),
   is_blocked: exports_external.literal(true)
 });
+var followUserResponseSchema = exports_external.object({
+  follower_id: exports_external.string().min(1),
+  followee_id: exports_external.string().min(1),
+  is_following: exports_external.literal(true),
+  follower_count: exports_external.number().int().nonnegative()
+});
+var unfollowUserResponseSchema = exports_external.object({
+  follower_id: exports_external.string().min(1),
+  followee_id: exports_external.string().min(1),
+  is_following: exports_external.literal(false),
+  follower_count: exports_external.number().int().nonnegative()
+});
 var profileMiniUserSchema = exports_external.object({
   id: exports_external.string().min(1),
   display_name: exports_external.string().min(1),
@@ -24814,16 +24984,22 @@ var profileMiniUserSchema = exports_external.object({
   avatar_url: exports_external.string().nullable(),
   avatar_color: exports_external.string().nullable().optional(),
   bio: exports_external.string().max(280).nullable(),
+  is_following: exports_external.boolean(),
   is_self: exports_external.boolean()
 });
-var referralRefereeSchema = profileMiniUserSchema.extend({
-  referred_at: exports_external.string().min(1)
-});
-var referralListResponseSchema = exports_external.object({
+var userFollowListResponseSchema = exports_external.object({
   type: exports_external.literal("list"),
-  list_type: exports_external.literal("referral"),
-  count: exports_external.number().int().nonnegative(),
-  recent: exports_external.array(referralRefereeSchema)
+  list_type: exports_external.literal("user_follow"),
+  objects: exports_external.array(profileMiniUserSchema)
+});
+var followSuggestionSchema = profileMiniUserSchema.extend({
+  mutuals: exports_external.array(profileMiniUserSchema),
+  mutual_count: exports_external.number().int().nonnegative()
+});
+var followSuggestionListResponseSchema = exports_external.object({
+  type: exports_external.literal("list"),
+  list_type: exports_external.literal("follow_suggestion"),
+  objects: exports_external.array(followSuggestionSchema)
 });
 var adminReferralsDailyPointSchema = exports_external.object({
   date: exports_external.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -24871,47 +25047,6 @@ var userContributionsResponseSchema = exports_external.object({
   daily_average: exports_external.number().nonnegative(),
   current_streak_days: exports_external.number().int().nonnegative(),
   days: exports_external.array(userContributionDaySchema)
-});
-var userActivityThreadCreatedSchema = exports_external.object({
-  type: exports_external.literal("thread_created"),
-  occurred_at: exports_external.string().datetime(),
-  id: exports_external.string().min(1),
-  thread: exports_external.object({
-    id: exports_external.string().min(1),
-    title: exports_external.string(),
-    visibility: exports_external.enum(["private", "workspace", "public"])
-  })
-});
-var userActivityThreadUpdatedSchema = exports_external.object({
-  type: exports_external.literal("thread_updated"),
-  occurred_at: exports_external.string().datetime(),
-  id: exports_external.string().min(1),
-  thread: exports_external.object({
-    id: exports_external.string().min(1),
-    title: exports_external.string(),
-    visibility: exports_external.enum(["private", "workspace", "public"])
-  })
-});
-var userActivityCommentPostedSchema = exports_external.object({
-  type: exports_external.literal("comment_posted"),
-  occurred_at: exports_external.string().datetime(),
-  id: exports_external.string().min(1),
-  comment_excerpt: exports_external.string(),
-  thread: exports_external.object({
-    id: exports_external.string().min(1),
-    title: exports_external.string(),
-    visibility: exports_external.enum(["private", "workspace", "public"])
-  })
-});
-var userActivityEventSchema = exports_external.discriminatedUnion("type", [
-  userActivityThreadCreatedSchema,
-  userActivityThreadUpdatedSchema,
-  userActivityCommentPostedSchema
-]);
-var userActivityListResponseSchema = exports_external.object({
-  type: exports_external.literal("list"),
-  list_type: exports_external.literal("user_activity"),
-  objects: exports_external.array(userActivityEventSchema)
 });
 var profileImageKindSchema = exports_external.enum(["avatar", "banner"]);
 var profileImageContentTypeSchema = exports_external.enum([
@@ -25096,8 +25231,7 @@ var apiContract = c11.router({
     path: "/whoami",
     headers: exports_external.object({
       authorization: exports_external.string().min(1).optional(),
-      "x-lore-referral-token": exports_external.string().min(1).max(16).optional(),
-      "x-lore-invited-by-user-id": exports_external.string().min(1).max(40).optional()
+      "x-lore-referral-token": exports_external.string().min(1).max(16).optional()
     }),
     responses: {
       200: whoAmIResponseSchema,
@@ -25281,7 +25415,7 @@ var apiContract = c11.router({
       401: errorSchema10,
       403: errorSchema10
     },
-    summary: "List people in the viewer\u2019s workspace with user-block activity in the last 10 minutes, deduped per author, max 10."
+    summary: "List people with user-block activity in the last 10 minutes. Includes the viewer\u2019s workspace and followed authors, deduped per author, max 10."
   },
   listThreads: {
     method: "GET",
@@ -25563,6 +25697,7 @@ var apiContract = c11.router({
           id: exports_external.string(),
           title: exports_external.string(),
           is_owner: exports_external.boolean(),
+          is_archived: exports_external.boolean(),
           status: exports_external.enum(["done", "working", "waiting", "failed"]),
           activity_at: exports_external.string().datetime().nullable(),
           outcome: exports_external.string()
@@ -26191,6 +26326,23 @@ var apiContract = c11.router({
       409: errorSchema10
     },
     summary: "Publish an artifact version to the feed"
+  },
+  listPost: {
+    method: "POST",
+    path: "/posts/:id/list",
+    pathParams: exports_external.object({
+      id: exports_external.string().min(1).describe("Stable post ID, e.g. post_...")
+    }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: exports_external.void(),
+    responses: {
+      200: postSummarySchema,
+      401: errorSchema10,
+      404: errorSchema10
+    },
+    summary: "Put your own unlisted post in the feed; an already listed post is unchanged"
   },
   remixPost: {
     method: "POST",
@@ -26827,6 +26979,23 @@ var apiContract = c11.router({
     },
     summary: "Unpublish an owned workspace skill and remove it from the team catalog"
   },
+  updateSkillMarkdown: {
+    method: "PUT",
+    path: "/skills/:id/markdown",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    body: updateSkillMarkdownRequestSchema,
+    responses: {
+      200: exports_external.object({ version_id: exports_external.string() }),
+      400: errorSchema10,
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      409: errorSchema10,
+      422: errorSchema10
+    },
+    summary: "Save a new version of an owned single-file skill"
+  },
   createSkillShare: {
     method: "POST",
     path: "/skills/:id/shares",
@@ -27245,34 +27414,6 @@ var apiContract = c11.router({
     },
     summary: "Resolve a public profile by handle \u2014 same shape as GET /users/:id but keyed on the user's chosen handle."
   },
-  listMyReferrals: {
-    method: "GET",
-    path: "/users/me/referrals",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1)
-    }),
-    responses: {
-      200: referralListResponseSchema,
-      401: errorSchema10
-    },
-    summary: "Total count plus the most-recent referees the authenticated user has attributed via `/?invited_by=\u2026` invite links. Mirrors the inviter side of users.referred_by_user_id."
-  },
-  listUserActivity: {
-    method: "GET",
-    path: "/users/:id/activity",
-    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    query: exports_external.object({
-      limit: exports_external.coerce.number().int().positive().max(100).optional()
-    }),
-    responses: {
-      200: userActivityListResponseSchema,
-      404: errorSchema10
-    },
-    summary: "Reverse-chronological activity feed for a user, scoped to what the viewer can see (same visibility rules as listThreads)."
-  },
   getUserContributions: {
     method: "GET",
     path: "/users/:id/contributions",
@@ -27285,6 +27426,45 @@ var apiContract = c11.router({
       404: errorSchema10
     },
     summary: "Daily contribution counts for the trailing 365 days \u2014 counts thread blocks the user authored on threads visible to the viewer."
+  },
+  listUserFollowers: {
+    method: "GET",
+    path: "/users/:id/followers",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    responses: {
+      200: userFollowListResponseSchema,
+      404: errorSchema10
+    },
+    summary: "List the users following a given user."
+  },
+  listUserFollowing: {
+    method: "GET",
+    path: "/users/:id/following",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    responses: {
+      200: userFollowListResponseSchema,
+      404: errorSchema10
+    },
+    summary: "List the users a given user is following."
+  },
+  listFollowSuggestions: {
+    method: "GET",
+    path: "/users/:id/follow-suggestions",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    responses: {
+      200: followSuggestionListResponseSchema,
+      404: errorSchema10
+    },
+    summary: "Mutual-follow suggestions for a viewer: walks the viewer's followees one hop further and ranks candidates by mutual count. Replaces a 1 \u2192 24 client-side fan-out across `/users/:seed/following`."
   },
   blockUser: {
     method: "POST",
@@ -27300,7 +27480,39 @@ var apiContract = c11.router({
       404: errorSchema10,
       422: errorSchema10
     },
-    summary: "Block another user. Idempotent \u2014 repeating the call is a no-op."
+    summary: "Block another user and remove follows in both directions. Idempotent \u2014 repeating the call is a no-op."
+  },
+  followUser: {
+    method: "POST",
+    path: "/users/:id/follow",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: exports_external.object({}).optional(),
+    responses: {
+      200: followUserResponseSchema,
+      401: errorSchema10,
+      404: errorSchema10,
+      409: errorSchema10,
+      422: errorSchema10
+    },
+    summary: "Follow another user. Idempotent \u2014 repeating the call is a no-op."
+  },
+  unfollowUser: {
+    method: "DELETE",
+    path: "/users/:id/follow",
+    pathParams: exports_external.object({ id: exports_external.string().min(1) }),
+    headers: exports_external.object({
+      authorization: exports_external.string().min(1).optional()
+    }),
+    body: exports_external.object({}).optional(),
+    responses: {
+      200: unfollowUserResponseSchema,
+      401: errorSchema10,
+      404: errorSchema10
+    },
+    summary: "Unfollow a user. Idempotent \u2014 repeating the call is a no-op."
   },
   uploadProfileImage: {
     method: "POST",
@@ -27329,22 +27541,6 @@ var apiContract = c11.router({
     },
     summary: "List members of the authenticated user\u2019s organization"
   },
-  createOrganizationInvite: {
-    method: "POST",
-    path: "/organization/invites",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    body: createOrganizationInviteRequestSchema,
-    responses: {
-      201: createOrganizationInviteResponseSchema,
-      401: errorSchema10,
-      403: errorSchema10,
-      409: errorSchema10,
-      422: errorSchema10
-    },
-    summary: "Send a Lore referral email attributed to the authenticated user; this does not create workspace membership"
-  },
   ensureWorkOSOrganization: {
     method: "POST",
     path: "/organization/workos/ensure",
@@ -27359,18 +27555,6 @@ var apiContract = c11.router({
       503: errorSchema10
     },
     summary: "Create or reuse a WorkOS organization for the authenticated user\u2019s non-public email domain and add the user as a member."
-  },
-  listUploadSessions: {
-    method: "GET",
-    path: "/upload_sessions",
-    headers: exports_external.object({
-      authorization: exports_external.string().min(1).optional()
-    }),
-    responses: {
-      200: uploadSessionListResponseSchema,
-      401: errorSchema10
-    },
-    summary: "List recent upload sessions for the authenticated user"
   },
   listUploadApiKeys: {
     method: "GET",
@@ -27629,6 +27813,20 @@ var apiContract = c11.router({
       404: errorSchema10
     },
     summary: "Look up a thread by thread id, thread file id, or harness session id. Tanagram admins only."
+  },
+  adminForceFollow: {
+    method: "POST",
+    path: "/admin/connections/follow",
+    headers: exports_external.object({ authorization: exports_external.string().min(1).optional() }),
+    body: adminForceFollowRequestSchema,
+    responses: {
+      200: adminForceFollowResponseSchema,
+      401: errorSchema10,
+      403: errorSchema10,
+      404: errorSchema10,
+      422: errorSchema10
+    },
+    summary: "Force follower->followee edge. Admin-only and non-destructive."
   },
   listContentCreationProfiles: {
     method: "GET",
@@ -30316,7 +30514,7 @@ function envApiKey() {
 function pluginApiKeyName(hostname3) {
   return `plugin@${hostname3}`;
 }
-var createUploadApiKey = async (name2, opts) => {
+var createUploadApiKey = async (name3, opts) => {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const accessToken = await getValidAccessToken(opts);
   const post = (bearer) => fetchImpl(`${cloudMcpBaseUrl()}/api/upload_api_keys`, {
@@ -30325,7 +30523,7 @@ var createUploadApiKey = async (name2, opts) => {
       authorization: `Bearer ${bearer}`,
       "content-type": "application/json"
     },
-    body: JSON.stringify({ name: name2 })
+    body: JSON.stringify({ name: name3 })
   });
   let response = await post(accessToken);
   if (response.status === 401) {
