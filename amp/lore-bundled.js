@@ -20384,6 +20384,12 @@ var searchContract = c10.router({
 // ../contracts/src/workbenchVideo.ts
 var VIDEO_MODELS = [
   {
+    id: "kling3.0",
+    label: "Kling 3.0",
+    aliases: ["Kling 3.0", "Kling"],
+    capabilities: { textToVideo: true, startFrame: true, endFrame: true, referenceImages: false }
+  },
+  {
     id: "seedance2_5",
     label: "Seedance 2.5",
     aliases: ["Seedance 2.5", "Seedance"],
