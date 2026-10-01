@@ -20384,12 +20384,6 @@ var searchContract = c10.router({
 // ../contracts/src/workbenchVideo.ts
 var VIDEO_MODELS = [
   {
-    id: "wan3",
-    label: "Wan 3",
-    aliases: ["Wan 3", "WAN"],
-    capabilities: { textToVideo: true, startFrame: true, endFrame: false, referenceImages: true }
-  },
-  {
     id: "seedance2_5",
     label: "Seedance 2.5",
     aliases: ["Seedance 2.5", "Seedance"],
