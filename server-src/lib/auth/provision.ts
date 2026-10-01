@@ -31,15 +31,6 @@ function envApiKey(): string | null {
   return value && value.length > 0 ? value : null;
 }
 
-/**
- * Machine-legible name for the shared key so a user revoking keys in the web UI
- * can tell which host minted each one. The `plugin@` prefix records that the
- * plugin login flow provisioned it.
- */
-export function pluginApiKeyName(hostname: string): string {
-  return `plugin@${hostname}`;
-}
-
 type CreateUploadApiKeyImpl = (
   name: string,
   opts: { home?: string; fetchImpl?: typeof fetch },
@@ -108,7 +99,8 @@ export async function provisionSharedApiKey(
   if (envApiKey() !== null) return { provisioned: false };
   if ((await readApiKey(stateDir(opts.home))) !== null) return { provisioned: false };
 
-  const rawKey = await createKey(pluginApiKeyName(hostname), {
+  // Identify the plugin and host when a user revokes keys in the web UI.
+  const rawKey = await createKey(`plugin@${hostname}`, {
     home: opts.home,
     fetchImpl: opts.fetchImpl,
   });

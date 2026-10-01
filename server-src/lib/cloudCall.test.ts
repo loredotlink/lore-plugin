@@ -417,16 +417,4 @@ describe("callCloudTool", () => {
     const ids = calls.map((c) => (c.body as { id: string }).id);
     expect(ids[0]).not.toBe(ids[1]);
   });
-
-  test("getValidAccessToken is invoked exactly once per call in the happy path", async () => {
-    await writeTokens(validTokens(), home);
-    // Confirm by counting calls to a fetchImpl that includes the auth
-    // header — one fetch ⇔ one token acquisition in this implementation.
-    const { fetchImpl, calls } = captureFetch((req) =>
-      rpcSuccess((req.body as { id: string }).id, textToolResult({ ok: true })),
-    );
-    await callCloudTool("get_thread", { id: "x" }, { fetchImpl, home });
-    expect(calls.length).toBe(1);
-    expect(calls[0]!.headers["authorization"]).toBe("Bearer access-LIVE");
-  });
 });

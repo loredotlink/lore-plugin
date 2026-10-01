@@ -244,7 +244,7 @@ describe("initiateDeviceCode", () => {
     expect(result.interval).toBe(5);
   });
 
-  test("POST body includes client_id = registered WorkOS public plugin client", async () => {
+  test("POST body carries the registered client, AuthKit scopes, and discovered resource", async () => {
     let capturedBody: string | undefined;
     const fetchImpl = makeRoutingFetch({
       deviceResponse: () => jsonResponse(makeDeviceCodeBody()),
@@ -262,34 +262,10 @@ describe("initiateDeviceCode", () => {
     expect(params.get("client_id")).toMatch(/^client_/);
     // Must NOT be the legacy pre-AuthKit client id.
     expect(params.get("client_id")).not.toBe("lore-cowork-plugin");
-  });
-
-  test("POST body includes scope = AUTHKIT_SCOPES (openid email profile offline_access)", async () => {
-    let capturedBody: string | undefined;
-    const fetchImpl = makeRoutingFetch({
-      deviceResponse: () => jsonResponse(makeDeviceCodeBody()),
-      onCall: (url, init) => {
-        if (url === TEST_DEVICE_ENDPOINT) capturedBody = init?.body as string;
-      },
-    });
-    await initiateDeviceCode({ fetchImpl, home });
-    const params = new URLSearchParams(capturedBody);
     expect(params.get("scope")).toBe(AUTHKIT_SCOPES);
     expect(params.get("scope")).toBe("openid email profile offline_access");
     // Must NOT be the legacy scope.
     expect(params.get("scope")).not.toBe("mcp.read mcp.write");
-  });
-
-  test("POST body includes resource from discovery (PRM resource field)", async () => {
-    let capturedBody: string | undefined;
-    const fetchImpl = makeRoutingFetch({
-      deviceResponse: () => jsonResponse(makeDeviceCodeBody()),
-      onCall: (url, init) => {
-        if (url === TEST_DEVICE_ENDPOINT) capturedBody = init?.body as string;
-      },
-    });
-    await initiateDeviceCode({ fetchImpl, home });
-    const params = new URLSearchParams(capturedBody);
     // WorkOS AuthKit uses RFC 8707's `resource` parameter. The value comes
     // from PRM `resource` field = TEST_RESOURCE.
     expect(params.get("resource")).toBe(TEST_RESOURCE);

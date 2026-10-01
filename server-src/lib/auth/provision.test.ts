@@ -5,7 +5,7 @@ import path from "node:path";
 import { readApiKey } from "@lore/identity-store";
 import { stateDir, writeTokens } from "./store";
 import { __resetCloudBaseUrlForTests } from "../cloudBaseUrl";
-import { createUploadApiKey, pluginApiKeyName, provisionSharedApiKey } from "./provision";
+import { createUploadApiKey, provisionSharedApiKey } from "./provision";
 
 let home: string;
 const originalEnvKey = process.env.LORE_API_KEY;
@@ -25,12 +25,6 @@ afterEach(() => {
   if (originalBaseUrl === undefined) delete process.env.LORE_MCP_BASE_URL;
   else process.env.LORE_MCP_BASE_URL = originalBaseUrl;
   __resetCloudBaseUrlForTests();
-});
-
-describe("pluginApiKeyName", () => {
-  test("stamps the hostname for revocation legibility", () => {
-    expect(pluginApiKeyName("mbp.local")).toBe("plugin@mbp.local");
-  });
 });
 
 describe("provisionSharedApiKey", () => {

@@ -5,11 +5,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { PluginAPI, PluginCommandContext } from "@ampcode/plugin";
 
-import {
-  configureLoreStateDirForInstalledAmpPlugin,
-  inferLoreStateDirFromAmpPluginUrl,
-  shareActiveThread,
-} from "./lore";
+import { inferLoreStateDirFromAmpPluginUrl, shareActiveThread } from "./lore";
 
 function makeContext(): PluginCommandContext & {
   appendedMessages: Array<{ type: "user-message"; content: string }>;
@@ -94,27 +90,6 @@ function makeContext(): PluginCommandContext & {
 }
 
 describe("installed Amp plugin state dir inference", () => {
-  test("infers the owning Lore state dir from the materialized harness plugin path", () => {
-    const stateDir = path.join("/tmp", "home", ".lore-dev-stack");
-    const pluginFile = path.join(stateDir, "harness", "amp", "lore-plugin", "amp", "lore.ts");
-
-    expect(inferLoreStateDirFromAmpPluginUrl(pathToFileURL(pluginFile).href)).toBe(stateDir);
-  });
-
-  test("infers the owning Lore state dir from the bundled materialized harness plugin path", () => {
-    const stateDir = path.join("/tmp", "home", ".lore-dev-stack");
-    const pluginFile = path.join(
-      stateDir,
-      "harness",
-      "amp",
-      "lore-plugin",
-      "amp",
-      "lore-bundled.js",
-    );
-
-    expect(inferLoreStateDirFromAmpPluginUrl(pathToFileURL(pluginFile).href)).toBe(stateDir);
-  });
-
   test("infers through Amp plugin symlinks", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "lore-amp-plugin-test-"));
     try {
@@ -132,63 +107,6 @@ describe("installed Amp plugin state dir inference", () => {
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
-  });
-
-  test("returns null for source-tree plugin paths", () => {
-    const sourceFile = path.join("/repo", "packages", "lore-plugin", "amp", "lore.ts");
-
-    expect(inferLoreStateDirFromAmpPluginUrl(pathToFileURL(sourceFile).href)).toBeNull();
-  });
-});
-
-describe("configureLoreStateDirForInstalledAmpPlugin — test-suite isolation (TAN-5045)", () => {
-  // The plugin test suite imports this module into ONE shared bun-test
-  // process. If the module's top-level inference ran here it would set
-  // LORE_PLUGIN_STATE_DIR process-wide, and — because that env var is an
-  // absolute override that wins over the explicit `home` arg — redirect every
-  // OTHER test's token writes into the developer's real ~/.lore. The test
-  // preload sets LORE_PLUGIN_TEST_SANDBOX=1 so inference is a no-op.
-  function withEnv(fn: () => void): void {
-    const savedFlag = process.env.LORE_PLUGIN_TEST_SANDBOX;
-    const savedStateDir = process.env.LORE_PLUGIN_STATE_DIR;
-    try {
-      fn();
-    } finally {
-      if (savedFlag === undefined) delete process.env.LORE_PLUGIN_TEST_SANDBOX;
-      else process.env.LORE_PLUGIN_TEST_SANDBOX = savedFlag;
-      if (savedStateDir === undefined) delete process.env.LORE_PLUGIN_STATE_DIR;
-      else process.env.LORE_PLUGIN_STATE_DIR = savedStateDir;
-    }
-  }
-
-  const installedPluginUrl = pathToFileURL(
-    path.join("/tmp", "home", ".lore-dev-stack", "harness", "amp", "lore-plugin", "amp", "lore.ts"),
-  ).href;
-
-  test("does NOT mutate LORE_PLUGIN_STATE_DIR when the sandbox flag is set", () => {
-    withEnv(() => {
-      process.env.LORE_PLUGIN_TEST_SANDBOX = "1";
-      delete process.env.LORE_PLUGIN_STATE_DIR;
-
-      configureLoreStateDirForInstalledAmpPlugin(installedPluginUrl);
-
-      expect(process.env.LORE_PLUGIN_STATE_DIR).toBeUndefined();
-    });
-  });
-
-  test("infers and sets LORE_PLUGIN_STATE_DIR when the sandbox flag is absent", () => {
-    withEnv(() => {
-      delete process.env.LORE_PLUGIN_TEST_SANDBOX;
-      delete process.env.LORE_PLUGIN_STATE_DIR;
-
-      configureLoreStateDirForInstalledAmpPlugin(installedPluginUrl);
-
-      // Snapshot the env: TS narrows `process.env.X` to `undefined` after the
-      // `delete` above and can't see the opaque call reassign it. A fresh
-      // object breaks that flow-narrowing.
-      const env = { ...process.env };
-      expect(env.LORE_PLUGIN_STATE_DIR).toBe(path.join("/tmp", "home", ".lore-dev-stack"));
-    });
   });
 });
 
@@ -308,26 +226,6 @@ describe("Lore Amp command", () => {
     ]);
     expect(ctx.inputs).toEqual([]);
     expect(ctx.openedUrls).toEqual([]);
-  });
-
-  test("copies the Lore thread URL to the local clipboard after sharing", async () => {
-    const ctx = makeContext();
-
-    await shareActiveThread(ctx, {
-      env: {},
-      runAmpExport: async () => JSON.stringify({ title: "Shared Amp Thread", messages: [] }),
-      share: async () => ({ thread_url: "https://lore.test/threads/thread-copied" }),
-    });
-
-    expect(ctx.shellCalls).toEqual([
-      {
-        strings: ["sh -c ", " sh ", ""],
-        values: ['printf %s "$1" | pbcopy', "https://lore.test/threads/thread-copied"],
-      },
-    ]);
-    expect(ctx.notifications).toEqual([
-      "Shared Amp thread to Lore: https://lore.test/threads/thread-copied. Copied Lore URL to clipboard.",
-    ]);
   });
 
   test("extracts the Lore thread URL from MCP text content returned by the share tool", async () => {

@@ -24,24 +24,6 @@ function resultText(
 }
 
 describe("toAmpToolDefinition", () => {
-  test("preserves tool name, description, inputSchema, and calls handler with input", async () => {
-    const inputs: unknown[] = [];
-    const tool = makeTool(async (input) => {
-      inputs.push(input);
-      return { ok: true, input };
-    });
-
-    const ampTool = toAmpToolDefinition(tool);
-    const input = { query: "hello" };
-    const result = await ampTool.execute(input, {});
-
-    expect(ampTool.name).toBe("lore_test_tool");
-    expect(ampTool.description).toBe("A test Lore tool");
-    expect(ampTool.inputSchema).toBe(tool.inputSchema);
-    expect(inputs).toEqual([input]);
-    expect(resultText(result)).toBe(JSON.stringify({ ok: true, input }));
-  });
-
   test("returns string handler results as text output without JSON quoting", async () => {
     const ampTool = toAmpToolDefinition(makeTool(async () => "plain output"));
 

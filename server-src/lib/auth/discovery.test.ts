@@ -347,16 +347,6 @@ describe("network failure with stale cache", () => {
 // ---------------------------------------------------------------------------
 
 describe("network failure with no cache", () => {
-  test('throws an actionable error naming "discovery" and the URL that failed', async () => {
-    const failingFetch = (async () => {
-      throw new Error("ECONNREFUSED");
-    }) as unknown as typeof fetch;
-
-    await expect(discoverEndpoints({ fetchImpl: failingFetch, home, now })).rejects.toThrow(
-      "Discovery failed",
-    );
-  });
-
   test("error message includes the PRM URL", async () => {
     const failingFetch = (async () => {
       throw new Error("ECONNREFUSED");

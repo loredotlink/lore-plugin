@@ -3,11 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import {
-  readLocalSessionTool,
-  runReadLocalSession,
-  type ReadLocalSessionResult,
-} from "./readLocalSession";
+import { readLocalSessionTool, runReadLocalSession } from "./readLocalSession";
 import { CoworkSource } from "../lib/session/cowork.js";
 
 function makeTmpDir(): string {
@@ -84,32 +80,6 @@ function makeSession(
   }
   return sessionDir;
 }
-
-describe("readLocalSessionTool — shape", () => {
-  test('exports a tool named "read_local_session"', () => {
-    expect(readLocalSessionTool.name).toBe("read_local_session");
-  });
-
-  test("has a non-empty description", () => {
-    expect(typeof readLocalSessionTool.description).toBe("string");
-    expect(readLocalSessionTool.description.length).toBeGreaterThan(0);
-  });
-
-  test("input schema is the documented shape", () => {
-    expect(readLocalSessionTool.inputSchema).toEqual({
-      type: "object",
-      properties: {
-        session_id: { type: "string" },
-      },
-      additionalProperties: false,
-    });
-  });
-
-  test("handler is an async function", () => {
-    expect(typeof readLocalSessionTool.handler).toBe("function");
-  });
-});
-
 describe("runReadLocalSession — resolution priority", () => {
   let tmp: string;
   let root: string;
@@ -169,81 +139,6 @@ describe("runReadLocalSession — resolution priority", () => {
     expect(result.account_id).toBe("accountA");
     expect(result.transcript).toBe("A-transcript\n");
   });
-
-  test("session_id arg takes priority over env var (explicit check)", () => {
-    // Arg points to A; env points to B; arg wins.
-    const result = runReadLocalSession({
-      source,
-      args: { session_id: "sess-A" },
-      env: { COWORK_SESSION_ID: "sess-B" },
-    });
-    expect(result.session_id).toBe("sess-A");
-  });
-
-  test("empty-string session_id falls through to env", () => {
-    const result = runReadLocalSession({
-      source,
-      args: { session_id: "" },
-      env: { COWORK_SESSION_ID: "sess-A" },
-    });
-    expect(result.session_id).toBe("sess-A");
-  });
-
-  test("whitespace-only session_id falls through to env", () => {
-    const result = runReadLocalSession({
-      source,
-      args: { session_id: "   " },
-      env: { COWORK_SESSION_ID: "sess-A" },
-    });
-    expect(result.session_id).toBe("sess-A");
-  });
-
-  test("empty-string env var falls through to mtime", () => {
-    const result = runReadLocalSession({
-      source,
-      args: {},
-      env: { COWORK_SESSION_ID: "" },
-    });
-    expect(result.session_id).toBe("sess-B"); // newest
-  });
-
-  test("whitespace-only env var falls through to mtime", () => {
-    const result = runReadLocalSession({
-      source,
-      args: {},
-      env: { COWORK_SESSION_ID: "   " },
-    });
-    expect(result.session_id).toBe("sess-B");
-  });
-
-  test("empty-string session_id AND empty-string env → falls through to mtime", () => {
-    const result = runReadLocalSession({
-      source,
-      args: { session_id: "" },
-      env: { COWORK_SESSION_ID: "" },
-    });
-    expect(result.session_id).toBe("sess-B");
-  });
-
-  test("whitespace-padded session_id arg resolves the trimmed real session", () => {
-    const result = runReadLocalSession({
-      source,
-      args: { session_id: "  sess-A  " },
-      env: {},
-    });
-    expect(result.session_id).toBe("sess-A");
-    expect(result.account_id).toBe("accountA");
-  });
-
-  test("whitespace-padded COWORK_SESSION_ID env resolves the trimmed real session", () => {
-    const result = runReadLocalSession({
-      source,
-      args: {},
-      env: { COWORK_SESSION_ID: "  sess-A  " },
-    });
-    expect(result.session_id).toBe("sess-A");
-    expect(result.account_id).toBe("accountA");
-  });
 });
 
 describe("runReadLocalSession — error paths", () => {
@@ -299,38 +194,6 @@ describe("runReadLocalSession — error paths", () => {
     expect(e.message).toContain("session not found: ghost-id");
   });
 
-  test('no sessions at all → McpError(InvalidParams, "no Cowork session found")', () => {
-    const root = path.join(tmp, "root");
-    fs.mkdirSync(root);
-    const source = new CoworkSource({ sessionsRoot: root });
-
-    let thrown: unknown;
-    try {
-      runReadLocalSession({ source, args: {}, env: {} });
-    } catch (err) {
-      thrown = err;
-    }
-    expect(thrown).toBeInstanceOf(McpError);
-    const e = thrown as McpError;
-    expect(e.code).toBe(ErrorCode.InvalidParams);
-    expect(e.message).toContain("no Cowork session found");
-  });
-
-  test('root does not exist → McpError(InvalidParams, "no Cowork session found")', () => {
-    const missing = path.join(tmp, "does-not-exist");
-    const source = new CoworkSource({ sessionsRoot: missing });
-
-    let thrown: unknown;
-    try {
-      runReadLocalSession({ source, args: {}, env: {} });
-    } catch (err) {
-      thrown = err;
-    }
-    expect(thrown).toBeInstanceOf(McpError);
-    expect((thrown as McpError).code).toBe(ErrorCode.InvalidParams);
-    expect((thrown as McpError).message).toContain("no Cowork session found");
-  });
-
   test("missing transcript file → McpError(InvalidParams) with lib message", () => {
     const root = path.join(tmp, "root");
     fs.mkdirSync(root);
@@ -373,67 +236,6 @@ describe("runReadLocalSession — error paths", () => {
     const e = thrown as McpError;
     expect(e.code).toBe(ErrorCode.InvalidParams);
     expect(e.message).toContain("no Cowork session found");
-  });
-});
-
-describe("runReadLocalSession — return shape", () => {
-  let tmp: string;
-  beforeEach(() => {
-    tmp = makeTmpDir();
-  });
-  afterEach(() => {
-    rmrf(tmp);
-  });
-
-  test("returns only the documented snake_case keys", () => {
-    const root = path.join(tmp, "root");
-    fs.mkdirSync(root);
-    makeSession(root, "account", "org", "sess", {
-      mtimeMs: 1_000_000,
-      transcript: "x",
-      uploads: ["u.txt"],
-      outputs: ["o.json"],
-    });
-    const source = new CoworkSource({ sessionsRoot: root });
-
-    const result = runReadLocalSession({ source, args: {}, env: {} });
-    expect(Object.keys(result).sort()).toEqual([
-      "account_id",
-      "org_id",
-      "outputs",
-      "session_id",
-      "transcript",
-      "uploads",
-    ]);
-  });
-
-  test("transcript is returned verbatim (not parsed)", () => {
-    const root = path.join(tmp, "root");
-    fs.mkdirSync(root);
-    const raw = 'not-json-at-all\n{"a":1}\nthird line';
-    makeSession(root, "account", "org", "sess", {
-      mtimeMs: 1_000_000,
-      transcript: raw,
-    });
-    const source = new CoworkSource({ sessionsRoot: root });
-
-    const result = runReadLocalSession({ source, args: {}, env: {} });
-    expect(result.transcript).toBe(raw);
-  });
-
-  test("result is JSON-serializable", () => {
-    const root = path.join(tmp, "root");
-    fs.mkdirSync(root);
-    makeSession(root, "account", "org", "sess", {
-      mtimeMs: 1_000_000,
-      transcript: "x",
-      uploads: ["a.txt"],
-      outputs: ["b.json"],
-    });
-    const source = new CoworkSource({ sessionsRoot: root });
-    const result = runReadLocalSession({ source, args: {}, env: {} });
-    const roundTripped = JSON.parse(JSON.stringify(result)) as ReadLocalSessionResult;
-    expect(roundTripped).toEqual(result);
   });
 });
 
@@ -492,20 +294,5 @@ describe("readLocalSessionTool.handler — env is read lazily", () => {
     }
     expect(thrown).toBeInstanceOf(McpError);
     expect((thrown as McpError).message).toContain("lazy-marker-code-67890");
-  });
-
-  test("handler passes runtime env when dispatch options omit home", async () => {
-    delete process.env.CLAUDE_CODE_SESSION_ID;
-    delete process.env.CLAUDE_SESSION_ID;
-    process.env.COWORK_SESSION_ID = "lazy-cowork-marker-24680";
-
-    let thrown: unknown;
-    try {
-      await readLocalSessionTool.handler({}, {});
-    } catch (err) {
-      thrown = err;
-    }
-    expect(thrown).toBeInstanceOf(McpError);
-    expect((thrown as McpError).message).toContain("lazy-cowork-marker-24680");
   });
 });

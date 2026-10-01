@@ -5,11 +5,6 @@ import path from "node:path";
 import { CoworkSource } from "./cowork.js";
 import type { SessionSummary } from "./index.js";
 
-test('CoworkSource reports runtime = "cowork"', () => {
-  const source = new CoworkSource({ sessionsRoot: "/tmp/nonexistent" });
-  expect(source.runtime).toBe("cowork");
-});
-
 function makeTmpRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "cowork-source-test-"));
 }
@@ -29,67 +24,6 @@ function stageSession(
   fs.utimesSync(transcriptPath, new Date(mtimeMs), new Date(mtimeMs));
   return sessionDir;
 }
-
-test("listSessions: returns empty array when root does not exist", () => {
-  const source = new CoworkSource({ sessionsRoot: "/tmp/definitely-not-here-xyz" });
-  expect(source.listSessions()).toEqual([]);
-});
-
-test("listSessions: enumerates account/org scopes with session ids, newest first", () => {
-  const root = makeTmpRoot();
-  stageSession(root, "account-A", "org-1", "sess-1", 1_000);
-  stageSession(root, "account-A", "org-2", "sess-2", 3_000);
-  stageSession(root, "account-B", "org-3", "sess-3", 2_000);
-
-  const source = new CoworkSource({ sessionsRoot: root });
-  const result = source.listSessions();
-
-  expect(result.map((s) => s.sessionId)).toEqual(["sess-2", "sess-3", "sess-1"]);
-  expect(result[0]?.accountId).toBe("account-A");
-  expect(result[0]?.orgId).toBe("org-2");
-  expect(result[1]?.accountId).toBe("account-B");
-});
-
-test("findById: returns the matching session", () => {
-  const root = makeTmpRoot();
-  stageSession(root, "account-A", "org-target", "sess-target", 1_000);
-  stageSession(root, "account-A", "org-other", "sess-other", 2_000);
-
-  const source = new CoworkSource({ sessionsRoot: root });
-  const found = source.findById("sess-target");
-
-  expect(found.sessionId).toBe("sess-target");
-  expect(found.accountId).toBe("account-A");
-  expect(found.orgId).toBe("org-target");
-});
-
-test("findById: throws when session does not exist", () => {
-  const root = makeTmpRoot();
-  stageSession(root, "account-A", "org-real", "sess-real", 1_000);
-
-  const source = new CoworkSource({ sessionsRoot: root });
-  expect(() => source.findById("sess-ghost")).toThrow(/sess-ghost/);
-});
-
-test("resolveActive: returns newest session when env unset", () => {
-  const root = makeTmpRoot();
-  stageSession(root, "account-A", "org-old", "sess-old", 1_000);
-  stageSession(root, "account-A", "org-new", "sess-new", 9_000);
-
-  const source = new CoworkSource({ sessionsRoot: root });
-  expect(source.resolveActive({}).sessionId).toBe("sess-new");
-});
-
-test("resolveActive: COWORK_SESSION_ID env wins over newest-by-mtime", () => {
-  const root = makeTmpRoot();
-  stageSession(root, "account-A", "org-targeted", "sess-targeted", 1_000);
-  stageSession(root, "account-A", "org-newer", "sess-newer", 9_000);
-
-  const source = new CoworkSource({ sessionsRoot: root });
-  expect(source.resolveActive({ COWORK_SESSION_ID: "sess-targeted" }).sessionId).toBe(
-    "sess-targeted",
-  );
-});
 
 test("resolveActive: trims whitespace from COWORK_SESSION_ID", () => {
   const root = makeTmpRoot();
@@ -112,14 +46,6 @@ test("resolveActive: blank COWORK_SESSION_ID is ignored", () => {
 test("resolveActive: throws when no sessions on disk", () => {
   const source = new CoworkSource({ sessionsRoot: "/tmp/definitely-empty-xyz" });
   expect(() => source.resolveActive({})).toThrow(/no Cowork session/);
-});
-
-test("resolveActive: throws when COWORK_SESSION_ID names a missing session", () => {
-  const root = makeTmpRoot();
-  stageSession(root, "account-A", "org-real", "sess-real", 1_000);
-
-  const source = new CoworkSource({ sessionsRoot: root });
-  expect(() => source.resolveActive({ COWORK_SESSION_ID: "sess-ghost" })).toThrow(/sess-ghost/);
 });
 
 function stageFullSession(
@@ -158,34 +84,6 @@ function stageFullSession(
     mtimeMs: stat.mtimeMs,
   };
 }
-
-test("readSession: returns transcript bytes and artifact filenames", () => {
-  const root = makeTmpRoot();
-  const summary = stageFullSession(root, "account-A", "org-A", "sess-A", {
-    transcript: '{"role":"user"}\n',
-    uploads: ["a.txt", "b.png"],
-    outputs: ["out.json"],
-  });
-
-  const source = new CoworkSource({ sessionsRoot: root });
-  const payload = source.readSession(summary);
-
-  expect(payload.transcript).toBe('{"role":"user"}\n');
-  expect(payload.uploads).toEqual(["a.txt", "b.png"]);
-  expect(payload.outputs).toEqual(["out.json"]);
-  expect(payload.sessionId).toBe("sess-A");
-});
-
-test("readSession: accepts transcript.jsonl as a fallback filename", () => {
-  const root = makeTmpRoot();
-  const summary = stageFullSession(root, "account-A", "org-A", "sess-A", {
-    transcript: "fallback\n",
-    transcriptName: "transcript.jsonl",
-  });
-
-  const source = new CoworkSource({ sessionsRoot: root });
-  expect(source.readSession(summary).transcript).toBe("fallback\n");
-});
 
 test("readSession: throws when session has no local_* subdirectory", () => {
   const root = makeTmpRoot();

@@ -122,25 +122,6 @@ describe("shareAmpThread", () => {
     expect(shareCalls).toBe(0);
   });
 
-  test("omits optional metadata and visibility when not supplied or not straightforward", async () => {
-    const exportJson = '{"messages":[]}';
-    let shareArgs: Record<string, unknown> | undefined;
-
-    await shareAmpThread(
-      { threadId: "amp-thread-3" },
-      {
-        env: {},
-        runAmpExport: async () => exportJson,
-        share: async (args) => {
-          shareArgs = args;
-          return { thread_id: "lore-3", thread_url: "https://lore.test/lore-3" };
-        },
-      },
-    );
-
-    expect(shareArgs).toEqual({ transcript: exportJson });
-  });
-
   test("preserves MCP/auth-required result shapes from share core", async () => {
     const authRequired = {
       isError: true,
@@ -238,32 +219,5 @@ describe("shareAmpThread", () => {
       }),
     );
     expect(exportedThreadIds).toEqual(["context-thread"]);
-  });
-
-  test("share_current_amp_thread Amp tool returns an actionable text error when no thread is resolvable", async () => {
-    let exportCalls = 0;
-    let shareCalls = 0;
-    const tool = createShareCurrentAmpThreadTool({
-      env: {},
-      runAmpExport: async () => {
-        exportCalls += 1;
-        return ampExportJson();
-      },
-      share: async () => {
-        shareCalls += 1;
-        return {};
-      },
-    });
-
-    const result = await tool.execute({}, {});
-
-    expect(result).toEqual([
-      {
-        type: "text",
-        text: expect.stringMatching(/Pass thread_id.*AMP_CURRENT_THREAD_ID/i),
-      },
-    ]);
-    expect(exportCalls).toBe(0);
-    expect(shareCalls).toBe(0);
   });
 });

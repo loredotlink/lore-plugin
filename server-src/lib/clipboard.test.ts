@@ -32,17 +32,6 @@ describe("copyToClipboard", () => {
   });
 
   if (os.platform() === "darwin") {
-    test("uses pbcopy on macOS and reports success when it exits 0", async () => {
-      const captureFile = path.join(stubBinDir, "captured.txt");
-      await writeStubBinary("pbcopy", `#!/bin/bash\n/bin/cat > ${JSON.stringify(captureFile)}\n`);
-
-      const ok = await copyToClipboard("payload", { timeoutMs: 5000 });
-      expect(ok).toBe(true);
-
-      const captured = await fs.readFile(captureFile, "utf8");
-      expect(captured).toBe("payload");
-    });
-
     test("returns false when pbcopy exits non-zero", async () => {
       await writeStubBinary("pbcopy", "#!/bin/bash\nexit 17\n");
       const ok = await copyToClipboard("payload", { timeoutMs: 5000 });

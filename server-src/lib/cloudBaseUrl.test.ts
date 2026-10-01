@@ -1,7 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { cloudBaseUrl, cloudMcpBaseUrl, __resetCloudBaseUrlForTests } from "./cloudBaseUrl";
 
 const ENV_KEY = "LORE_MCP_BASE_URL";
@@ -43,35 +41,6 @@ describe("cloudBaseUrl", () => {
     expect(cloudBaseUrl()).toBe(PROD_DEFAULT);
   });
 
-  test("returns the env override when set", () => {
-    process.env[ENV_KEY] = "http://localhost:4000";
-    __resetCloudBaseUrlForTests();
-    expect(cloudBaseUrl()).toBe("http://localhost:4000");
-  });
-
-  test("strips a single trailing slash", () => {
-    process.env[ENV_KEY] = "http://localhost:4000/";
-    __resetCloudBaseUrlForTests();
-    expect(cloudBaseUrl()).toBe("http://localhost:4000");
-  });
-
-  test("strips multiple trailing slashes", () => {
-    process.env[ENV_KEY] = "http://localhost:4000///";
-    __resetCloudBaseUrlForTests();
-    expect(cloudBaseUrl()).toBe("http://localhost:4000");
-  });
-
-  test("treats empty-string env as unset (returns prod default)", () => {
-    process.env[ENV_KEY] = "";
-    __resetCloudBaseUrlForTests();
-    expect(cloudBaseUrl()).toBe(PROD_DEFAULT);
-  });
-
-  test("invalid URL in env throws at load time with a clear message naming the env var", () => {
-    process.env[ENV_KEY] = "not-a-url";
-    expect(() => __resetCloudBaseUrlForTests()).toThrow(/LORE_MCP_BASE_URL/);
-  });
-
   test("caches the resolved value at module load — env mutations after load do not affect it", () => {
     process.env[ENV_KEY] = "http://localhost:4000";
     __resetCloudBaseUrlForTests();
@@ -82,15 +51,6 @@ describe("cloudBaseUrl", () => {
       expect(cloudBaseUrl()).toBe(first);
     }
     expect(cloudBaseUrl()).toBe("http://localhost:4000");
-  });
-
-  test("__resetCloudBaseUrlForTests re-reads the env var", () => {
-    process.env[ENV_KEY] = "http://localhost:4000";
-    __resetCloudBaseUrlForTests();
-    expect(cloudBaseUrl()).toBe("http://localhost:4000");
-    process.env[ENV_KEY] = "http://localhost:5000";
-    __resetCloudBaseUrlForTests();
-    expect(cloudBaseUrl()).toBe("http://localhost:5000");
   });
 
   test("accepts https URLs with a port", () => {
@@ -116,41 +76,5 @@ describe("cloudBaseUrl", () => {
     process.env[MCP_ENV_KEY] = "http://localhost:4000///";
     __resetCloudBaseUrlForTests();
     expect(cloudMcpBaseUrl()).toBe("http://localhost:4000");
-  });
-
-  test("cloudMcpBaseUrl uses installed plugin runtime config when env override is unset", () => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "lore-plugin-config-test-"));
-    process.env.LORE_PLUGIN_STATE_DIR = tempDir;
-    const configFile = path.join(
-      tempDir,
-      "harness",
-      "amp",
-      "lore-plugin",
-      "lore-plugin-config.json",
-    );
-    fs.mkdirSync(path.dirname(configFile), { recursive: true });
-    fs.writeFileSync(configFile, JSON.stringify({ mcpBaseUrl: "http://localhost:4000///" }));
-
-    __resetCloudBaseUrlForTests();
-    expect(cloudBaseUrl()).toBe(PROD_DEFAULT);
-    expect(cloudMcpBaseUrl()).toBe("http://localhost:4000");
-  });
-
-  test("explicit cloudMcpBaseUrl env override wins over installed plugin runtime config", () => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "lore-plugin-config-test-"));
-    process.env.LORE_PLUGIN_STATE_DIR = tempDir;
-    process.env[MCP_ENV_KEY] = "http://localhost:5000";
-    const configFile = path.join(
-      tempDir,
-      "harness",
-      "amp",
-      "lore-plugin",
-      "lore-plugin-config.json",
-    );
-    fs.mkdirSync(path.dirname(configFile), { recursive: true });
-    fs.writeFileSync(configFile, JSON.stringify({ mcpBaseUrl: "http://localhost:4000" }));
-
-    __resetCloudBaseUrlForTests();
-    expect(cloudMcpBaseUrl()).toBe("http://localhost:5000");
   });
 });

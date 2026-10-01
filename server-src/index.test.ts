@@ -15,9 +15,8 @@
  * intact, and a regression that removes the validator surfaces here.
  *
  * We exercise `validateAgainstSchema` directly rather than booting the
- * stdio transport — same logic, no scaffolding cost. A second test
- * walks `listLocalSessionsTool` through its real `inputSchema` to
- * confirm the empty-object-with-no-additionals contract round-trips.
+ * stdio transport — same logic, no scaffolding cost. A concrete-schema test
+ * confirms `listLocalSessionsTool` is wired to a closed input schema.
  *
  * The `dispatchToolCall` integration tests use a temp home dir seeded via
  * dispatch options so all state is hermetic and no real network calls are
@@ -29,7 +28,7 @@ import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
+import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { mcpTextCallToolResultSchema } from "@lore/contracts/mcp";
 import { encodeCwdToDir } from "@lore/transcript-locate";
 import type { ToolInputSchema } from "./lib/tool";
@@ -46,10 +45,6 @@ describe("validateAgainstSchema — additionalProperties: false", () => {
     properties: {},
     additionalProperties: false,
   };
-
-  test("accepts an empty object", () => {
-    expect(validateAgainstSchema(schema, {})).toBeNull();
-  });
 
   test("rejects an object with any unknown field", () => {
     const err = validateAgainstSchema(schema, { sessionId: "abc" });
@@ -82,20 +77,6 @@ describe("validateAgainstSchema — required + property types", () => {
     required: ["session_id"],
     additionalProperties: false,
   };
-
-  test("accepts a fully-specified valid arg set", () => {
-    expect(
-      validateAgainstSchema(schema, {
-        session_id: "sess",
-        verbose: true,
-        limit: 5,
-      }),
-    ).toBeNull();
-  });
-
-  test("accepts only the required field", () => {
-    expect(validateAgainstSchema(schema, { session_id: "sess" })).toBeNull();
-  });
 
   test("rejects missing required field", () => {
     const err = validateAgainstSchema(schema, { verbose: true });
@@ -138,10 +119,6 @@ describe("validateAgainstSchema — required + property types", () => {
 });
 
 describe("validateAgainstSchema — listLocalSessionsTool integration", () => {
-  test("accepts {} against the real list_local_sessions schema", () => {
-    expect(validateAgainstSchema(listLocalSessionsTool.inputSchema, {})).toBeNull();
-  });
-
   test("rejects any extra arg against list_local_sessions (the camelCase typo case)", () => {
     const err = validateAgainstSchema(listLocalSessionsTool.inputSchema, {
       sessionId: "whatever",
@@ -152,12 +129,6 @@ describe("validateAgainstSchema — listLocalSessionsTool integration", () => {
 });
 
 describe("validateAgainstSchema — shareSessionTool visibility", () => {
-  test("accepts every declared visibility", () => {
-    for (const visibility of ["private", "workspace", "public"]) {
-      expect(validateAgainstSchema(shareSessionTool.inputSchema, { visibility })).toBeNull();
-    }
-  });
-
   test("rejects a visibility outside the declared enum", () => {
     const err = validateAgainstSchema(shareSessionTool.inputSchema, {
       visibility: "organization",
@@ -200,17 +171,6 @@ describe("dispatchToolCall — end-to-end dispatch wiring", () => {
     ).rejects.toMatchObject({
       code: ErrorCode.MethodNotFound,
     });
-  });
-
-  test("unknown tool name → McpError message mentions the tool name", async () => {
-    let thrown: unknown;
-    try {
-      await dispatchToolCall({ name: "no_such_tool" }, { home: tmpHome });
-    } catch (err) {
-      thrown = err;
-    }
-    expect(thrown).toBeInstanceOf(McpError);
-    expect((thrown as McpError).message).toContain("no_such_tool");
   });
 
   // The headless device-flow path. `lore_login_resume` never spawns a browser

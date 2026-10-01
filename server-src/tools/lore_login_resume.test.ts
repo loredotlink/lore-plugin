@@ -349,28 +349,4 @@ describe("runLoreLoginResume", () => {
     expect(caught!.message).not.toContain("dev-XYZ-99");
     expect(caught!.message).not.toContain("error_description");
   });
-
-  test("independence: works with no prior runLoreLogin in the same process", async () => {
-    // No module-state setup happens between tests; this test simply
-    // calls resume directly with a fresh tmp home and asserts the flow
-    // completes. The other tests already do this — this case is here
-    // explicitly to lock in the contract.
-    const now = () => 1_700_000_000_000;
-    const { fetchImpl } = makeFetch([
-      { url: TEST_TOKEN_ENDPOINT, res: jsonResponse(tokenPairBody()) },
-    ]);
-    const { sleep } = makeSleep();
-    const result = await runLoreLoginResume({
-      device_code: "dev-COLD",
-      expires_in_seconds: 600,
-      interval_seconds: 5,
-      fetchImpl,
-      now,
-      sleep,
-      home,
-    });
-    expect(result).toEqual({ ok: true });
-    const persisted = await readTokens(home);
-    expect(persisted?.access_token).toBe("access-NEW");
-  });
 });

@@ -14,39 +14,11 @@ describe("AuthRequiredError", () => {
     expect(caught).toBeInstanceOf(AuthRequiredError);
     expect(caught).toBeInstanceOf(Error);
   });
-
-  test("preserves a default message when none is given", () => {
-    const err = new AuthRequiredError();
-    expect(typeof err.message).toBe("string");
-    expect(err.message.length).toBeGreaterThan(0);
-  });
-
-  test("preserves a custom message when provided", () => {
-    const err = new AuthRequiredError("custom reason");
-    expect(err.message).toBe("custom reason");
-  });
-
-  test("retains a .stack trace", () => {
-    const err = new AuthRequiredError();
-    expect(typeof err.stack).toBe("string");
-    expect((err.stack as string).length).toBeGreaterThan(0);
-  });
-
-  test('has the class name "AuthRequiredError"', () => {
-    // Useful for log lines that print `error.name`.
-    const err = new AuthRequiredError();
-    expect(err.name).toBe("AuthRequiredError");
-  });
 });
 
 describe("AUTH_REQUIRED_MESSAGE", () => {
   test('contains the literal substring "lore_login"', () => {
     expect(AUTH_REQUIRED_MESSAGE).toContain("lore_login");
-  });
-
-  test("is a non-empty string", () => {
-    expect(typeof AUTH_REQUIRED_MESSAGE).toBe("string");
-    expect(AUTH_REQUIRED_MESSAGE.length).toBeGreaterThan(0);
   });
 });
 

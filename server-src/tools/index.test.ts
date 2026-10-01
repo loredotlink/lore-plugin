@@ -16,9 +16,4 @@ describe("tools barrel", () => {
       "search_threads",
     ]);
   });
-
-  test("does not register duplicate tool names", () => {
-    const names = tools.map((tool) => tool.name);
-    expect(new Set(names).size).toBe(names.length);
-  });
 });

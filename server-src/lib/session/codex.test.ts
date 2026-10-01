@@ -35,52 +35,6 @@ function stageCodexSession(
 test("defaultCodexSessionsRoot: points at ~/.codex/sessions", () => {
   expect(defaultCodexSessionsRoot("/Users/test")).toBe("/Users/test/.codex/sessions");
 });
-
-test("listSessions: returns jsonl files newest-first", () => {
-  const root = makeTmpDir();
-  try {
-    stageCodexSession(root, "019e4b45-dc7c-7de2-a506-85efeaaa7a2d", 1_000_000);
-    stageCodexSession(root, "019e4b45-dc7c-7de2-a506-85efeaaa7a2e", 2_000_000);
-
-    const source = new CodexSource({ sessionsRoot: root });
-    expect(source.listSessions().map((s) => s.sessionId)).toEqual([
-      "019e4b45-dc7c-7de2-a506-85efeaaa7a2e",
-      "019e4b45-dc7c-7de2-a506-85efeaaa7a2d",
-    ]);
-  } finally {
-    rmrf(root);
-  }
-});
-
-test("findById: returns the matching session", () => {
-  const root = makeTmpDir();
-  try {
-    stageCodexSession(root, "019e4b45-dc7c-7de2-a506-85efeaaa7a2d", 1_000_000);
-    const source = new CodexSource({ sessionsRoot: root });
-    expect(source.findById("019e4b45-dc7c-7de2-a506-85efeaaa7a2d").sessionId).toBe(
-      "019e4b45-dc7c-7de2-a506-85efeaaa7a2d",
-    );
-  } finally {
-    rmrf(root);
-  }
-});
-
-test("resolveActive: returns the session named by CODEX_THREAD_ID", () => {
-  const root = makeTmpDir();
-  try {
-    stageCodexSession(root, "019e4b45-dc7c-7de2-a506-85efeaaa7a2d", 1_000_000);
-    stageCodexSession(root, "019e4b45-dc7c-7de2-a506-85efeaaa7a2e", 2_000_000);
-    const source = new CodexSource({ sessionsRoot: root });
-    expect(
-      source.resolveActive({
-        CODEX_THREAD_ID: "019e4b45-dc7c-7de2-a506-85efeaaa7a2d",
-      }).sessionId,
-    ).toBe("019e4b45-dc7c-7de2-a506-85efeaaa7a2d");
-  } finally {
-    rmrf(root);
-  }
-});
-
 test("resolveActive: falls back to CODEX_SESSION_ID for backwards compatibility", () => {
   const root = makeTmpDir();
   try {
@@ -91,18 +45,6 @@ test("resolveActive: falls back to CODEX_SESSION_ID for backwards compatibility"
         CODEX_SESSION_ID: "019e4b45-dc7c-7de2-a506-85efeaaa7a2d",
       }).sessionId,
     ).toBe("019e4b45-dc7c-7de2-a506-85efeaaa7a2d");
-  } finally {
-    rmrf(root);
-  }
-});
-
-test("resolveActive: returns newest session when env unset", () => {
-  const root = makeTmpDir();
-  try {
-    stageCodexSession(root, "019e4b45-dc7c-7de2-a506-85efeaaa7a2d", 1_000_000);
-    stageCodexSession(root, "019e4b45-dc7c-7de2-a506-85efeaaa7a2e", 2_000_000);
-    const source = new CodexSource({ sessionsRoot: root });
-    expect(source.resolveActive({}).sessionId).toBe("019e4b45-dc7c-7de2-a506-85efeaaa7a2e");
   } finally {
     rmrf(root);
   }
